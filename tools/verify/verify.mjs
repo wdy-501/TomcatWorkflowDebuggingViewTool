@@ -92,9 +92,10 @@
  * closes S4 with S4-H (S0–S3 regression + freeze) and S4-I (scope/security/cleanup). S4-H reads
  * the earlier RESULTS, so it only passes in a full run. A normal run executes S0–S3 plus A..I.
  *
- * Usage (from tools/verify):  npm ci && node verify.mjs [--json]                  (full S0–S5)
+ * Usage (from tools/verify):  npm ci && node verify.mjs [--json]                  (full S0–S6a; S6 partial)
  *                             node verify.mjs --s4[=A,B,C,D,E,F,G,H,I] [--json]   (S4-only)
  *                             node verify.mjs --s5[=A,B,C,D,E,F,G,H] [--json]    (S5-only; G anchors need a full run)
+ *                             node verify.mjs --s6a[=A,B,C,D,E] [--json]         (S6a-only; E anchors need a full run)
  */
 
 import { createHash } from "node:crypto";
@@ -213,8 +214,8 @@ const S3_WORKBENCH_TOKENS = [
   "回放不会重发请求、不写数据库、不调用 demo、不执行程序；",
   // S5 migration (B3): the old "JS 内部变量本次未采集（无构建插件/sourcemap）" copy is gone.
   "JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）",
-  // S5 canonical capability banner (workbench header/footnote).
-  "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
+  // S6a migration (B8): the old absolute S5 banner is replaced by the canonical S6a banner.
+  "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
 ];
 const S3_STATE_SEMANTICS = [
   "OK", "RETURNED_FALSE", "THREW", "NOT_COLLECTED_", "TRUNCATED", "REDACTED", "UNKNOWN", "LOST",
@@ -259,7 +260,7 @@ const S4_SELECTORS = [
 ];
 const S4_GAP_EMPTY_TEXT = "未发现缺口（仅基于已采集数据；未采集项不会显示为成功）";
 const S4_FETCH_WITHOUT_BACKEND_TEXT = "后端未采集/未关联";
-const S4_RUNTIME_X3_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 属 S6";
+const S4_RUNTIME_X3_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3";
 /** S4-G sessions/URLs (diagnose cases). */
 const S4_DIAG_SESSION = "s_s4diag";
 const S4_DIAG_MISSING_SESSION = "s_s4missing";
@@ -372,13 +373,21 @@ const S5_VALUE_KINDS = ["param", "param", "param", "field", "return"];
 const S5_PERF_REL = "tools/perf/l1-overhead.mjs";
 const S5_VALUES_SELECTOR = "#s5-values";
 /** Text that must be absent from workbench/demo src+dist after S5 (B3 honesty migration). */
-const S5_STALE_TEXTS = ["无构建插件/sourcemap", "S5 待做", "无 S5", "S5/S6", "无 sourcemap/行号映射"];
+const S5_STALE_TEXTS = [
+  "无构建插件/sourcemap", "S5 待做", "无 S5", "S5/S6", "无 sourcemap/行号映射",
+  // S6a migration (B2): the four superseded S5 absolute statements must not survive in src+dist.
+  "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
+  "运行时 ×3 属 S6",
+  "无异步/×3",
+  "无构建期局部变量/L2",
+];
 /** Claim text that must always stay absent (S5 is not L2). */
 const S5_FORBIDDEN_CLAIMS = ["kind=local", "L2 已采集"];
-/** S5 demo backend files allowed to change (order path + findById SELECT). */
+/** S5 demo backend files allowed to change (order path + findById SELECT + S6a L2DemoService). */
 const S5_DEMO_BACKEND_ALLOWED = [
   "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/controller/OrderController.java",
   "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/service/OrderService.java",
+  "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/service/L2DemoService.java",
   "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/mapper/OrderMapper.java",
   "demo/buggy-shop-boot-vue/backend/src/main/resources/mapper/OrderMapper.xml",
 ];
@@ -417,6 +426,76 @@ const S5_EVIDENCE = {
 };
 /** One-run memoization for the S5 front-end builds/tests shared by S5-A/D/E. */
 const S5_BUILD_CACHE = { sdk: null, plugin: null, demo: null, workbench: null };
+
+/* ------------------------------------------------------------------ */
+/* S6a L2 line-level locals + per-invocation ×3 (S6 stays partial)     */
+/* ------------------------------------------------------------------ */
+
+const S6_PLAN_REVIEW_REL = "docs/plans/stages/S6/plan-review-s6a.md";
+const S6A_PLAN_REL = "docs/plans/stages/S6/s6a-plan.md";
+const S6A_DISPATCH_REL = "docs/plans/stages/S6/dispatch-s6a.md";
+const S6A_FIXTURE_DIR = "fixtures/s6-l2-lines";
+const S6A_EVENTS_REL = `${S6A_FIXTURE_DIR}/events.ndjson`;
+const S6A_FACTS_REL = `${S6A_FIXTURE_DIR}/expected-facts.json`;
+const S6A_README_REL = `${S6A_FIXTURE_DIR}/README.md`;
+/** Runtime agent session for the S6a L2 E2E (dispatch §8; never s_s3demo/s_s5agent). */
+const S6A_SESSION = "s_s6a";
+const S6A_FIXTURE_SESSION = "s_s6l2a";
+const S6A_DEMO_BACKEND_REL = "demo/buggy-shop-boot-vue/backend";
+const S6A_L2_SERVICE_REL = `${S6A_DEMO_BACKEND_REL}/src/main/java/com/example/shop/service/L2DemoService.java`;
+const S6A_L2_FLAG = "L2";
+const S6A_CONTROLLER_NODE_KEY = "com.example.shop.controller.OrderController#reconcile";
+const S6A_SERVICE_NODE_KEY = "com.example.shop.service.L2DemoService#reconcileAmount";
+const S6A_BANNER = "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b";
+const S6A_L2_NOTE = "S6a L2：行级局部变量来自 LVT 探针（样例第 2 次调用 local 100 → 0）；异步/无调试信息/循环折叠/开销属 S6b";
+const S6A_XN_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3";
+/** S6A-D static dist tokens (dist literals only; dynamic Vue attrs are proven elsewhere). */
+const S6A_WORKBENCH_TOKENS = [
+  "s6-l2-badge", "s6-l2-note", "data-value-kind", "data-invocation-diff",
+  "行号 ", "100 → 0", "值变化", S6A_BANNER, S6A_L2_NOTE, S6A_XN_NOTE,
+];
+/** Agent files allowed to carry L2/LVT terminology (S2-8/S3-8/S4-I/S5-H, s6a-plan §8.1.3). */
+const S6A_AGENT_L2_FILES = [
+  "agent/src/main/java/io/traceboard/agent/L2ClassFileTransformer.java",
+  "agent/src/main/java/io/traceboard/agent/L2Values.java",
+  "agent/src/main/java/io/traceboard/agent/SpanContext.java",
+];
+const s6aL2Allowed = (rel) => S6A_AGENT_L2_FILES.includes(rel) || rel.startsWith("workbench/src/s6/");
+/**
+ * S6a G1 freeze (plan-review s6a §10.3 / s6a-plan §8.1.1): 8 newly frozen files. It SUPERSEDES the
+ * S5 values for api.v1.md / event-model.v1.md (additive S6a notes only); the other 16 S5 entries
+ * keep their S5 bytes (LATEST_G1_FREEZE below is the single comparison map).
+ */
+const S6A_G1_FREEZE = {
+  "docs/contracts/api.v1.md": "4c895fd776c51f45eafcb4d31589d076270d11c0278afc16af16fb14c540d8f3",
+  "docs/contracts/event-model.v1.md": "fc6ad919a65ae63367a251b4015596c81bb30d21116d48472ffc4d601f2d65c9",
+  "fixtures/s6-l2-lines/events.ndjson": "ebf681135400c1dc6729c7f24135cf18e0243e660b24833689fda0832ab8bebc",
+  "fixtures/s6-l2-lines/expected-facts.json": "5a9f1ea795a95fa8f76350be6fdf86a88a37eb6ad3139db9aadc17aab664969d",
+  "fixtures/s6-l2-lines/README.md": "827247e3a7ed61da55e5c34c81e9e928d0fc11a449496713dfab869f62680b5a",
+  "docs/plans/stages/S6/s6a-plan.md": "957f2409b6b6ec6b7626d54cbbfc45f7517f0e4e73376c927d6f494985248f8c",
+  "docs/plans/stages/S6/dispatch-s6a.md": "c6dbda4d9a3d738d4168f875710fdd81ed10104b52273af1b2fb8156e4a52160",
+  "docs/plans/stages/S6/plan-review-s6a.md": "cb41a56a607a469e0c5337837259050035bc9cf2b40c9f8008e80ffe960711e0",
+};
+/** S6a supersedes api/event-model; every other S5 entry stays at its S5 hash. */
+const LATEST_G1_FREEZE = { ...S5_G1_FREEZE, ...S6A_G1_FREEZE };
+
+const S6A_IMPLEMENTED = ["A", "B", "C", "D", "E"];
+const S6A_EVIDENCE = { javaBuild: null, demo: null, agent: null, fixture: null, workbench: null };
+/** One-run memoization for the S6a Java/build assets (reused from S5 when the full suite ran). */
+const S6A_BUILD_CACHE = { java: null, workbench: null, demoFrontend: null, sdk: null };
+
+/** Parse the S6a-only CLI selector; null when `--s6a` is absent (normal full S0–S6a run). */
+function parseS6Request(argv) {
+  const arg = argv.find((item) => item === "--s6a" || item.startsWith("--s6a="));
+  if (arg === undefined) return null;
+  const raw = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1).trim() : "";
+  if (!raw) return new Set(S6A_IMPLEMENTED);
+  return new Set(raw.split(",").map((part) => part.trim().toUpperCase()).filter(Boolean));
+}
+
+const S6_ONLY = process.argv.some((item) => item.startsWith("--s6a"));
+const S6_SELECTED = S6_ONLY ? (parseS6Request(process.argv) ?? new Set(S6A_IMPLEMENTED)) : null;
+const REPRO_S6 = `(cd "tools/verify" && node verify.mjs --s6a=${S6A_IMPLEMENTED.join(",")})`;
 
 /**
  * `npm ci` can transiently fail on Windows with EPERM/EBUSY (errno -4048) while a previous
@@ -4720,8 +4799,9 @@ function checkS2Drift() {
   const s2Map = new Map(freeze.s2.map((entry) => [entry.rel, entry.hash]));
   const s3Freeze = s3FreezeSections();
   const s3Map = new Map(s3Freeze.s3.map((entry) => [entry.rel, entry.hash]));
-  // S4/S5 re-hashed api/transport/event-model (and re-used unchanged files); the latest freeze wins.
-  const latestMap = new Map([...s3Map, ...Object.entries(S5_G1_FREEZE)]);
+  // S4/S5/S6a re-hashed api/event-model (and re-used unchanged files); the latest freeze wins
+  // (S6a supersedes the S5 api/event-model hashes; schema/transport/status/S0–S5 stay at S5).
+  const latestMap = new Map([...s3Map, ...Object.entries(LATEST_G1_FREEZE)]);
   const contractRels = new Set([
     "docs/contracts/api.v1.md",
     "docs/contracts/transport.v1.md",
@@ -4735,8 +4815,8 @@ function checkS2Drift() {
       const ok = Boolean(expected) && actual === expected;
       checks.push({
         ok,
-        label: `S3/S4 migration: contract updated only through the latest G1 freeze (${entry.rel})`,
-        detail: ok ? "hash matches the latest (S5) G1 freeze" : `actual=${actual} latest=${expected ?? "missing"}`,
+        label: `S3/S4/S6a migration: contract updated only through the latest G1 freeze (${entry.rel})`,
+        detail: ok ? "hash matches the latest (S6a) G1 freeze" : `actual=${actual} latest=${expected ?? "missing"}`,
       });
     } else {
       checks.push({
@@ -4885,27 +4965,28 @@ function checkS2Scope() {
     "org.apache.ibatis.executor.statement.PreparedStatementHandler",
   ];
   const adviceClasses = [
-    "ControllerAdvice.class", "PreviewControllerAdvice.class",
+    "ControllerAdvice.class", "PreviewControllerAdvice.class", "ReconcileControllerAdvice.class",
     "ServiceAdvice.class", "PreviewServiceAdvice.class", "FieldWriteAdvice.class",
     "MapperAdvice.class", "SqlAdvice.class",
   ];
   checks.push({
-    ok: typeMatchers === 5 && transformSites === 7 &&
+    ok: typeMatchers === 5 && transformSites === 8 &&
       agentTargets.every((target) => traceAgent.includes(target)) &&
       adviceClasses.every((name) => traceAgent.includes(name)),
-    label: "agent instruments exactly 5 types / 7 advices (cancel + preview controller/service, Order field write, MapperProxy, PreparedStatementHandler)",
-    detail: `.type=${typeMatchers} .transform=${transformSites}`,
+    label: "agent instruments exactly 5 Byte Buddy types / 8 advices (cancel + preview + reconcile controllers, cancel/preview services, Order field write, MapperProxy, PreparedStatementHandler; L2DemoService is ASM-only)",
+    detail: `.type=${typeMatchers} .transform=${transformSites} advices=${adviceClasses.length}`,
   });
   const shopClasses = [...new Set(agentSources.match(/com\.example\.shop\.[A-Za-z0-9_.]+/g) ?? [])].sort();
   const expectedShopClasses = [
     "com.example.shop.controller.OrderController",
     "com.example.shop.mapper.OrderMapper",
     "com.example.shop.model.Order",
+    "com.example.shop.service.L2DemoService",
     "com.example.shop.service.OrderService",
   ];
   checks.push({
     ok: deepEqual(shopClasses, expectedShopClasses),
-    label: "no other com.example.shop target is instrumented (no repository/other controller)",
+    label: "no other com.example.shop target is referenced/instrumented: 4 S2/S5 classes + the ASM-only L2DemoService (not a Byte Buddy target)",
     detail: shopClasses.join(","),
   });
   checks.push({
@@ -4917,15 +4998,21 @@ function checkS2Scope() {
   });
   const agentForbidden = [];
   for (const file of agentCode) {
+    const l2Allowed = S6A_AGENT_L2_FILES.includes(file.rel);
     for (const { name, re } of [
       { name: "browser/sdk", re: /EventSource|WebSocket|sendBeacon|addEventListener\("click"/ },
       { name: "L2/local", re: /kind\s*=\s*["']local|LocalVariableTable|visitLocalVariable|localVariables/ },
       { name: "exception-payload", re: /getMessage\(\)/ },
     ]) {
+      if (name === "L2/local" && l2Allowed) continue;
       if (re.test(file.text)) agentForbidden.push(`${file.rel} [${name}]`);
     }
   }
-  checks.push({ ok: agentForbidden.length === 0, label: "agent has no browser SDK / local (L2) / exception-payload code (S5 values are param+field+return only)", detail: agentForbidden.join(",") || "none" });
+  checks.push({
+    ok: agentForbidden.length === 0,
+    label: "agent has no browser SDK / exception-payload code; L2/LVT terminology is allowed only in the 3 S6a L2 files (L1Values stays param+field+return only)",
+    detail: agentForbidden.join(",") || "none",
+  });
   const l1Values = agentCode.find((f) => f.rel.endsWith("L1Values.java"))?.text ?? "";
   checks.push({
     ok: /"param"/.test(l1Values) && /"field"/.test(l1Values) && /"return"/.test(l1Values) &&
@@ -5151,7 +5238,7 @@ function checkS2Scope() {
 
   gate(
     "S2-8",
-    "S4/S5 migration: 9 business routes + 5 agent types / 7 advices exactly (handshake is handwritten HttpURLConnection), no L2/persistence/stream, H2 embedded only, no secrets/mirrors",
+    "S4/S5/S6a migration: 9 business routes + 5 Byte Buddy types / 8 advices exactly (handshake is handwritten HttpURLConnection), L2 only in the S6a L2 files, no persistence/stream, H2 embedded only, no secrets/mirrors",
     checks,
     `grep -rnE "EventSource|WebSocket|JdbcTemplate|SseEmitter" agent/src server/collector/src workbench/src demo/buggy-shop-boot-vue/backend/src`,
   );
@@ -5206,11 +5293,13 @@ function checkS3Cleanup() {
     "docs/plans/stages/S3/",
     "docs/plans/stages/S4/",
     "docs/plans/stages/S5/",
+    "docs/plans/stages/S6/",
     "fixtures/s1-walking-skeleton/",
     "fixtures/s2-zero-row-chain/",
     "fixtures/s3-frontend-facts/",
     "fixtures/s4-details/",
     "fixtures/s5-l1-values/",
+    "fixtures/s6-l2-lines/",
     "tools/verify/",
     "tools/perf/",
   ];
@@ -5253,7 +5342,7 @@ function checkS3Cleanup() {
   });
   checks.push({
     ok: status.ok && unexpected.length === 0,
-    label: "git status only shows the S5 whitelist (product dirs incl. server/launcher + 9 demo-frontend files + 4 demo-backend L1 files, S3/S4/S5 fixtures/guides/contracts/docs, frontend/build-plugin, tools/verify+perf)",
+    label: "git status only shows the S6a whitelist (product dirs incl. server/launcher + 9 demo-frontend files + 5 demo-backend L1/L2 files, S3/S4/S5/S6a fixtures/guides/contracts/docs, frontend/build-plugin, tools/verify+perf)",
     detail: unexpected.slice(0, 4).join(" | ") || `${status.lines.length} expected entries`,
   });
   checks.push({
@@ -5431,9 +5520,11 @@ function checkS3Builds(validate) {
   const demoTokens = [
     "amount-b", "btn-save-b", "金额必须大于 0", "校验通过（本案例不提交）",
     "traceparent", "X-TraceBoard-Click", "s_s3demo",
-    // S5 migration: stale "无构建插件/sourcemap" copy replaced by the canonical banner + manifest.
-    "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
+    // S6a migration (B8): the old absolute S5 banner is REPLACED by the canonical S6a banner;
+    // all non-banner S5 tokens stay, and the S6a reconcile tokens are added.
+    "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
     "__TRACEBOARD_MANIFEST__", "previewDiscount",
+    "#btn-reconcile", "reconcileBatch", "reconcileAmount", "S6a", "L2",
   ];
   for (const token of demoTokens) {
     checks.push({
@@ -5631,13 +5722,14 @@ function checkS3Fixtures(validate) {
   });
   const hashProblems = [];
   for (const entry of [...freeze.s3, ...freeze.legacy]) {
-    const expected = S5_G1_FREEZE[entry.rel] ?? entry.hash;
+    // S6a supersedes the S5 api/event-model hashes; everything else keeps its frozen bytes.
+    const expected = LATEST_G1_FREEZE[entry.rel] ?? entry.hash;
     const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
     if (actual !== expected) hashProblems.push(`${entry.rel} actual=${actual} expected=${expected}`);
   }
   checks.push({
     ok: hashProblems.length === 0,
-    label: "schema, contracts (latest = S5 G1 freeze), S3 fixtures/plan/dispatch, S0–S2 fixtures: every hash matches (bytes unchanged)",
+    label: "schema, contracts (latest = S6a G1 freeze: api/event-model superseded), S3 fixtures/plan/dispatch, S0–S2 fixtures: every hash matches (bytes unchanged)",
     detail: hashProblems.length ? hashProblems.slice(0, 4).join(" || ") : `${freeze.s3.length + freeze.legacy.length} hashes match`,
   });
   const s2Freeze = s2FreezeSections();
@@ -6259,12 +6351,14 @@ function checkS3Scope() {
   });
 
   const l2Hits = productCode.filter((file) =>
-    // S5 values are param/field/return summaries; local variables/line tables are L2/S6.
+    // S5 values are param/field/return summaries; L2 line-level locals exist only in the S6a
+    // agent L2 files + workbench/src/s6/** (never SDK/collector/demo frontend/other files).
+    !s6aL2Allowed(file.rel) &&
     /kind\s*=\s*["']local|LocalVariableTable|visitLocalVariable|localVariables/.test(file.text)).map((file) => file.rel);
   checks.push({
     ok: l2Hits.length === 0,
-    label: "no L2/local-variable payload in SDK/agent/collector/workbench (S5 values are param/field/return only)",
-    detail: l2Hits.join(",") || "none",
+    label: "L2 allowed only in the S6a L2 files (3 agent L2/ASM files + workbench/src/s6/**); all other SDK/agent/collector/workbench files stay L2/local-free",
+    detail: l2Hits.join(",") || "none outside the S6a L2 files",
   });
 
   const workbenchSdkMaps = [WORKBENCH_DIST_REL, SDK_DIST_REL]
@@ -6357,7 +6451,7 @@ function checkS3Scope() {
 
   gate(
     "S3-8",
-    "scope/security: S5 values/manifest/sourcemap allowed but no L2/.map decoding/pixel replay/SSE/WS/persistence, SDK no secrets/CDN/PII, loopback, no external $ref; S4 launcher is allowed",
+    "scope/security: S5 values/manifest/sourcemap allowed; L2 only in the S6a L2 files; no .map decoding/pixel replay/SSE/WS/persistence, SDK no secrets/CDN/PII, loopback, no external $ref; S4 launcher is allowed",
     checks,
     `grep -rnE "rrweb|EventSource|WebSocket|localStorage|sourceMappingURL" frontend/sdk/src workbench/src demo/buggy-shop-boot-vue/frontend/src server/collector/src agent/src`,
   );
@@ -8172,7 +8266,7 @@ async function checkS4F() {
     const missingTokens = S4_DIST_TOKENS.filter((token) => !distAll.includes(token));
     checks.push({
       ok: distFiles.length > 0 && missingTokens.length === 0,
-      label: "workbench dist contains node-details/×N/gaps tokens + all 未采集 texts (incl. runtime ×3 is S6)",
+      label: "workbench dist contains node-details/×N/gaps tokens + all 未采集 texts (incl. the canonical S6a ×N note)",
       detail: missingTokens.length ? `missing=${missingTokens.join(",")}` : `${S4_DIST_TOKENS.length}/${S4_DIST_TOKENS.length} tokens`,
     });
     const missingSelectors = S4_SELECTORS.filter((id) => !distAll.includes(id));
@@ -8721,16 +8815,18 @@ function checkS4H() {
     detail: schemaHash,
   });
 
-  /* -------- S5 G1 freeze (supersedes S4 for api/event-model): zero drift -------- */
+  /* -------- S5 G1 freeze (S6a supersedes api/event-model): zero drift -------- */
+  // Keep the 18-entry S5 set (count assertion); only api/event-model take the S6a hash.
   const frozenEntries = Object.entries(S5_G1_FREEZE);
   const freezeDrift = [];
-  for (const [rel, expected] of frozenEntries) {
+  for (const [rel, s5Hash] of frozenEntries) {
+    const expected = LATEST_G1_FREEZE[rel] ?? s5Hash;
     const now = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
     if (now !== expected) freezeDrift.push(`${rel} (${expected.slice(0, 12)}… -> ${now.slice(0, 12)}…)`);
   }
   checks.push({
     ok: frozenEntries.length === 18 && freezeDrift.length === 0,
-    label: "S5 G1 freeze zero drift: schema, 4 contracts, 2 guides, S4/S5 fixtures, S4/S5 plan+dispatch/amendment (18 files)",
+    label: "S5 G1 freeze 18/18 at S6a hashes: schema, 4 contracts (api/event-model superseded), 2 guides, S4/S5 fixtures, S4/S5 plan+dispatch/amendment",
     detail: freezeDrift.length ? freezeDrift.slice(0, 4).join(" || ") : `${frozenEntries.length}/${frozenEntries.length} hashes match`,
   });
 
@@ -8827,13 +8923,15 @@ function checkS4I() {
   const markerHits = [];
   for (const file of scopeFiles) {
     if (file.rel.includes("/test/")) continue;
+    const l2Allowed = s6aL2Allowed(file.rel);
     for (const marker of forbiddenMarkers) {
+      if (marker.name === "L2/local" && l2Allowed) continue;
       if (marker.re.test(file.text)) markerHits.push(`${file.rel} [${marker.name}]`);
     }
   }
   checks.push({
     ok: markerHits.length === 0 && scopeFiles.length > 0,
-    label: "S4 sources contain no S6+ capability (.map decoding, L2/local, WAR/Tomcat, cloud, SSE/WS, pixel replay, persistence); S5 values/manifest allowed",
+    label: "S4 sources contain no S6+ capability (.map decoding, L2/local outside the S6a L2 files, WAR/Tomcat, cloud, SSE/WS, pixel replay, persistence); S5 values/manifest allowed",
     detail: markerHits.slice(0, 5).join(",") || `${scopeFiles.length} files clean`,
   });
 
@@ -8994,8 +9092,10 @@ function checkS4I() {
     "docs/guides/",
     "docs/plans/stages/S4/",
     "docs/plans/stages/S5/",
+    "docs/plans/stages/S6/",
     "fixtures/s4-details/",
     "fixtures/s5-l1-values/",
+    "fixtures/s6-l2-lines/",
     "tools/verify/",
     "tools/perf/",
   ];
@@ -9019,7 +9119,7 @@ function checkS4I() {
   }
   checks.push({
     ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
-    label: "git change set is inside the S5 whitelist only (agent/collector/launcher/sdk+build-plugin/demo frontend+4 backend files/workbench/docs contracts+guides+S4+S5/fixtures/s4-details+s5-l1-values/tools/verify+perf/pom)",
+    label: "git change set is inside the S6a whitelist only (agent/collector/launcher/sdk+build-plugin/demo frontend+5 backend files/workbench/docs contracts+guides+S4+S5+S6a/fixtures/s4+s5+s6-l2-lines/tools/verify+perf/pom)",
     detail: unexpected.length || forbidden.length
       ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
       : `${status.lines.length} entries within scope`,
@@ -9349,7 +9449,8 @@ async function checkS5D() {
       "100 → 0", "已脱敏", "已截断", "（manifest 映射）", "行号未采集", "第 1/1 次",
       "S5 L1：参数/字段写入/返回摘要；局部变量（L2）与行级属 S6，本阶段未采集",
       "未采集（该节点无 values；S5 只采参数/字段写入/返回摘要）",
-      "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
+      // S6a migration (B2): the old S5 header banner is replaced by the canonical S6a banner.
+      "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
       "JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）",
     ];
     const missingS5 = s5WorkbenchTokens.filter((token) => !wbText.includes(token));
@@ -9373,14 +9474,21 @@ async function checkS5D() {
         ? walk(abs(tree)).map((file) => ({ rel: relOf(file), text: readFileSync(file, "utf8") }))
         : distTextFiles(tree);
       for (const file of files) {
-        for (const token of [...S5_STALE_TEXTS, ...S5_FORBIDDEN_CLAIMS]) {
+        for (const token of S5_STALE_TEXTS) {
           if (file.text.includes(token)) staleHits.push(`${file.rel} -> ${token}`);
+        }
+        // Claim text is about the rendered UI: comments are not claims, so the (unchanged) token
+        // list is applied to comment-stripped text. Visible strings/templates stay scanned and
+        // the built dist is minified (comments stripped) - no assertion is relaxed.
+        const visible = stripComments(file.text);
+        for (const token of S5_FORBIDDEN_CLAIMS) {
+          if (visible.includes(token)) staleHits.push(`${file.rel} -> ${token}`);
         }
       }
     }
     checks.push({
       ok: staleHits.length === 0,
-      label: "B3 reverse: workbench/demo src+dist contain no 无构建插件/sourcemap, S5 待做, 无 S5, S5/S6, 无 sourcemap/行号映射, kind=local or L2 已采集",
+      label: "B3 reverse: workbench/demo src+dist contain no 无构建插件/sourcemap, S5 待做/无 S5/S5-S6, 4 superseded S6a texts, kind=local or L2 已采集 (claims scanned on comment-stripped UI text)",
       detail: staleHits.slice(0, 6).join(" || ") || "0 stale claims",
     });
     S5_EVIDENCE.fixture = { graph: { nodes: nodes.length, edges: edges.length, values: valueNode?.values?.length ?? 0 }, workbenchTokens: s5WorkbenchTokens.length };
@@ -9513,12 +9621,12 @@ function checkS5E() {
   const demoApp = readFileSync(abs(`${S5_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
   checks.push({
     ok: demoText.includes("#btn-discount") && demoText.includes("previewDiscount") &&
-      demoText.includes("S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）") &&
+      demoText.includes("S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b") &&
       demoApp.includes('id="btn-discount"') && demoApp.includes('data-tb-fn="previewDiscount"') &&
       demoApp.includes("requestedAmount=100") && demoApp.includes("demoSecret=s3cr3t") &&
       demoApp.includes('"x".repeat(3000)'),
-    label: "demo dist/source: #btn-discount + previewDiscount + S5 canonical copy + fixed 100/s3cr3t/3000-x URL, no loadOrders refresh",
-    detail: `btn=${demoText.includes("#btn-discount")} copy=${demoText.includes("S5：已有函数级")}`,
+    label: "demo dist/source: #btn-discount + previewDiscount + S6a canonical copy + fixed 100/s3cr3t/3000-x URL, no loadOrders refresh",
+    detail: `btn=${demoText.includes("#btn-discount")} copy=${demoText.includes("S6a：仅 L2DemoService")}`,
   });
   const cdnHosts = ["unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com", "npmmirror.com", "mirrors.aliyun.com"];
   const cdnHits = [];
@@ -9667,13 +9775,15 @@ function checkS5G() {
     detail: "G1: PASS",
   });
   const freezeDrift = [];
-  for (const [rel, expected] of Object.entries(S5_G1_FREEZE)) {
+  for (const [rel, s5Hash] of Object.entries(S5_G1_FREEZE)) {
+    // S6a supersedes the S5 api/event-model hashes; the other 16 files keep their S5 bytes.
+    const expected = LATEST_G1_FREEZE[rel] ?? s5Hash;
     const actual = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
     if (actual !== expected) freezeDrift.push(`${rel} ${actual.slice(0, 12)}…!=${expected.slice(0, 12)}…`);
   }
   checks.push({
     ok: Object.keys(S5_G1_FREEZE).length === 18 && freezeDrift.length === 0,
-    label: "S5 G1 freeze zero drift: schema/contracts/guides/S4+S5 fixtures/S4+S5 plan+dispatch (18 files, api+event-model at S5 hashes)",
+    label: "S5 G1 freeze zero drift: schema/contracts/guides/S4+S5 fixtures/S4+S5 plan+dispatch (18 files, api+event-model at S6a hashes, S6a files at S6a hashes)",
     detail: freezeDrift.length ? freezeDrift.slice(0, 4).join(" || ") : "18/18 hashes match",
   });
   const schemaHash = existsSync(abs(SCHEMA_REL)) ? sha256File(abs(SCHEMA_REL)) : "missing";
@@ -9740,7 +9850,7 @@ function checkS5G() {
   }
   return gate(
     "S5-G",
-    "regression/freeze: S0–S4 anchors PASS in a full run, schema/S0–S5 fixture bytes unchanged, S5 G1 freeze 18/18 (anchors explicitly deferred in S5-only mode)",
+    "regression/freeze: S0–S4 anchors PASS in a full run, schema/S0–S5 fixture bytes unchanged, S5 G1 freeze 18/18 at S6a hashes (api/event-model superseded; anchors explicitly deferred in S5-only mode)",
     checks,
     repro,
   );
@@ -9773,13 +9883,15 @@ function checkS5H() {
   const markerHits = [];
   for (const file of scopeFiles) {
     if (file.rel.includes("/test/")) continue;
+    const l2Allowed = s6aL2Allowed(file.rel);
     for (const marker of forbiddenMarkers) {
+      if (marker.name === "L2/local" && l2Allowed) continue;
       if (marker.re.test(file.text)) markerHits.push(`${file.rel} [${marker.name}]`);
     }
   }
   checks.push({
     ok: markerHits.length === 0 && scopeFiles.length > 0,
-    label: "no S6+ capability in S5 product sources: no L2/local, async continuation, runtime ×3, SSE/WS, persistence, pixel replay, .map decoding, Tomcat/WAR, cloud, React",
+    label: "no S6+ capability in S5 product sources: no L2/local outside the S6a L2 files, async continuation, runtime ×3, SSE/WS, persistence, pixel replay, .map decoding, Tomcat/WAR, cloud, React; no async/NO_DEBUG/loop-fold/perf claims",
     detail: markerHits.slice(0, 6).join(",") || `${scopeFiles.length} files clean`,
   });
   const agentL1 = readFileSync(abs("agent/src/main/java/io/traceboard/agent/L1Values.java"), "utf8");
@@ -9924,6 +10036,7 @@ function checkS5H() {
     "agent/", "server/collector/", "server/launcher/", "frontend/sdk/", "frontend/build-plugin/",
     "demo/buggy-shop-boot-vue/frontend/", "workbench/", "docs/contracts/", "docs/guides/",
     "docs/plans/stages/S5/", "fixtures/s5-l1-values/", "tools/verify/", "tools/perf/",
+    "docs/plans/stages/S6/", "fixtures/s6-l2-lines/",
   ];
   const forbiddenPrefixes = ["schema/", "fixtures/case-a-zero-rows/", "fixtures/s1-walking-skeleton/", "fixtures/s2-zero-row-chain/", "fixtures/s3-frontend-facts/", "fixtures/s4-details/", "docs/plans/stages/S0/"];
   const forbiddenExact = ["docs/contracts/transport.v1.md", "docs/contracts/status-semantics.md", "docs/plans/00-master-plan.md", "docs/plans/SOLO-PLAN.md"];
@@ -9938,7 +10051,7 @@ function checkS5H() {
   }
   checks.push({
     ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
-    label: "S5 change set within the whitelist (agent/collector/launcher/sdk+build-plugin/demo frontend+4 backend files/workbench/docs contracts+guides+S5/fixtures s5/tools/verify+perf/pom); schema/S0–S4 fixtures/transport/status untouched",
+    label: "S6a change set within the whitelist (agent/collector/launcher/sdk+build-plugin/demo frontend+5 backend files/workbench/docs contracts+guides+S5+S6a/fixtures s5+s6/tools/verify+perf/pom); schema/S0–S4 fixtures/transport/status untouched",
     detail: unexpected.length || forbidden.length
       ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
       : `${status.lines.length} entries within scope`,
@@ -10650,6 +10763,1097 @@ function s5CompileValidator() {
 }
 
 /* ------------------------------------------------------------------ */
+/* S6a: L2 line-level locals + per-invocation ×3 (S6 stays partial)    */
+/* ------------------------------------------------------------------ */
+
+/** Source lines of the two assignment statements (recomputed, never hard-coded). */
+function s6aL2SourceLines() {
+  const lines = readFileSync(abs(S6A_L2_SERVICE_REL), "utf8").split(/\r?\n/);
+  const initIndex = lines.findIndex((line) => /\bdouble\s+local\s*=\s*amount\s*;/.test(line));
+  const assignIndex = lines.findIndex((line) => /\blocal\s*=\s*0\.0d\s*;/.test(line));
+  return { initLine: initIndex >= 0 ? initIndex + 1 : null, assignLine: assignIndex >= 0 ? assignIndex + 1 : null };
+}
+
+/** Parse `javap -l -p` for the reconcileAmount LVT entry `local D` (+ Start/Length/Slot). */
+function s6aParseLvt(text) {
+  const evidence = { method: false, lvt: false, start: null, length: null, slot: null };
+  let inTarget = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/public\s+double\s+reconcileAmount\s*\(\s*long\s*,\s*double\s*,\s*int\s*\)/.test(line)) {
+      inTarget = true;
+      evidence.method = true;
+      continue;
+    }
+    if (!inTarget) continue;
+    if (/^\s+(?:public|private|protected)\b.*;\s*$/.test(line)) {
+      inTarget = false;
+      continue;
+    }
+    const match = line.match(/^\s+(\d+)\s+(\d+)\s+(\d+)\s+local\s+D\s*$/);
+    if (match) {
+      evidence.lvt = true;
+      evidence.start = Number(match[1]);
+      evidence.length = Number(match[2]);
+      evidence.slot = Number(match[3]);
+    }
+  }
+  return evidence;
+}
+
+/** Reuse the S5-BUILD evidence in a full run; in S6a-only mode build root JDK21 + demo JDK8. */
+function s6aEnsureJavaBuilds() {
+  if (S6A_BUILD_CACHE.java) return S6A_BUILD_CACHE.java;
+  if (S5_EVIDENCE.javaBuild) {
+    S6A_BUILD_CACHE.java = { reused: true, ok: S5_EVIDENCE.javaBuild.ok === true, root: null, demo: null };
+    return S6A_BUILD_CACHE.java;
+  }
+  const root = runShell("mvn -B -q -DskipTests package", {
+    cwd: REPO,
+    env: { ...process.env, JAVA_HOME: JDK21_HOME },
+  });
+  const demo = runShell("mvn -B -q -DskipTests package", {
+    cwd: abs(S6A_DEMO_BACKEND_REL),
+    env: { ...process.env, JAVA_HOME: JDK8_HOME },
+  });
+  S6A_BUILD_CACHE.java = {
+    reused: false,
+    ok: root.code === 0 && !root.error && !root.signal && !/BUILD FAILURE/.test(`${root.stdout}\n${root.stderr}`) &&
+      demo.code === 0 && !demo.error && !demo.signal && !/BUILD FAILURE/.test(`${demo.stdout}\n${demo.stderr}`),
+    root,
+    demo,
+  };
+  return S6A_BUILD_CACHE.java;
+}
+
+/** S6a assets: SDK (S5 build), workbench dist and the demo frontend dist (S5 build cache). */
+function s6aEnsureAssets() {
+  if (!S6A_BUILD_CACHE.sdk) S6A_BUILD_CACHE.sdk = s5EnsureSdk();
+  if (!S6A_BUILD_CACHE.workbench) S6A_BUILD_CACHE.workbench = s5EnsureWorkbench();
+  if (!S6A_BUILD_CACHE.demoFrontend) S6A_BUILD_CACHE.demoFrontend = s5EnsureDemoFrontend();
+  return S6A_BUILD_CACHE;
+}
+
+/** Bundle the workbench `s6/l2.ts` pure helpers and import them as ESM (no browser needed). */
+async function loadS6L2Module() {
+  const workbenchRequire = createRequire(path.join(REPO, "workbench", "package.json"));
+  const esbuild = workbenchRequire("esbuild");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "tb-s6-l2-"));
+  tmpDirs.push(dir);
+  const outfile = path.join(dir, "l2.mjs");
+  esbuild.buildSync({
+    entryPoints: [abs("workbench/src/s6/l2.ts")],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    outfile,
+    logLevel: "silent",
+    sourcemap: false,
+  });
+  return import(pathToFileURL(outfile).href);
+}
+
+/**
+ * S6A-A: builds/artifact. Root reactor JDK21 (collector first, N1) + demo JDK8, agent jar major 52,
+ * shaded/relocated ASM 9.7 (no un-relocated org/objectweb/asm), Premain-Class, `javap -l` proves
+ * the `local:D` LVT entry, and one agent run proves exactly 2 probes (init offset == LVT Start,
+ * lines recomputed from source) with no l2_probe_missing/l2_no_lvt/l2_transform_error.
+ */
+async function checkS6A() {
+  section("S6A-A: build/artifact (root JDK21 + demo JDK8 + agent 52 + shaded ASM 9.7 + Premain + LVT local:D + 2-probe self-check)");
+  const checks = [];
+  const repro = `JAVA_HOME="${JDK21_HOME}" mvn -B -q -DskipTests package && (cd "${S6A_DEMO_BACKEND_REL}" && JAVA_HOME="${JDK8_HOME}" mvn -B -q -DskipTests package) && (cd "workbench" && npm ci && npm run build)`;
+  const java = s6aEnsureJavaBuilds();
+  checks.push({
+    ok: java.ok === true,
+    label: "collector/agent root reactor `mvn -B -q -DskipTests package` (JAVA_HOME=JDK21) + demo backend (JAVA_HOME=JDK8) exit 0 (collector built before any startup, N1)",
+    detail: java.reused
+      ? "reused the S5-BUILD evidence from this run (same working tree)"
+      : `root exit=${java.root?.code} demo exit=${java.demo?.code} ${lastLines(`${java.root?.stdout ?? ""}\n${java.root?.stderr ?? ""}`, 1).join(" ").slice(0, 160)}`,
+  });
+  for (const rel of [COLLECTOR_JAR_REL, AGENT_JAR_REL, DEMO_JAR_REL]) {
+    checks.push({
+      ok: existsSync(abs(rel)) && statSync(abs(rel)).size > 0,
+      label: `${path.basename(rel)} exists after the build`,
+      detail: existsSync(abs(rel)) ? `${statSync(abs(rel)).size} bytes` : "missing",
+    });
+  }
+  const javapAgent = existsSync(JDK21_JAVAP)
+    ? runExe(JDK21_JAVAP, ["-verbose", "-classpath", abs(AGENT_JAR_REL), "io.traceboard.agent.TraceAgent"])
+    : { stdout: "" };
+  const agentMajor = Number((javapAgent.stdout.match(/major version:\s*(\d+)/) ?? [])[1]);
+  checks.push({
+    ok: agentMajor === 52,
+    label: "agent jar compiled for Java 8 (major 52)",
+    detail: `major=${Number.isNaN(agentMajor) ? "?" : agentMajor}`,
+  });
+
+  const jar = zipEntries(abs(AGENT_JAR_REL));
+  const relocatedAsm = jar.entries.filter((entry) => entry.startsWith("io/traceboard/agent/shaded/org/objectweb/asm/"));
+  const unrelocatedAsm = jar.entries.filter((entry) => entry.startsWith("org/objectweb/asm/"));
+  const relocatedBb = jar.entries.filter((entry) => entry.startsWith("io/traceboard/agent/shaded/net/bytebuddy/"));
+  checks.push({
+    ok: jar.ok && relocatedAsm.length > 0 && unrelocatedAsm.length === 0 && relocatedBb.length > 0,
+    label: "shaded ASM lives under io/traceboard/agent/shaded/org/objectweb/asm/** and no un-relocated org/objectweb/asm remains (byte-buddy shaded too)",
+    detail: `asm=${relocatedAsm.length} unrelocated=${unrelocatedAsm.length} bytebuddy=${relocatedBb.length}`,
+  });
+  const manifest = runExe("unzip", ["-p", abs(AGENT_JAR_REL), "META-INF/MANIFEST.MF"]);
+  const agentSource = readFileSync(abs("agent/src/main/java/io/traceboard/agent/TraceAgent.java"), "utf8");
+  checks.push({
+    ok: manifest.code === 0 && /Premain-Class:\s*io\.traceboard\.agent\.TraceAgent/.test(manifest.stdout) &&
+      !/Agent-Class:/.test(manifest.stdout) && /public\s+static\s+void\s+premain\s*\(\s*String/.test(agentSource),
+    label: "jar manifest declares Premain-Class io.traceboard.agent.TraceAgent (no Agent-Class; premain is public static)",
+    detail: (manifest.stdout.match(/Premain-Class:[^\r\n]+/) ?? ["missing"])[0],
+  });
+  const agentPom = readFileSync(abs("agent/pom.xml"), "utf8");
+  const depBlock = agentPom.match(/<dependencies>([\s\S]*?)<\/dependencies>/)?.[1] ?? "";
+  const depArtifacts = [...depBlock.matchAll(/<artifactId>([^<]+)<\/artifactId>/g)].map((match) => match[1]).sort();
+  checks.push({
+    ok: deepEqual(depArtifacts, ["asm", "asm-commons", "asm-tree", "byte-buddy"].sort()) &&
+      /<asm\.version>9\.7<\/asm\.version>/.test(agentPom) &&
+      /<shadedPattern>io\.traceboard\.agent\.shaded\.org\.objectweb\.asm<\/shadedPattern>/.test(agentPom) &&
+      ["asm", "asm-tree", "asm-commons"].every((name) => depBlock.includes(`<artifactId>${name}</artifactId>`)) &&
+      !/<dependency>[\s\S]*?(spring|servlet|mybatis)/i.test(agentPom),
+    label: "agent pom dependencies are exactly byte-buddy + asm/asm-tree/asm-commons 9.7 (relocated; no Spring/Servlet/MyBatis)",
+    detail: depArtifacts.join(","),
+  });
+
+  const sourceLines = s6aL2SourceLines();
+  const javapLvt = existsSync(`${JDK8_HOME}/bin/javap.exe`)
+    ? runExe(`${JDK8_HOME}/bin/javap.exe`, ["-l", "-p", "-classpath", abs(`${S6A_DEMO_BACKEND_REL}/target/classes`), "com.example.shop.service.L2DemoService"])
+    : { stdout: "", code: -1, error: new Error("javap missing") };
+  const lvt = s6aParseLvt(javapLvt.stdout ?? "");
+  checks.push({
+    ok: lvt.method && lvt.lvt && Number.isInteger(lvt.start) && Number.isInteger(lvt.length) &&
+      sourceLines.initLine !== null && sourceLines.assignLine !== null && sourceLines.assignLine !== sourceLines.initLine,
+    label: "`javap -l` proves reconcileAmount carries a LocalVariableTable entry local:D (Start/Length/Slot) and the source has distinct init/assign lines",
+    detail: `local start=${lvt.start} length=${lvt.length} slot=${lvt.slot}; source init=${sourceLines.initLine} assign=${sourceLines.assignLine}`,
+  });
+
+  let demo = null;
+  try {
+    const port = s5PortFree(8080);
+    checks.push({ ok: port.ok, label: "port 8080 free before the artifact run", detail: port.detail });
+    if (port.ok) {
+      demo = startJavaServer("demo(8080,agent-artifact)", JDK8_JAVA, [
+        `-javaagent:${abs(AGENT_JAR_REL)}`,
+        "-Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events",
+        `-Dtraceboard.sessionId=${S6A_SESSION}_artifact`,
+        "-jar",
+        abs(DEMO_JAR_REL),
+      ], abs(S6A_DEMO_BACKEND_REL));
+      const ready = await pollUntil(async () => {
+        const res = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
+        return res.ok && res.status === 200 ? res : null;
+      }, START_TIMEOUT_MS);
+      await sleep(1000);
+      const log = demo.log.text;
+      checks.push({ ok: Boolean(ready), label: "demo answers /api/orders with the agent attached (classes load -> transformer runs)", detail: ready ? "200" : lastLines(log, 3).join(" | ") });
+      const probe = log.match(/l2_probes_installed method=reconcileAmount offsets=(\d+),(\d+) lines=(\d+),(\d+)/);
+      checks.push({
+        ok: probe !== null && probe[1] !== probe[2] && Number(probe[1]) === lvt.start &&
+          Number(probe[3]) === sourceLines.initLine && Number(probe[4]) === sourceLines.assignLine,
+        label: "runtime self-check: exactly 2 probes, init offset == LVT Start (inclusive), lines == source init/assign (recomputed)",
+        detail: probe ? `offsets=${probe[1]},${probe[2]} lines=${probe[3]},${probe[4]} lvtStart=${lvt.start}` : lastLines(log, 4).join(" | ").slice(0, 240),
+      });
+      const l2Failures = ["l2_probe_missing", "l2_no_lvt", "l2_no_method", "l2_transform_error"].filter((token) => log.includes(token));
+      checks.push({
+        ok: l2Failures.length === 0 && /premain installed/.test(log),
+        label: "no l2_probe_missing/l2_no_lvt/l2_no_method/l2_transform_error; premain installed log present",
+        detail: l2Failures.join(",") || "clean",
+      });
+    }
+  } finally {
+    await stopServer(demo);
+    const freed = await pollUntil(() => s5PortFree(8080).ok, 30000, 400);
+    checks.push({ ok: Boolean(freed), label: "artifact demo stopped, port 8080 released", detail: `8080=${s5PortFree(8080).detail}` });
+  }
+
+  const assets = s6aEnsureAssets();
+  checks.push({
+    ok: assets.sdk.ci.code === 0 && assets.sdk.build.code === 0 && assets.sdk.tests === "17" && assets.sdk.pass === "17",
+    label: "SDK (S5 asset) npm ci + build + 17/17 tests still green",
+    detail: `tests=${assets.sdk.tests} pass=${assets.sdk.pass}`,
+  });
+  const wbDist = distTextFiles(WORKBENCH_DIST_REL);
+  checks.push({
+    ok: assets.workbench.ci.code === 0 && assets.workbench.build.code === 0 && wbDist.length > 0,
+    label: "workbench npm ci + npm run build exit 0 (S5/S6a UI assets rebuilt)",
+    detail: `exit=${assets.workbench.build.code} dist=${wbDist.length} files`,
+  });
+  const demoDist = distTextFiles(DEMO_DIST_REL);
+  checks.push({
+    ok: assets.demoFrontend.ci.code === 0 && assets.demoFrontend.build.code === 0 && demoDist.length > 0,
+    label: "demo frontend npm ci + npm run build exit 0 (S5 asset; #btn-reconcile ships in dist)",
+    detail: `exit=${assets.demoFrontend.build.code} dist=${demoDist.length} files`,
+  });
+
+  S6A_EVIDENCE.javaBuild = { ok: checks.every((check) => check.ok), java, lvt, sourceLines };
+  return gate(
+    "S6A-A",
+    "build/artifact: root JDK21 + demo JDK8; agent major 52; shaded/relocated ASM 9.7 (no un-relocated); Premain-Class; javap LVT local:D; 2-probe self-check init offset == LVT Start; SDK/workbench/demo assets built",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S6A-B: the demo reconcile endpoint without an agent. Any id -> 200 {"data":[100.0,0.0,100.0]};
+ * pure computation (no DB read/write); case A cancel and the S5 L1 preview keep their behaviour.
+ */
+async function checkS6B() {
+  section("S6A-B: demo reconcile (no agent) — exact 200 body, no DB, case A + L1 unchanged");
+  const checks = [];
+  const repro = `"${JDK8_JAVA}" -jar "${DEMO_JAR_REL}" & curl -s -X POST "http://127.0.0.1:8080/api/orders/1/reconcile"`;
+  const pre = [
+    { ok: s5PortFree(8080).ok, label: "port 8080 free before start", detail: s5PortFree(8080).detail },
+    { ok: existsSync(abs(DEMO_JAR_REL)), label: "demo jar exists", detail: DEMO_JAR_REL },
+    { ok: existsSync(JDK8_JAVA), label: "JDK8 java.exe exists", detail: JDK8_JAVA },
+  ];
+  const l2Source = readFileSync(abs(S6A_L2_SERVICE_REL), "utf8");
+  checks.push({
+    ok: !/\b(UPDATE|SELECT|INSERT|DELETE)\b|findById|JdbcTemplate|@Transactional|Mapper/.test(l2Source),
+    label: "L2DemoService.java is pure computation: no UPDATE/SELECT/INSERT/DELETE/findById/JdbcTemplate/@Transactional/Mapper",
+    detail: `${l2Source.split(/\r?\n/).length} lines scanned`,
+  });
+  const controllerDir = `${S6A_DEMO_BACKEND_REL}/src/main/java/com/example/shop/controller`;
+  const mappingPaths = [];
+  let ordersMapping = 0;
+  for (const file of dirTextFiles(controllerDir)) {
+    for (const match of file.text.matchAll(/@(Get|Post|Put|Patch|Delete)Mapping\b(?:\s*\(\s*(?:path\s*=\s*)?["']([^"']*)["']\s*\))?/g)) {
+      mappingPaths.push(match[2] ?? "");
+    }
+    if (/@RequestMapping\("\/api\/orders"\)/.test(file.text)) ordersMapping += 1;
+  }
+  checks.push({
+    ok: ordersMapping === 1 && deepEqual(mappingPaths.slice().sort(), ["", "/{id}/cancel", "/{id}/preview-discount", "/{id}/reconcile"].sort()),
+    label: "demo controller surface unchanged except the single POST /{id}/reconcile (GET list + cancel + preview-discount + reconcile only)",
+    detail: `orders=${ordersMapping} paths=${mappingPaths.join(",")}`,
+  });
+  const appSource = readFileSync(abs(`${S5_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
+  const reconcileStart = appSource.indexOf("async function reconcile(");
+  const reconcileEnd = appSource.indexOf("onMounted(", reconcileStart);
+  const reconcileBody = reconcileStart >= 0 && reconcileEnd > reconcileStart ? appSource.slice(reconcileStart, reconcileEnd) : "";
+  checks.push({
+    ok: appSource.includes('id="btn-reconcile"') &&
+      appSource.includes('fetch("/api/orders/1/reconcile", { method: "POST" })') &&
+      reconcileBody.length > 0 && !reconcileBody.includes("loadOrders") &&
+      !/wrapFn\("reconcile/.test(appSource) && appSource.includes(S6A_BANNER),
+    label: "demo frontend static: #btn-reconcile -> POST /api/orders/1/reconcile (plain handler, no wrapFn), never loadOrders, S6a banner present",
+    detail: `handler=${reconcileBody.length} chars loadOrders=${reconcileBody.includes("loadOrders")}`,
+  });
+  if (!pre.every((item) => item.ok)) {
+    return record("S6A-B", "S6A-B demo reconcile (preconditions)", false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`), repro);
+  }
+
+  let demo = null;
+  try {
+    demo = startJavaServer("demo(8080,no-agent) S6A-B", JDK8_JAVA, ["-jar", abs(DEMO_JAR_REL)], abs(S6A_DEMO_BACKEND_REL));
+    const ready = await pollUntil(async () => {
+      const res = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    if (!ready) {
+      checks.push({ ok: false, label: "demo started", detail: lastLines(demo.log.text, 4).join(" | ") });
+      return gate("S6A-B", "S6A-B demo reconcile (startup)", checks, repro);
+    }
+    const seed = s5OrderRow(ready.text);
+    checks.push({
+      ok: seed !== null && seed.status === "CREATED" && Number(seed.amount) === 100,
+      label: "GET /api/orders seed: id=1 CREATED amount=100 before reconcile",
+      detail: show(seed),
+    });
+
+    const reconcile1 = await tryRequest(8080, "/api/orders/1/reconcile", { method: "POST" }, 30000);
+    const body1 = reconcile1.ok ? parseJson(reconcile1.text) : { ok: false };
+    const raw1 = String(reconcile1.text ?? "").trim();
+    checks.push({
+      ok: reconcile1.status === 200 && body1.ok && deepEqual(body1.value, { data: [100, 0, 100] }) &&
+        raw1 === '{"data":[100.0,0.0,100.0]}',
+      label: 'POST /api/orders/1/reconcile -> 200 exact {"data":[100.0,0.0,100.0]} (3 floats, 2nd call bad)',
+      detail: `status=${reconcile1.status} body=${show(reconcile1.text)}`,
+    });
+    const reconcile999 = await tryRequest(8080, "/api/orders/999/reconcile", { method: "POST" }, 30000);
+    const body999 = reconcile999.ok ? parseJson(reconcile999.text) : { ok: false };
+    checks.push({
+      ok: reconcile999.status === 200 && body999.ok && deepEqual(body999.value, { data: [100, 0, 100] }) &&
+        String(reconcile999.text ?? "").trim() === '{"data":[100.0,0.0,100.0]}',
+      label: "unknown id 999 -> 200 same exact shape (pure computation, id not looked up; no 404/-1/null)",
+      detail: `status=${reconcile999.status} body=${show(reconcile999.text)}`,
+    });
+    const afterReconcile = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const afterRow = s5OrderRow(afterReconcile.text);
+    checks.push({
+      ok: afterRow !== null && Number(afterRow.amount) === 100 && afterRow.status === "CREATED",
+      label: "GET /api/orders after both reconciles: DB amount 100.00 / status CREATED (no DB read/write)",
+      detail: show(afterRow),
+    });
+
+    const preview = await tryRequest(8080, s5PreviewQuery(1), { method: "POST" }, 30000);
+    const previewBody = preview.ok ? parseJson(preview.text) : { ok: false };
+    checks.push({
+      ok: preview.status === 200 && previewBody.ok && deepEqual(previewBody.value, { data: 0 }),
+      label: 'S5 L1 preview-discount still 200 {"data":0} (unchanged endpoint)',
+      detail: `status=${preview.status} body=${show(preview.text)}`,
+    });
+    const cancel = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" }, 30000);
+    const cancelBody = cancel.ok ? parseJson(cancel.text) : { ok: false };
+    const afterCancel = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const afterCancelRow = s5OrderRow(afterCancel.text);
+    checks.push({
+      ok: cancel.status === 200 && cancelBody.ok && deepEqual(cancelBody.value, { data: true }) &&
+        afterCancelRow !== null && Number(afterCancelRow.amount) === 100 && afterCancelRow.status === "CREATED",
+      label: "case A POST /api/orders/1/cancel -> 200 {\"data\":true}; orders stay CREATED/100 (0-row UPDATE unchanged)",
+      detail: `status=${cancel.status} body=${show(cancel.text)} row=${show(afterCancelRow)}`,
+    });
+  } finally {
+    await stopServer(demo);
+    const freed = await pollUntil(() => s5PortFree(8080).ok, 30000, 400);
+    checks.push({ ok: Boolean(freed), label: "S6A-B cleanup: demo stopped, port 8080 released", detail: `8080=${s5PortFree(8080).detail}` });
+  }
+
+  S6A_EVIDENCE.demo = { checks };
+  return gate(
+    "S6A-B",
+    "demo: reconcile 200 exact [100.0,0.0,100.0] (id 1 and 999), DB amount 100/CREATED, no DB source access, case A + L1 preview unchanged, #btn-reconcile static",
+    checks,
+    repro,
+  );
+}
+
+/** Exact expected L2 values item (contract order irrelevant for JSON equality). */
+function s6aL2Item(line, from, to, invocation) {
+  return { name: "local", kind: "local", line, from, to, truncated: false, redacted: false, invocation };
+}
+
+/**
+ * S6A-C: agent L2 E2E. collector(8601) + demo(8080) + agent, session s_s6a: controller + exactly
+ * 3 same-nodeKey reconcileAmount spans (return 100/0/100), exact 1/2/1 values with the 2nd call's
+ * 100 -> 0 at the recomputed `local = 0` line, L2 flag, no L1, no VerifyError, fail-open.
+ */
+async function checkS6C(validate) {
+  section("S6A-C: agent L2 E2E (collector 8601 + demo 8080 + agent, session s_s6a)");
+  const checks = [];
+  const repro = `"${JDK8_JAVA}" -javaagent:"${AGENT_JAR_REL}" -Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events -Dtraceboard.sessionId=${S6A_SESSION} -jar "${DEMO_JAR_REL}"`;
+  const pre = [
+    { ok: s5PortFree(8601).ok, label: "port 8601 free before start", detail: s5PortFree(8601).detail },
+    { ok: s5PortFree(8080).ok, label: "port 8080 free before start", detail: s5PortFree(8080).detail },
+    { ok: existsSync(abs(COLLECTOR_JAR_REL)), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: existsSync(abs(DEMO_JAR_REL)), label: "demo jar exists", detail: DEMO_JAR_REL },
+    { ok: existsSync(abs(AGENT_JAR_REL)), label: "agent jar exists", detail: AGENT_JAR_REL },
+    { ok: existsSync(JDK21_JAVA) && existsSync(JDK8_JAVA), label: "JDK21 + JDK8 present", detail: `${JDK21_HOME} / ${JDK8_HOME}` },
+    { ok: typeof validate === "function", label: "frozen schema validator available", detail: SCHEMA_REL },
+  ];
+  if (!pre.every((item) => item.ok)) {
+    return record("S6A-C", "S6A-C agent L2 (preconditions)", false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`), repro);
+  }
+  const sourceLines = s6aL2SourceLines();
+  const initLine = sourceLines.initLine;
+  const assignLine = sourceLines.assignLine;
+  const expectedValues = [
+    [s6aL2Item(initLine, null, 100, 1)],
+    [s6aL2Item(initLine, null, 100, 2), s6aL2Item(assignLine, 100, 0, 2)],
+    [s6aL2Item(initLine, null, 100, 3)],
+  ];
+
+  let collector = null;
+  let demo = null;
+  try {
+    collector = startJavaServer("collector(8601) S6A-C", JDK21_JAVA, ["-jar", abs(COLLECTOR_JAR_REL)], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(health), label: "collector 8601 /actuator/health 200", detail: health ? "UP" : "timeout" });
+    if (!health) return gate("S6A-C", "S6A-C agent L2 (collector unavailable)", checks, repro);
+
+    demo = startJavaServer("demo(8080)+agent S6A-C", JDK8_JAVA, [
+      `-javaagent:${abs(AGENT_JAR_REL)}`,
+      "-Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events",
+      `-Dtraceboard.sessionId=${S6A_SESSION}`,
+      "-jar",
+      abs(DEMO_JAR_REL),
+    ], abs(S6A_DEMO_BACKEND_REL));
+    const ready = await pollUntil(async () => {
+      const res = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(ready), label: "demo+agent answers /api/orders (no VerifyError at startup)", detail: ready ? "200" : lastLines(demo.log.text, 5).join(" | ") });
+    if (!ready) return gate("S6A-C", "S6A-C agent L2 (demo startup)", checks, repro);
+
+    /* ---------------- joined reconcile: controller + 3 service spans ---------------- */
+    const traceId = hexRandom(16);
+    const clientSpanId = hexRandom(8);
+    const clickId = `click_${hexRandom(8)}`;
+    const reconcile = await tryRequest(8080, "/api/orders/1/reconcile", {
+      method: "POST",
+      headers: { traceparent: `00-${traceId}-${clientSpanId}-01`, "X-TraceBoard-Click": clickId },
+    }, 30000);
+    const reconcileBody = reconcile.ok ? parseJson(reconcile.text) : { ok: false };
+    checks.push({
+      ok: reconcile.status === 200 && reconcileBody.ok && deepEqual(reconcileBody.value, { data: [100, 0, 100] }),
+      label: "joined reconcile -> 200 {\"data\":[100.0,0.0,100.0]}",
+      detail: `status=${reconcile.status} body=${show(reconcile.text)}`,
+    });
+    const polled = await pollUntil(async () => {
+      const page = await getEventsPage(S6A_SESSION, "?afterSeq=0&limit=400");
+      const spans = Array.isArray(page.value.events) ? page.value.events.map((entry) => entry.event) : [];
+      return page.res.ok && spans.filter((span) => span.traceId === traceId).length >= 4 ? { page, spans } : null;
+    }, 20000, 400);
+    await sleep(600);
+    const page1 = await getEventsPage(S6A_SESSION, "?afterSeq=0&limit=400");
+    const spans1 = Array.isArray(page1.value.events) ? page1.value.events.map((entry) => entry.event) : [];
+    const traceSpans = sortedByStart(spans1.filter((span) => span.traceId === traceId));
+    const schemaProblems = traceSpans.filter((span) => (typeof validate === "function" ? !validate(span) : true))
+      .map((span) => `${span.spanId}: ${(validate?.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ")}`);
+    checks.push({
+      ok: Boolean(polled) && traceSpans.length === 4 && schemaProblems.length === 0,
+      label: "collector received exactly 4 spans for the joined trace and every line validates against schema v1",
+      detail: `spans=${traceSpans.length} schemaProblems=${schemaProblems.slice(0, 3).join(",") || "none"}`,
+    });
+
+    const controller = traceSpans.find((span) => span.kind === "controller") ?? null;
+    const services = traceSpans.filter((span) => span.kind === "service");
+    const kinds = traceSpans.map((span) => span.kind);
+    checks.push({
+      ok: deepEqual(kinds, ["controller", "service", "service", "service"]) &&
+        controller !== null && controller.nodeKey === S6A_CONTROLLER_NODE_KEY &&
+        services.length === 3 && !traceSpans.some((span) => span.kind === "mapper" || span.kind === "sql") &&
+        !spans1.some((span) => String(span.nodeKey).includes("reconcileBatch")),
+      label: "exactly 4 spans: 1 controller OrderController#reconcile + 3 service spans (no mapper/sql, no reconcileBatch span)",
+      detail: `kinds=${kinds.join(",")} batchSpan=${spans1.some((span) => String(span.nodeKey).includes("reconcileBatch"))}`,
+    });
+    checks.push({
+      ok: controller !== null && controller.parentSpanId === clientSpanId && controller.confidence === "EXACT" &&
+        controller.rootEventId === clickId && deepEqual(controller.return, { type: "org.springframework.http.ResponseEntity", value: 200 }) &&
+        !Object.prototype.hasOwnProperty.call(controller, "values") &&
+        (controller.flags ?? []).includes(S2_FLAG_CHAIN) && !(controller.flags ?? []).includes(S6A_L2_FLAG) &&
+        !(controller.flags ?? []).includes(S5_L1_FLAG),
+      label: "controller: exact header join (parent=fetch spanId, EXACT, click id, ResponseEntity/200), NO values, no L2/L1 flag",
+      detail: `parent=${controller?.parentSpanId} return=${show(controller?.return)} flags=${show(controller?.flags)}`,
+    });
+
+    const serviceNodeKeys = [...new Set(services.map((span) => span.nodeKey))];
+    const starts = services.map((span) => span.startNs);
+    const returns = services.map((span) => (span.return && typeof span.return.value === "number" ? span.return.value : null));
+    checks.push({
+      ok: services.length === 3 && deepEqual(serviceNodeKeys, [S6A_SERVICE_NODE_KEY]) &&
+        controller !== null && services.every((span) => span.parentSpanId === controller.spanId) &&
+        starts.every((value, index) => index === 0 || value > starts[index - 1]) &&
+        deepEqual(returns, [100, 0, 100]) &&
+        services.every((span) => span.status === "OK" && span.kind === "service" && span.confidence === "EXACT"),
+      label: "3 same-nodeKey service spans under the controller, startNs strictly increasing, return 100/0/100, status OK, EXACT inherited",
+      detail: `nodeKeys=${serviceNodeKeys.join(",")} returns=${returns.join(",")} starts=${starts.join(",")}`,
+    });
+    const flagProblems = [];
+    services.forEach((span, index) => {
+      const flags = Array.isArray(span.flags) ? span.flags : [];
+      if (!flags.includes(S6A_L2_FLAG)) flagProblems.push(`inv${index + 1} missing L2`);
+      if (!flags.includes(S2_FLAG_CHAIN)) flagProblems.push(`inv${index + 1} missing ${S2_FLAG_CHAIN}`);
+      for (const forbidden of [S5_L1_FLAG, "LOST_BACKEND", "VALUES_CAPPED", "L1_SKIPPED", "S3_EXACT_LINK"]) {
+        if (flags.some((flag) => flag === forbidden || flag.startsWith(`${forbidden}=`))) {
+          flagProblems.push(`inv${index + 1} has ${forbidden}`);
+        }
+      }
+      if (span.source?.file !== "L2DemoService.java" || !(span.source?.line >= 1)) flagProblems.push(`inv${index + 1} source=${show(span.source)}`);
+    });
+    checks.push({
+      ok: flagProblems.length === 0,
+      label: "service flags include L2 + S2_ZERO_ROW_CHAIN and exclude L1/LOST_BACKEND/VALUES_CAPPED/L1_SKIPPED/S3_EXACT_LINK; source L2DemoService.java:line",
+      detail: flagProblems.slice(0, 6).join(" || ") || services.map((span) => (span.flags ?? []).join("+")).join(" | ").slice(0, 240),
+    });
+
+    const valueProblems = [];
+    services.forEach((span, index) => {
+      if (!deepEqual(span.values, expectedValues[index])) {
+        valueProblems.push(`inv${index + 1} values=${show(span.values)} expected=${show(expectedValues[index])}`);
+      }
+    });
+    const valueKinds = services.flatMap((span) => (span.values ?? []).map((item) => item.kind));
+    checks.push({
+      ok: valueProblems.length === 0 && valueKinds.every((kind) => kind === "local") &&
+        services[1]?.values?.[1]?.line === assignLine && services[1]?.values?.[1]?.from === 100 && services[1]?.values?.[1]?.to === 0,
+      label: `values exactly 1/2/1 items; 2nd invocation has local 100 -> 0 at the recomputed "local = 0" line (${assignLine}); first item from=null is a baseline, never a change`,
+      detail: valueProblems.slice(0, 4).join(" || ") || `lines=${initLine}/${assignLine} kinds=${[...new Set(valueKinds)].join(",")}`,
+    });
+
+    const log1 = demo.log.text;
+    const probe = log1.match(/l2_probes_installed method=reconcileAmount offsets=(\d+),(\d+) lines=(\d+),(\d+)/);
+    const l2Failures = ["l2_probe_missing", "l2_no_lvt", "l2_no_method", "l2_transform_error"].filter((token) => log1.includes(token));
+    const classErrors = /VerifyError|ClassFormatError|NoClassDefFoundError|UnsupportedClassVersionError/.test(log1);
+    checks.push({
+      ok: probe !== null && Number(probe[3]) === initLine && Number(probe[4]) === assignLine &&
+        l2Failures.length === 0 && !classErrors && /transformed com\.example\.shop\.controller\.OrderController/.test(log1),
+      label: "agent log: 2 probes at the recomputed lines, no l2_* failure, no VerifyError/ClassFormatError, reconcile controller advice installed",
+      detail: probe ? `offsets=${probe[1]},${probe[2]} lines=${probe[3]},${probe[4]}` : `failures=${l2Failures.join(",")} classErrors=${classErrors}`,
+    });
+
+    /* ---------------- headerless reconcile: legal S2 LOST child chain, never fake EXACT ---------------- */
+    const noHeader = await tryRequest(8080, "/api/orders/1/reconcile", { method: "POST" }, 30000);
+    const noHeaderBody = noHeader.ok ? parseJson(noHeader.text) : { ok: false };
+    const polled2 = await pollUntil(async () => {
+      const page = await getEventsPage(S6A_SESSION, "?afterSeq=0&limit=400");
+      const spans = Array.isArray(page.value.events) ? page.value.events.map((entry) => entry.event) : [];
+      return page.res.ok && spans.length >= 8 ? spans : null;
+    }, 20000, 400);
+    await sleep(600);
+    const page2 = await getEventsPage(S6A_SESSION, "?afterSeq=0&limit=400");
+    const spans2 = Array.isArray(page2.value.events) ? page2.value.events.map((entry) => entry.event) : [];
+    const lostSpans = sortedByStart(spans2.filter((span) => span.traceId !== traceId));
+    const lostController = lostSpans.find((span) => span.kind === "controller") ?? null;
+    const lostServices = lostSpans.filter((span) => span.kind === "service");
+    checks.push({
+      ok: noHeader.status === 200 && noHeaderBody.ok && deepEqual(noHeaderBody.value, { data: [100, 0, 100] }) &&
+        Boolean(polled2) && lostSpans.length === 4 && lostController !== null && lostServices.length === 3 &&
+        lostController.confidence === "LOST" && (lostController.flags ?? []).includes("LOST_BACKEND") &&
+        lostSpans.every((span) => span.confidence === "LOST") &&
+        lostServices.every((span) => span.parentSpanId === lostController.spanId && (span.flags ?? []).includes(S6A_L2_FLAG) &&
+          !(span.flags ?? []).includes("LOST_BACKEND")),
+      label: "headerless reconcile: 200 + legal S2 LOST chain (LOST_BACKEND only on the root, 3 L2 children), no fabricated EXACT (headerless L2 values not required)",
+      detail: `status=${noHeader.status} spans=${lostSpans.length} controller=${lostController?.confidence}/${show(lostController?.flags)} services=${lostServices.length}`,
+    });
+
+    /* ---------------- collector down -> fail-open ---------------- */
+    await stopServer(collector);
+    collector = null;
+    const freed = await pollUntil(() => s5PortFree(8601).ok, 30000, 400);
+    const failOpen = await tryRequest(8080, "/api/orders/1/reconcile", { method: "POST" }, 30000);
+    const failBody = failOpen.ok ? parseJson(failOpen.text) : { ok: false };
+    checks.push({
+      ok: Boolean(freed) && failOpen.status === 200 && failBody.ok && deepEqual(failBody.value, { data: [100, 0, 100] }),
+      label: "collector stopped (:8601 free) -> reconcile still 200 exact body (agent fail-open)",
+      detail: `status=${failOpen.status} body=${show(failOpen.text)}`,
+    });
+    checks.push({
+      ok: !/VerifyError|ClassFormatError|NoClassDefFoundError/.test(demo.log.text),
+      label: "no VerifyError/ClassFormatError after the full L2 run (fail-open injection)",
+      detail: "clean",
+    });
+  } finally {
+    await stopServer(demo);
+    await stopServer(collector);
+    const freed8080 = await pollUntil(() => s5PortFree(8080).ok, 30000, 400);
+    checks.push({
+      ok: Boolean(freed8080) && s5PortFree(8601).ok,
+      label: "S6A-C cleanup: demo + collector stopped, ports 8080/8601 released",
+      detail: `8080=${s5PortFree(8080).detail} 8601=${s5PortFree(8601).detail}`,
+    });
+  }
+
+  S6A_EVIDENCE.agent = { checks };
+  return gate(
+    "S6A-C",
+    "agent L2: controller + 3 same-nodeKey reconcileAmount spans, return 100/0/100, values 1/2/1 (2nd call 100->0 at the source line), L2 flag/no L1, controller no values, no VerifyError, headerless LOST chain legal, collector-down fail-open",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S6A-D: workbench. Ingest the S6a fixture -> graph 6 nodes/5 edges/15 ordered fields; pure
+ * helpers (workbench/src/s6/**) prove per-fixture conditionality (only L2 nodes, only the 2nd
+ * invocation changes, rows 2/1/1); dist assertions stay at the STATIC token layer (dynamic Vue
+ * attrs/interpolations are NOT dist literals - conditionality is S6A-C runtime + these helpers).
+ */
+async function checkS6D() {
+  section("S6A-D: workbench (fixture graph 6/5/15, static dist tokens, pure s6 helpers)");
+  const checks = [];
+  const repro = `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: application/x-ndjson" --data-binary @"${S6A_EVENTS_REL}" && (cd "workbench" && npm run build) && curl -s "http://127.0.0.1:8601/api/v1/sessions/${S6A_FIXTURE_SESSION}/graph?traceId=6b7c8d9e0f1a2b3c4d5e6f708192a3b4"`;
+  const eventsText = readFileSync(abs(S6A_EVENTS_REL), "utf8");
+  const eventLines = eventsText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const events = [];
+  const parseProblems = [];
+  for (const [index, line] of eventLines.entries()) {
+    const parsed = parseJson(line);
+    if (!parsed.ok) parseProblems.push(`line ${index + 1}`);
+    else events.push(parsed.value);
+  }
+  const factsParsed = parseJson(readFileSync(abs(S6A_FACTS_REL), "utf8"));
+  const facts = factsParsed.ok ? factsParsed.value : {};
+  const workbench = facts.workbenchExpectations ?? {};
+  const graphExpected = facts.apiExpectations?.graph ?? {};
+  const pre = [
+    { ok: existsSync(abs(S6A_EVENTS_REL)) && existsSync(abs(S6A_FACTS_REL)) && existsSync(abs(S6A_README_REL)), label: "fixtures/s6-l2-lines/{events.ndjson,expected-facts.json,README.md} exist", detail: S6A_FIXTURE_DIR },
+    { ok: eventLines.length === 6 && events.length === 6 && parseProblems.length === 0, label: "S6a fixture has 6 parseable NDJSON events", detail: `lines=${eventLines.length} parsed=${events.length}` },
+    { ok: factsParsed.ok && facts.stage === "S6a" && facts.eventCount === 6 && facts.workbenchExpectations?.l2BadgeText === "L2", label: "expected-facts: stage S6a, 6 events + workbench expectations", detail: `stage=${facts.stage}` },
+    { ok: existsSync(JDK21_JAVA), label: "JDK21 java.exe exists", detail: JDK21_JAVA },
+    { ok: existsSync(abs(COLLECTOR_JAR_REL)), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: listeningOn(8601).lines.length === 0, label: "port 8601 free before start", detail: listeningOn(8601).lines.join(" | ") || "no listener" },
+  ];
+  if (!pre.every((item) => item.ok)) {
+    return record("S6A-D", "S6A-D workbench (preconditions)", false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`), repro);
+  }
+  const ajv = new Ajv2020({ allErrors: true, strict: true });
+  const validate = ajv.compile(JSON.parse(readFileSync(abs(SCHEMA_REL), "utf8")));
+  const schemaProblems = events.filter((event) => !validate(event))
+    .map((event, index) => `${event.spanId ?? `#${index}`}: ${(validate.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ")}`);
+  checks.push({
+    ok: schemaProblems.length === 0,
+    label: "6/6 S6a fixture events validate against the frozen Ajv 2020-12 schema (strict)",
+    detail: schemaProblems.slice(0, 3).join(" || ") || "6/6 valid",
+  });
+
+  let collector = null;
+  let modules = null;
+  try {
+    collector = startJavaServer("collector(8601) S6A-D", JDK21_JAVA, ["-jar", abs(COLLECTOR_JAR_REL)], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(health), label: "collector 8601 /actuator/health 200", detail: health ? "UP" : "timeout" });
+    if (!health) return gate("S6A-D", "S6A-D workbench (collector unavailable)", checks, repro);
+
+    const ingest = await postNdjson("/ingest/v1/events", eventsText, `${NDJSON}; charset=utf-8`);
+    const ingestParsed = ingest.ok ? parseJson(ingest.text) : { ok: false };
+    const ingestBody = ingestParsed.ok && ingestParsed.value ? ingestParsed.value : {};
+    checks.push({
+      ok: ingest.ok && ingest.status === 202 && ingestBody.accepted === 6 && ingestBody.rejected === 0,
+      label: "ingest fixtures/s6-l2-lines/events.ndjson (session s_s6l2a) -> 202 accepted=6 rejected=0",
+      detail: `status=${ingest.status} body=${show(ingest.text)}`,
+    });
+
+    const graphRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S6A_FIXTURE_SESSION}/graph?traceId=${graphExpected.traceId}`);
+    const graphParsed = graphRes.ok ? parseJson(graphRes.text) : { ok: false };
+    const graph = graphParsed.ok && graphParsed.value ? graphParsed.value : {};
+    const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    const fixtureBySpanId = new Map(events.map((event) => [event.spanId, event]));
+    const nodeProblems = [];
+    nodes.forEach((node, index) => {
+      const keys = Object.keys(node ?? {});
+      if (keys.join(",") !== S5_GRAPH_NODE_KEYS_ORDERED.join(",")) nodeProblems.push(`node${index} keys=${keys.join(",")}`);
+      const event = fixtureBySpanId.get(node.spanId);
+      if (!event) {
+        nodeProblems.push(`node${index} unknown spanId=${node.spanId}`);
+        return;
+      }
+      if (node.parentSpanId !== event.parentSpanId || node.kind !== event.kind || node.nodeKey !== event.nodeKey ||
+          node.status !== event.status || node.startNs !== event.startNs || node.durNs !== event.durNs) {
+        nodeProblems.push(`node${index} scalars`);
+      }
+      nodeProblems.push(...graphValuesProblems(node, event, `node${index}`));
+    });
+    const serviceNodes = nodes.filter((node) => node.kind === "service");
+    checks.push({
+      ok: graphRes.ok && graphRes.status === 200 && graph.sessionId === S6A_FIXTURE_SESSION &&
+        graph.traceId === graphExpected.traceId && graph.rootEventId === graphExpected.rootEventId &&
+        graph.confidence === graphExpected.confidence &&
+        nodes.length === 6 && edges.length === 5 && nodeProblems.length === 0 &&
+        deepEqual(nodes.map((node) => node.spanId), graphExpected.nodeOrder ?? []) &&
+        deepEqual(nodes.map((node) => node.kind), graphExpected.kindOrder ?? []) &&
+        deepEqual(edges, graphExpected.edges ?? []) &&
+        serviceNodes.length === 3,
+      label: "graph: 6 nodes / 5 edges, exact node+kind order and edges, every node has the 15 ordered fields with values verbatim (null on click/fetch/controller)",
+      detail: nodeProblems.slice(0, 5).join(" || ") || `${nodes.length} nodes / ${edges.length} edges / ${serviceNodes.length} service`,
+    });
+    const valueShapes = serviceNodes.map((node) => (Array.isArray(node.values) ? node.values.length : -1));
+    const nullSpans = nodes.filter((node) => graphExpected.valuesNullSpanIds?.includes(node.spanId));
+    checks.push({
+      ok: deepEqual(valueShapes, graphExpected.valuesValueCounts ?? [1, 2, 1]) &&
+        nullSpans.length === 3 && nullSpans.every((node) => node.values === null) &&
+        deepEqual(serviceNodes.map((node) => node.spanId), graphExpected.valuesSpanIds ?? []),
+      label: "values verbatim: 1/2/1 items on the 3 service nodes; click/fetch/controller carry null (never [])",
+      detail: `counts=${valueShapes.join("/")} nulls=${nullSpans.length}`,
+    });
+    const requestsRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S6A_FIXTURE_SESSION}/requests`);
+    const requestsParsed = requestsRes.ok ? parseJson(requestsRes.text) : { ok: false };
+    const requestsBody = requestsParsed.ok && requestsParsed.value ? requestsParsed.value : {};
+    const rows = Array.isArray(requestsBody.requests) ? requestsBody.requests : [];
+    const expectedRow = facts.apiExpectations?.requests?.row ?? {};
+    checks.push({
+      ok: requestsRes.ok && requestsRes.status === 200 && requestsBody.sdkActive === true && rows.length === 1 &&
+        deepEqual(rows[0], expectedRow) && !Object.prototype.hasOwnProperty.call(rows[0] ?? {}, "values"),
+      label: "requests: 1 EXACT row (6 spans, fetchCount=1, backendSpanCount=4, #btn-reconcile), no values key",
+      detail: show(rows[0]),
+    });
+
+    /* ---------------- dist: STATIC tokens only ---------------- */
+    const wb = s5EnsureWorkbench();
+    const wbDist = distTextFiles(WORKBENCH_DIST_REL);
+    const wbText = wbDist.map((file) => file.text).join("\n");
+    const missingS6 = S6A_WORKBENCH_TOKENS.filter((token) => !wbText.includes(token));
+    checks.push({
+      ok: wb.build.code === 0 && wbDist.length > 0 && missingS6.length === 0,
+      label: "workbench dist STATIC tokens: s6-l2-badge/s6-l2-note/data-value-kind/data-invocation-diff/行号 /100 → 0/值变化 + canonical banner/L2 note/×N note (dynamic Vue attrs are NOT asserted as dist literals)",
+      detail: missingS6.length ? `missing=${missingS6.join(",")}` : `${S6A_WORKBENCH_TOKENS.length}/${S6A_WORKBENCH_TOKENS.length} tokens`,
+    });
+    const retained = [
+      ...((workbench.s5SelectorsRetained ?? []).map((token) => token.replace(/^#/, ""))),
+      ...(workbench.staticDistTokens ?? []).filter((token) => ["s3-panel", "s4-detail", "s4-group-badge"].includes(token)),
+    ];
+    const missingRetained = [...new Set(retained)].filter((token) => !wbText.includes(token));
+    checks.push({
+      ok: missingRetained.length === 0 && wbText.includes("已确认：本次点击因果链内没有网络请求") && wbText.includes("逐次调用"),
+      label: "S5 selectors (#s5-values/#s5-l1-badge/#s5-source/#s5-values-empty) and S3/S4 panels/×N detail stay in dist",
+      detail: missingRetained.join(",") || "retained",
+    });
+    const claimTargets = [];
+    const addClaimFiles = (rel, strip) => {
+      if (!existsSync(abs(rel))) return;
+      const entries = rel === WORKBENCH_DIST_REL || rel === DEMO_DIST_REL
+        ? distTextFiles(rel).map((file) => ({ rel: file.rel, text: file.text }))
+        : walk(abs(rel)).map((file) => ({ rel: relOf(file), text: readFileSync(file, "utf8") }));
+      for (const entry of entries) claimTargets.push({ rel: entry.rel, text: strip ? stripComments(entry.text) : entry.text });
+    };
+    addClaimFiles(WORKBENCH_DIST_REL, false);
+    addClaimFiles("workbench/src", true);
+    addClaimFiles(`${S5_DEMO_FRONTEND_REL}/src`, true);
+    addClaimFiles(DEMO_DIST_REL, false);
+    const claimHits = [];
+    const forbiddenClaims = [
+      ...(workbench.staleTextsMustBeAbsentFromSrcAndDist ?? []),
+      ...(workbench.forbiddenTexts ?? []),
+      "异步上下文已采集", "无调试信息已处理", "循环折叠已实现", "L2 开销 ≤40%", "全部方法 L2",
+    ];
+    for (const file of claimTargets) {
+      for (const token of [...new Set(forbiddenClaims)]) {
+        if (file.text.includes(token)) claimHits.push(`${file.rel} -> ${token}`);
+      }
+    }
+    checks.push({
+      ok: claimHits.length === 0,
+      label: "no stale S5 absolute copy and no S6b claim (async/no-debug/loop-fold/overhead/all-methods-L2) in workbench/demo src+dist",
+      detail: claimHits.slice(0, 6).join(" || ") || "0 stale/overclaim hits",
+    });
+
+    /* ---------------- pure helpers: conditionality on the fixture ---------------- */
+    modules = await loadS6L2Module();
+    const exportNames = ["isL2Node", "localValueRows", "isValueChange", "invocationDiffNodes"];
+    checks.push({
+      ok: exportNames.every((name) => typeof modules[name] === "function") && modules.L2_BADGE_TEXT === "L2" && modules.VALUE_CHANGE_TEXT === "值变化",
+      label: "workbench/src/s6/l2.ts bundles under esbuild and exports isL2Node/localValueRows/isValueChange/invocationDiffNodes",
+      detail: exportNames.map((name) => `${name}=${typeof modules[name]}`).join(","),
+    });
+    const nonService = nodes.filter((node) => node.kind !== "service");
+    const l2Flags = serviceNodes.map((node) => modules.isL2Node(node));
+    const nonL2 = nonService.map((node) => modules.isL2Node(node));
+    checks.push({
+      ok: l2Flags.every(Boolean) && nonL2.every((value) => value === false) && nonService.length === 3,
+      label: "isL2Node is true for the 3 L2 service nodes and false for click/fetch/controller (flag-only, no nodeKey hard-coding)",
+      detail: `service=${l2Flags.join(",")} others=${nonL2.join(",")}`,
+    });
+    const rowCounts = serviceNodes.map((node) => modules.localValueRows(node).length);
+    const diffMatrix = serviceNodes.map((node) => modules.localValueRows(node).map((value) => modules.isValueChange(value)));
+    const diffNodeIds = modules.invocationDiffNodes(serviceNodes).map((node) => node.spanId);
+    const secondRow = modules.localValueRows(serviceNodes[1] ?? { values: [] })[1] ?? null;
+    const expectedSecondRow = workbench.pureFunctionExpectations?.secondLocalRow ?? {};
+    checks.push({
+      ok: deepEqual(rowCounts, [1, 2, 1]) &&
+        deepEqual(diffMatrix, [[false], [false, true], [false]]) &&
+        deepEqual(diffNodeIds, [graphExpected.valuesSpanIds?.[1]]) &&
+        secondRow?.line === expectedSecondRow.line && secondRow?.from === expectedSecondRow.from && secondRow?.to === expectedSecondRow.to,
+      label: `fixture conditionality: rows 2/1/1; only the 2nd invocation's 2nd row is a value change (from=100 -> 0 at fixture line ${expectedSecondRow.line}); first observation from=null is not; invocationDiffNodes = 2nd span only`,
+      detail: `rows=${rowCounts.join("/")} diff=${JSON.stringify(diffMatrix)} diffNodes=${diffNodeIds.join(",")} second=${show(secondRow)}`,
+    });
+    const strippedS6 = stripComments(readFileSync(abs("workbench/src/s6/l2.ts"), "utf8"));
+    const isL2Fn = strippedS6.match(/export function isL2Node[\s\S]*?\n}/)?.[0] ?? "";
+    checks.push({
+      ok: /flags\.includes\(L2_FLAG\)/.test(isL2Fn) && !/nodeKey|reconcileAmount|L2DemoService/.test(isL2Fn),
+      label: "s6 helper source proves the L2 badge rule is flag-based (isL2Node = flags.includes(L2_FLAG)) and never hard-codes the method/nodeKey",
+      detail: isL2Fn.replace(/\s+/g, " ").slice(0, 160) || "isL2Node not found",
+    });
+
+    S6A_EVIDENCE.fixture = { events: events.length, nodes: nodes.length, edges: edges.length, values: valueShapes };
+    S6A_EVIDENCE.workbench = { tokens: S6A_WORKBENCH_TOKENS.length, rowCounts, diffNodeIds };
+  } catch (error) {
+    checks.push({ ok: false, label: "S6A-D unexpected error", detail: String(error && error.message ? error.message : error) });
+  } finally {
+    await stopServer(collector);
+    const freed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
+    checks.push({ ok: Boolean(freed), label: "S6A-D cleanup: collector stopped, port 8601 released", detail: `8601=${listeningOn(8601).lines.length}` });
+  }
+
+  return gate(
+    "S6A-D",
+    "workbench: fixture graph 6/5/15 + values verbatim, static dist tokens + canonical copy + retained S3/S4/S5 selectors, pure s6 helpers prove only-L2/only-2nd-diff/rows 2-1-1; dist is static-token-only by design",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S6A-E: regression/scope/cleanup. S0–S5 anchors (full run), S6A_G1_FREEZE + S5 18-entry freeze
+ * at S6a hashes, S0–S5 fixture/schema/transport/status bytes, case A/B/L1/replay unchanged, no
+ * S6b capability/claims, no secrets/CDN/mirrors, ports/processes/git whitelist, cleanup.
+ */
+function checkS6E() {
+  section("S6A-E: regression/scope/cleanup (S6a partial; S0–S5 anchors, freeze at S6a hashes, no S6b, ports/git)");
+  const checks = [];
+  const repro = REPRO_S6;
+
+  const reviewText = readFileSync(abs(S6_PLAN_REVIEW_REL), "utf8");
+  checks.push({
+    ok: /最终结论：G1: PASS/.test(reviewText) && /G1: PASS/.test(reviewText),
+    label: "S6a plan-review records G1: PASS (freeze is the authority)",
+    detail: "plan-review-s6a.md",
+  });
+  const s6Drift = [];
+  for (const [rel, expected] of Object.entries(S6A_G1_FREEZE)) {
+    const actual = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
+    if (actual !== expected) s6Drift.push(`${rel} ${actual.slice(0, 12)}…!=${expected.slice(0, 12)}…`);
+  }
+  checks.push({
+    ok: Object.keys(S6A_G1_FREEZE).length === 8 && s6Drift.length === 0,
+    label: "S6A_G1_FREEZE zero drift: api/event-model + S6a fixture 3 files + s6a-plan/dispatch/plan-review (8 files)",
+    detail: s6Drift.length ? s6Drift.slice(0, 4).join(" || ") : "8/8 hashes match",
+  });
+  const supersededRels = ["docs/contracts/api.v1.md", "docs/contracts/event-model.v1.md"];
+  const s5Drift = [];
+  for (const [rel, s5Hash] of Object.entries(S5_G1_FREEZE)) {
+    const expected = LATEST_G1_FREEZE[rel] ?? s5Hash;
+    const actual = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
+    if (actual !== expected) s5Drift.push(rel);
+  }
+  const keptAtS5 = Object.entries(S5_G1_FREEZE)
+    .filter(([rel]) => !supersededRels.includes(rel))
+    .every(([rel, hash]) => existsSync(abs(rel)) && sha256File(abs(rel)) === hash);
+  checks.push({
+    ok: Object.keys(S5_G1_FREEZE).length === 18 && s5Drift.length === 0 && keptAtS5 &&
+      supersededRels.every((rel) => LATEST_G1_FREEZE[rel] === S6A_G1_FREEZE[rel]),
+    label: "S5 G1 freeze 18/18 (16 files at their S5 bytes; api/event-model superseded by the S6a hashes) + schema/transport/status unchanged",
+    detail: s5Drift.length ? `drift=${s5Drift.join(",")}` : "18/18 match (2 superseded)",
+  });
+
+  const fixtureBaseline = new Map();
+  const fixtureConflicts = [];
+  const collectFixtures = (entries) => {
+    for (const entry of entries) {
+      if (!entry.rel.startsWith("fixtures/")) continue;
+      const expected = LATEST_G1_FREEZE[entry.rel] ?? entry.hash;
+      if (fixtureBaseline.has(entry.rel) && fixtureBaseline.get(entry.rel) !== expected) fixtureConflicts.push(entry.rel);
+      fixtureBaseline.set(entry.rel, expected);
+    }
+  };
+  collectFixtures(s3FreezeSections().all);
+  collectFixtures(s2FreezeSections().all);
+  collectFixtures(Object.entries(S5_G1_FREEZE).map(([rel, hash]) => ({ rel, hash })));
+  const fixtureDrift = [];
+  for (const [rel, expected] of fixtureBaseline) {
+    const now = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
+    if (now !== expected) fixtureDrift.push(rel);
+  }
+  const s6FixtureFiles = walk(abs(S6A_FIXTURE_DIR)).map(relOf).sort();
+  checks.push({
+    ok: fixtureBaseline.size >= 13 && fixtureConflicts.length === 0 && fixtureDrift.length === 0 &&
+      deepEqual(s6FixtureFiles, [S6A_EVENTS_REL, S6A_FACTS_REL, S6A_README_REL].sort()),
+    label: "S0–S5 fixture bytes unchanged (never folded into the S6a baseline); fixtures/s6-l2-lines contains exactly the 3 new files",
+    detail: fixtureDrift.length || fixtureConflicts.length
+      ? `drift=${fixtureDrift.join(",")} conflicts=${fixtureConflicts.join(",")}`
+      : `${fixtureBaseline.size} S0–S5 fixtures match; S6a=3 files`,
+  });
+
+  if (S6_ONLY) {
+    const selected = S6_SELECTED ?? new Set(S6A_IMPLEMENTED);
+    const s6aBad = ["A", "B", "C", "D"].filter((letter) => selected.has(letter) && resultById(`S6A-${letter}`)?.ok !== true);
+    checks.push({
+      ok: s6aBad.length === 0,
+      label: "requested S6a gates (A–D) already PASS before S6A-E closure (S0–S5 anchors are deferred in --s6a mode by design, never a fake PASS)",
+      detail: s6aBad.length ? `failed=${s6aBad.join(",")}` : `selected=${[...selected].join(",")}; run the full suite for the S0–S5 anchor set`,
+    });
+  } else {
+    const prior = RESULTS.filter((item) => !String(item.id).startsWith("S6A-"));
+    const priorFailed = prior.filter((item) => !item.ok);
+    const anchors = [...S4_H_ANCHORS, "S5-BUILD", ...S5_IMPLEMENTED.map((letter) => `S5-${letter}`)];
+    const missingAnchors = anchors.filter((id) => resultById(id)?.ok !== true);
+    const s6aBad = ["A", "B", "C", "D"].filter((letter) => resultById(`S6A-${letter}`)?.ok !== true);
+    const regressionIds = ["S2-3", "S3-3", "S3-4", "S3-5", "S3-7", "S3-9", "S5-B", "S5-C"];
+    const regressionBad = regressionIds.filter((id) => resultById(id)?.ok !== true);
+    checks.push({
+      ok: prior.length >= 50 && priorFailed.length === 0 && missingAnchors.length === 0 &&
+        s6aBad.length === 0 && regressionBad.length === 0,
+      label: "full run: every S0–S5 gate PASS, 39 S4-H anchors + S5-BUILD/A–H present, S6A-A..D PASS; case A/B, L1 5 values, EXACT join, replay 0-write, S2 LOST 4-span unchanged",
+      detail: `prior=${prior.length} priorFailed=${priorFailed.map((item) => item.id).join(",") || "none"} anchors=${missingAnchors.join(",") || "all"} s6a=${s6aBad.join(",") || "all"} regression=${regressionBad.join(",") || "all"}`,
+    });
+  }
+
+  /* -------- S6b boundary: no async/no-debug/loop-fold/budget/perf capability -------- */
+  const scopeTrees = [
+    "agent/src", "server/collector/src", "server/launcher/src", "frontend/sdk/src",
+    "frontend/build-plugin", "workbench/src", `${S5_DEMO_FRONTEND_REL}/src`, `${S6A_DEMO_BACKEND_REL}/src`,
+  ];
+  const scopeFiles = scopeTrees.flatMap((rel) => dirTextFiles(rel))
+    .map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
+  const s6bHits = [];
+  for (const file of scopeFiles) {
+    if (/CompletableFuture|@Async\b|AsyncContext|async_hooks|continuationSpan|三倍重放|replayTimes\s*=\s*3/.test(file.text)) {
+      s6bHits.push(`${file.rel} [async-continuation]`);
+    }
+    if (file.rel.startsWith("agent/") && /NOT_COLLECTED_NO_DEBUG_INFO|NO_DEBUG_INFO|nodebug:/.test(file.text)) {
+      s6bHits.push(`${file.rel} [no-debug-event]`);
+    }
+  }
+  const claimTexts = [
+    "异步上下文已采集", "无调试信息已处理", "循环折叠已实现", "L2 开销 ≤40%", "全部方法 L2", "L2 已采集",
+  ];
+  for (const tree of [WORKBENCH_DIST_REL, `${S5_DEMO_FRONTEND_REL}/src`, DEMO_DIST_REL]) {
+    const files = tree === WORKBENCH_DIST_REL || tree === DEMO_DIST_REL
+      ? distTextFiles(tree)
+      : walk(abs(tree)).map((file) => ({ rel: relOf(file), text: stripComments(readFileSync(file, "utf8")) }));
+    for (const file of files) {
+      for (const text of claimTexts) {
+        if (file.text.includes(text)) s6bHits.push(`${file.rel} [claim:${text}]`);
+      }
+    }
+  }
+  if (existsSync(abs("tools/perf/l2-overhead.mjs"))) s6bHits.push("tools/perf/l2-overhead.mjs [L2 overhead gate]");
+  checks.push({
+    ok: s6bHits.length === 0,
+    label: "no S6b capability or claim: no async continuation, no NOT_COLLECTED_NO_DEBUG_INFO from the agent, no loop folding/sampling budget, no L2 overhead script/40% claim",
+    detail: s6bHits.slice(0, 6).join(" || ") || `${scopeFiles.length} product files clean`,
+  });
+
+  /* -------- no secrets/CDN/mirrors; fixture hygiene -------- */
+  const secretPatterns = [
+    /(?:password|passwd|pwd)\s*[:=]\s*["'][^"'\n]{3,}["']/gi,
+    /(?:api[_-]?key|apikey|access[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token)\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{8,}/gi,
+    /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    /\bAKIA[0-9A-Z]{16}\b/g,
+    /\bghp_[A-Za-z0-9]{20,}/g,
+  ];
+  const placeholderAllow = /placeholder|changeme|change_me|example|sample|dummy|redacted|xxx|<[^>]+>|\$\{|your_|demo|test|s3cr3t/i;
+  const secretHits = [];
+  for (const file of scopeFiles) {
+    if (/package-lock\.json/.test(file.rel)) continue;
+    for (const pattern of secretPatterns) {
+      pattern.lastIndex = 0;
+      for (const match of file.text.matchAll(pattern)) {
+        if (!placeholderAllow.test(match[0])) secretHits.push(`${file.rel} ${match[0].slice(0, 48)}`);
+      }
+    }
+  }
+  const cdnHosts = ["unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com", "npmmirror.com", "mirrors.aliyun.com", "registry.npm.taobao.org"];
+  const cdnHits = [];
+  for (const file of [...scopeFiles, ...distTextFiles(WORKBENCH_DIST_REL), ...distTextFiles(DEMO_DIST_REL).filter((entry) => !entry.rel.endsWith(".map"))]) {
+    const lower = file.text.toLowerCase();
+    for (const host of cdnHosts) if (lower.includes(host)) cdnHits.push(`${file.rel} -> ${host}`);
+  }
+  const mirrorUrls = [];
+  for (const rel of ["frontend/sdk/package-lock.json", "workbench/package-lock.json", `${S5_DEMO_FRONTEND_REL}/package-lock.json`]) {
+    if (!existsSync(abs(rel))) continue;
+    for (const match of readFileSync(abs(rel), "utf8").matchAll(/"resolved":\s*"([^"]+)"/g)) {
+      if (/^https?:/i.test(match[1]) && !match[1].startsWith("https://registry.npmjs.org/")) mirrorUrls.push(`${rel} -> ${match[1]}`);
+    }
+  }
+  const fixtureText = readFileSync(abs(S6A_EVENTS_REL), "utf8");
+  checks.push({
+    ok: secretHits.length === 0 && cdnHits.length === 0 && mirrorUrls.length === 0 &&
+      !fixtureText.includes(S5_DEMO_SECRET) && !/[\w.+-]+@[\w-]+\.[\w.]+/.test(fixtureText) && !/\b1[3-9]\d{9}\b/.test(fixtureText),
+    label: "no real secrets/PII/CDN/mirrors: S6a fixture has no s3cr3t/email/phone, product sources avoid secret patterns, lockfiles resolve only from registry.npmjs.org",
+    detail: `secrets=${secretHits.slice(0, 2).join(",") || "none"} cdn=${cdnHits.slice(0, 2).join(",") || "none"} mirrors=${mirrorUrls.slice(0, 2).join(",") || "none"}`,
+  });
+
+  /* -------- cleanup: ports/processes/git/product stability -------- */
+  const portProblems = [];
+  for (const port of S1_PORTS) {
+    const state = listeningOn(port);
+    if (!state.supported || state.lines.length > 0) portProblems.push(`${port}:${state.lines.join("|") || state.error}`);
+  }
+  checks.push({
+    ok: portProblems.length === 0,
+    label: `ports ${S1_PORTS.join("/")} not LISTENING after all S6a gates (demo/collector/Vite/preview/stub stopped)`,
+    detail: portProblems.join(" ; ") || "all free",
+  });
+  const nowJava = javaPids();
+  const javaLeft = nowJava.filter((pid) => !BASELINE.javaPids.includes(pid));
+  const nowNode = nodePids();
+  const nodeLeft = nowNode.filter((pid) => !BASELINE.nodePids.includes(pid) && pid !== process.pid);
+  const descendants = descendantSpawnedProcesses(process.pid);
+  const descendantHits = descendants.items.map((item) => `${item.name}:${item.pid}`);
+  checks.push({
+    ok: descendants.supported ? descendantHits.length === 0 : javaLeft.length === 0 && nodeLeft.length === 0,
+    label: "no java/node process spawned by this run is still alive (no orphan demo/collector/build)",
+    detail: descendants.supported
+      ? `descendants=${descendantHits.join(",") || "none"} (pid diff java=${javaLeft.join(",") || "none"} node=${nodeLeft.join(",") || "none"})`
+      : `powershell unavailable (${descendants.error}); java=${javaLeft.join(",") || "none"} node=${nodeLeft.join(",") || "none"}`,
+  });
+  const status = gitStatusLines();
+  const staged = status.lines.filter((line) => (line[0] ?? " ") !== " " && (line[0] ?? " ") !== "?");
+  const statusNow = status.lines.slice().sort().join("\n");
+  const headNow = gitHeadHash();
+  checks.push({
+    ok: status.ok && staged.length === 0 && statusNow === BASELINE.gitStatus && headNow === BASELINE.gitHead,
+    label: "git index untouched (no staged entries), HEAD/status identical to the run baseline (tester ran no git write)",
+    detail: `staged=${staged.length} statusUnchanged=${statusNow === BASELINE.gitStatus} head=${headNow === BASELINE.gitHead ? "unchanged" : `${BASELINE.gitHead} -> ${headNow}`}`,
+  });
+  const snapshotNow = sourceSnapshot();
+  const touched = [];
+  for (const [rel, hash] of Object.entries(SNAPSHOT)) {
+    if (snapshotNow[rel] !== hash) touched.push(rel);
+  }
+  const added = Object.keys(snapshotNow).filter((rel) => !(rel in SNAPSHOT));
+  checks.push({
+    ok: touched.length === 0 && added.length === 0,
+    label: "no product file modified or added by this verify run (only build outputs/temp logs changed)",
+    detail: touched.length || added.length ? `modified=${touched.slice(0, 5).join(",")} added=${added.slice(0, 5).join(",")}` : `${Object.keys(SNAPSHOT).length} product files stable`,
+  });
+
+  const allowedExact = new Set(["pom.xml", "README.md", ".gitattributes", ...S5_DEMO_BACKEND_ALLOWED]);
+  const allowedPrefixes = [
+    "agent/", "server/collector/", "server/launcher/", "frontend/sdk/", "frontend/build-plugin/",
+    "demo/buggy-shop-boot-vue/frontend/", "workbench/", "docs/contracts/", "docs/guides/",
+    "docs/plans/stages/S5/", "docs/plans/stages/S6/", "fixtures/s5-l1-values/", "fixtures/s6-l2-lines/",
+    "tools/verify/", "tools/perf/",
+  ];
+  const forbiddenPrefixes = ["schema/", "fixtures/case-a-zero-rows/", "fixtures/s1-walking-skeleton/", "fixtures/s2-zero-row-chain/", "fixtures/s3-frontend-facts/", "fixtures/s4-details/", "docs/plans/stages/S0/"];
+  const forbiddenExact = ["docs/contracts/transport.v1.md", "docs/contracts/status-semantics.md", "docs/plans/00-master-plan.md", "docs/plans/SOLO-PLAN.md"];
+  const backendAllowed = new Set(S5_DEMO_BACKEND_ALLOWED);
+  const unexpected = [];
+  const forbidden = [];
+  for (const line of status.lines) {
+    const rel = line.slice(3).trim().replace(/^"|"$/g, "").split("\\").join("/");
+    const allowed = allowedExact.has(rel) || allowedPrefixes.some((entry) => rel.startsWith(entry));
+    if (!allowed) unexpected.push(line);
+    if ((forbiddenPrefixes.some((entry) => rel.startsWith(entry)) && !backendAllowed.has(rel)) || forbiddenExact.includes(rel)) forbidden.push(line);
+  }
+  checks.push({
+    ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
+    label: "S6a change set within the whitelist (agent/5 demo backend L2 files/workbench/S6 docs+fixtures/tools); schema/S0–S4 fixtures/transport/status untouched",
+    detail: unexpected.length || forbidden.length
+      ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
+      : `${status.lines.length} entries within scope`,
+  });
+  const tagList = runExe("git", ["tag", "--list"], { timeout: 60000 });
+  checks.push({
+    ok: tagList.code === 0 && !/(^|\n)\s*s6a?\s*(\n|$)/i.test(tagList.stdout ?? ""),
+    label: "no s6/s6a tag exists (S6 stays partial; S6b + final S6 acceptance come later)",
+    detail: (tagList.stdout ?? "").trim().split(/\r?\n/).filter(Boolean).slice(0, 5).join(",") || "no tags",
+  });
+
+  return gate(
+    "S6A-E",
+    "regression/scope/cleanup: S0–S5 anchors PASS (full run), S6A_G1_FREEZE 8/8 + S5 freeze 18/18 at S6a hashes, S0–S5 fixture/schema/transport/status bytes, case A/B/L1/replay unchanged, no S6b capability/claims, no secrets/CDN/mirrors, ports/processes/git clean",
+    checks,
+    repro,
+  );
+}
+
+/** Run the S6a gates requested by --s6a (or every implemented gate in a normal full run). */
+async function checkS6() {
+  const selected = S6_SELECTED ?? new Set(S6A_IMPLEMENTED);
+  const unimplemented = [...selected].filter((letter) => !S6A_IMPLEMENTED.includes(letter));
+  for (const letter of unimplemented) {
+    record(
+      `S6A-${letter}`,
+      `S6A-${letter} is not implemented (implemented: ${S6A_IMPLEMENTED.join(",")})`,
+      false,
+      [`requested --s6a=${[...selected].join(",")}; implemented=${S6A_IMPLEMENTED.join(",")}`],
+      REPRO_S6,
+    );
+  }
+  if (["A", "B", "C", "D"].some((letter) => selected.has(letter))) {
+    s6aEnsureJavaBuilds();
+  }
+  if (selected.has("A")) await checkS6A();
+  if (selected.has("B")) await checkS6B();
+  if (selected.has("C")) await checkS6C(s5CompileValidator());
+  if (selected.has("D")) await checkS6D();
+  if (selected.has("E")) checkS6E();
+}
+
+/* ------------------------------------------------------------------ */
 /* source snapshot (product files only)                                */
 /* ------------------------------------------------------------------ */
 
@@ -10696,12 +11900,14 @@ function sourceSnapshot() {
 async function main() {
   const startedAt = new Date();
   console.log("==============================================");
-  if (S5_ONLY) {
+  if (S6_ONLY) {
+    console.log(`TraceBoard S6a verifier (S6a-only: ${[...S6_SELECTED].join(",") || "none"}; S6 stays partial)`);
+  } else if (S5_ONLY) {
     console.log(`TraceBoard S5 verifier (S5-only: ${[...S5_SELECTED].join(",") || "none"})`);
   } else if (S4_ONLY) {
     console.log(`TraceBoard S4 verifier (S4-only: ${[...S4_SELECTED].join(",") || "none"})`);
   } else {
-    console.log("TraceBoard S0 + S1 + S2 (re-migrated) + S3 + S4 + S5 (part 2) verifier");
+    console.log("TraceBoard S0 + S1 + S2 (re-migrated) + S3 + S4 + S5 + S6a (partial) verifier");
   }
   console.log(`repo: ${REPO}`);
   console.log(`started: ${startedAt.toISOString()}`);
@@ -10734,7 +11940,11 @@ async function main() {
     null,
   );
 
-  if (S5_ONLY) {
+  if (S6_ONLY) {
+    console.log("");
+    console.log(`mode: S6a-only (--s6a=${[...S6_SELECTED].join(",") || "none"}); S0–S5 gates are skipped by design.`);
+    await checkS6();
+  } else if (S5_ONLY) {
     console.log("");
     console.log(`mode: S5-only (--s5=${[...S5_SELECTED].join(",") || "none"}); S0–S4 gates are skipped by design.`);
     await checkS5();
@@ -10780,6 +11990,10 @@ async function main() {
 
     // S5-BUILD + S5-A..H (tester part 2) run after S4 so S5-G/H can read the earlier RESULTS.
     await checkS5();
+
+    // S6a (L2 line-level locals + per-invocation ×3) runs last; S6A-E reads the whole run.
+    // S6 remains PARTIAL: no s6/s6a tag and no S6b here.
+    await checkS6();
   }
 
   section("SUMMARY");
@@ -10791,15 +12005,17 @@ async function main() {
     for (const item of failed) console.log(`  - ${item.id}: ${item.title}`);
   }
   const verdict = failed.length === 0 ? "PASS" : "FAIL";
-  console.log(`${S5_ONLY ? "S5 TEST" : S4_ONLY ? "S4 TEST" : "S5 TEST (full S0–S5)"}: ${verdict}`);
+  console.log(`${S6_ONLY ? "S6a TEST (partial)" : S5_ONLY ? "S5 TEST" : S4_ONLY ? "S4 TEST" : "S6a TEST (full S0–S6a; S6 partial)"}: ${verdict}`);
 
   if (process.argv.includes("--json")) {
     console.log(
       `VERIFY_JSON:${JSON.stringify({
         repo: REPO,
-        mode: S5_ONLY ? "s5-only" : S4_ONLY ? "s4-only" : "full",
+        mode: S6_ONLY ? "s6a-only" : S5_ONLY ? "s5-only" : S4_ONLY ? "s4-only" : "full",
         s4Selected: S4_ONLY ? [...S4_SELECTED] : S4_IMPLEMENTED.slice(),
         s5Selected: S5_ONLY ? [...S5_SELECTED] : S5_IMPLEMENTED.slice(),
+        s6Selected: S6_ONLY ? [...S6_SELECTED] : S6A_IMPLEMENTED.slice(),
+        stage: "S6a",
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
         env,
