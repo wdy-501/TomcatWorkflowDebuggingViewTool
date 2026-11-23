@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:traceboard:schema:event:v1",
+  "title": "TraceBoard event v1",
+  "description": "TraceBoard append-only span event (schema v1, S0 draft frozen at G1). One JSON object per JSONL line. No external schema references: validation is fully offline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "type",
+    "sessionId",
+    "traceId",
+    "spanId",
+    "parentSpanId",
+    "rootEventId",
+    "kind",
+    "nodeKey",
+    "startNs",
+    "durNs",
+    "status",
+    "confidence",
+    "flags"
+  ],
+  "properties": {
+    "schema": {
+      "const": "traceboard.event.v1",
+      "description": "Event schema identifier. Any other value is a different contract."
+    },
+    "type": {
+      "const": "span",
+      "description": "S0 has exactly one event type. New types require a contract change."
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^s_[A-Za-z0-9_-]+$",
+      "description": "TraceBoard session partition id."
+    },
+    "traceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "W3C trace id, lowercase hex, 32 chars."
+    },
+    "spanId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "Span id, lowercase hex, 16 chars, unique within a session."
+    },
+    "parentSpanId": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "Parent span id, or null for the root span of a trace/operation."
+    },
+    "rootEventId": {
+      "type": "string",
+      "pattern": "^click_[A-Za-z0-9_-]{8,}$",
+      "description": "Frontend click root id (clickId). Backend spans inherit it."
+    },
+    "kind": {
+      "enum": [
+        "ui_event",
+        "js_method",
+        "fetch",
+        "controller",
+        "service",
+        "mapper",
+        "sql",
+        "jdbc",
+        "async",
+        "callback",
+        "render"
+      ],
+      "description": "Node kind; matches master plan 13.4."
+    },
+    "nodeKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "Stable node key, e.g. com.example.OrderServiceImpl#updateStatus or POST /api/orders/1/cancel."
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional source location. file/line may be null when unavailable.",
+      "properties": {
+        "file": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "line": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "Optional thread identity at span start.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "startNs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic nanoseconds since the session start."
+    },
+    "durNs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Span duration in nanoseconds."
+    },
+    "status": {
+      "enum": [
+        "OK",
+        "RETURNED_FALSE",
+        "THREW",
+        "NOT_COLLECTED_POLICY",
+        "NOT_COLLECTED_LOST",
+        "NOT_COLLECTED_NO_DEBUG_INFO",
+        "TRUNCATED",
+        "UNKNOWN"
+      ],
+      "description": "Event status projection (8 values). REDACTED is a value-level marker and LOST is a confidence value; see docs/contracts/status-semantics.md."
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "Required when status is NOT_COLLECTED_*: short code plus detail, e.g. policy:third_party_package."
+    },
+    "return": {
+      "description": "Optional return value. May be null (void) or {type, value}.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "value": {}
+          }
+        }
+      ]
+    },
+    "values": {
+      "type": "array",
+      "maxItems": 512,
+      "description": "Optional value-level facts. Items carry redacted/truncated markers.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "enum": ["local", "field", "param", "return"]
+          },
+          "line": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "from": {},
+          "to": {},
+          "truncated": {
+            "type": "boolean"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "invocation": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "sideEffects": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "Optional data side effects. v1 supports SQL only.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "sqlId", "rowsAffected", "transaction"],
+        "properties": {
+          "type": {
+            "const": "sql"
+          },
+          "sqlId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "rowsAffected": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "transaction": {
+            "enum": ["COMMITTED", "ROLLED_BACK", "UNKNOWN"]
+          }
+        }
+      }
+    },
+    "confidence": {
+      "enum": ["EXACT", "INFERRED", "LOST", "MANUAL"],
+      "description": "Correlation confidence per master plan 8.3. LOST lives here, not in status."
+    },
+    "flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9_.:=+-]+$"
+      },
+      "description": "Advisory flags, e.g. DROP_COUNT=0, SAMPLED, L2. Flags never change status."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "pattern": "^NOT_COLLECTED_"
+          }
+        }
+      },
+      "then": {
+        "required": ["reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
+}

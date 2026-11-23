@@ -1,0 +1,16 @@
+{
+  "name": "traceboard-s0-verify",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "TraceBoard S0 independent verifier: schema/fixture, expected facts, negative cases, causal intervals, builds, agent bytecode, runtime smoke, artifacts/parity, frozen drift, hygiene",
+  "scripts": {
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.traceboard</groupId>
+    <artifactId>traceboard</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>traceboard-agent</artifactId>
+  <packaging>jar</packaging>
+
+  <name>TraceBoard Agent</name>
+  <description>S0 noop -javaagent skeleton (no instrumentation)</description>
+
+  <properties>
+    <!-- S0 decision: agent bytecode must stay Java 8 (class file major version 52). -->
+    <maven.compiler.release>8</maven.compiler.release>
+  </properties>
+
+  <!-- Deliberately zero dependencies: no ASM, no Byte Buddy, no attach API. -->
+  <dependencies/>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <Premain-Class>io.traceboard.agent.TraceAgent</Premain-Class>
+              <Implementation-Title>TraceBoard Agent</Implementation-Title>
+              <Implementation-Version>${project.version}</Implementation-Version>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

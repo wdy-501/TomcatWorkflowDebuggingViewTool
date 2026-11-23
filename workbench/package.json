@@ -1,0 +1,25 @@
+{
+  "name": "traceboard-workbench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "TraceBoard workbench shell (S0: AppShell + fixture facts only)",
+  "scripts": {
+    "sync:fixtures": "node scripts/sync-fixtures.mjs",
+    "predev": "node scripts/sync-fixtures.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/sync-fixtures.mjs",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "pinia": "^2.3.1",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.7.3",
+    "vite": "^6.1.0",
+    "vue-tsc": "^2.2.0"
+  }
+}

@@ -1,0 +1,16 @@
+server:
+  port: 8601
+  address: 127.0.0.1
+
+spring:
+  application:
+    name: traceboard-collector
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

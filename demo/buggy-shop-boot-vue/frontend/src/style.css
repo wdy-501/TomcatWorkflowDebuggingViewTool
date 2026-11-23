@@ -1,0 +1,137 @@
+/* BuggyShop demo frontend - S0 local styling only (no external fonts/assets). */
+:root {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --border: #d8dee6;
+  --text: #1f2430;
+  --muted: #6b7484;
+  --accent: #2f6fdb;
+  --ok: #1f8f4e;
+  --err: #c62828;
+  --mono: "Consolas", "Menlo", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.page {
+  min-width: 760px;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.header h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 18px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 14px 18px 18px;
+}
+
+.card h2 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.order-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.order-table th,
+.order-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.order-table th {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.empty {
+  color: var(--muted);
+  margin: 4px 0;
+}
+
+.actions {
+  margin-top: 14px;
+}
+
+#btn-cancel {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 7px 18px;
+}
+
+#btn-cancel:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+#btn-cancel:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+#raw-json {
+  background: #f7f8fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  margin: 0;
+  min-height: 48px;
+  overflow-x: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.error {
+  color: var(--err);
+  font-size: 13px;
+  margin: 10px 0 0;
+}
+
+.toast {
+  background: #e8f6ee;
+  border: 1px solid #b7e2c8;
+  border-radius: 6px;
+  color: var(--ok);
+  display: inline-block;
+  font-size: 13px;
+  margin: 12px 0 0;
+  padding: 6px 14px;
+}
