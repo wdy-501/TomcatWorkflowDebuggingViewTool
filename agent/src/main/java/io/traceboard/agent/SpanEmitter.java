@@ -13,7 +13,9 @@ import java.util.Locale;
  * flag {@code S3_EXACT_LINK}, no {@code LOST_BACKEND}); without headers the S2 isolated backend root
  * is emitted verbatim ({@code parentSpanId=null}, {@code confidence=LOST}, {@code rootEventId=click_lost_<spanId>},
  * flags {@code S2_ZERO_ROW_CHAIN} + {@code LOST_BACKEND}). Children inherit trace/root/confidence.
- * No secrets, no argument values, no exception payload, no {@code values[]}.</p>
+ * S5 adds L1 {@code values[]} (params / field writes / return, redacted and truncated) on the
+ * {@code OrderService#previewDiscount} service span only; spans without value facts omit the key.
+ * No secrets (only {@code [REDACTED len=N]} placeholders), no local variables, no objects.</p>
  */
 public final class SpanEmitter {
 
@@ -21,6 +23,7 @@ public final class SpanEmitter {
     static final String FLAG_CHAIN = "S2_ZERO_ROW_CHAIN";
     static final String FLAG_LOST_BACKEND = "LOST_BACKEND";
     static final String FLAG_EXACT_LINK = "S3_EXACT_LINK";
+    static final String FLAG_L1 = "L1";
 
     private static final int MAX_RETURN_TYPE_CHARS = 64;
 
@@ -106,9 +109,16 @@ public final class SpanEmitter {
      * @param returnValueJson    pre-formatted JSON value (e.g. {@code 200}, {@code true}, {@code null})
      * @param sideEffectsJson    pre-formatted JSON array, or {@code null} to omit the field
      * @param source             real stack frame of the instrumented class, or {@code null}
+     * @param valuesJson         pre-formatted S5 {@code values} array, or {@code null} to omit the field
      */
     static void emit(SpanContext.Frame frame, long durNs, String status, String returnType,
                      String returnValueJson, String sideEffectsJson, StackTraceElement source) {
+        emit(frame, durNs, status, returnType, returnValueJson, sideEffectsJson, source, null);
+    }
+
+    static void emit(SpanContext.Frame frame, long durNs, String status, String returnType,
+                     String returnValueJson, String sideEffectsJson, StackTraceElement source,
+                     String valuesJson) {
         try {
             if (!enabled || frame == null || frame.traceId == null) {
                 return;
@@ -168,9 +178,18 @@ public final class SpanEmitter {
                 json.append(',');
                 appendQuoted(json, FLAG_LOST_BACKEND);
             }
+            // S5 extra flags (L1 / VALUES_CAPPED=<n> / L1_SKIPPED=<n>); empty for S2-S4 spans.
+            for (String extraFlag : frame.extraFlags) {
+                json.append(',');
+                appendQuoted(json, extraFlag);
+            }
             json.append(',');
             appendQuoted(json, "DROP_COUNT=" + senderDropped());
             json.append(']');
+            if (valuesJson != null) {
+                // S5: omitted entirely when the span has no value facts (S2-S4 byte compatibility).
+                json.append(",\"values\":").append(valuesJson);
+            }
             json.append("}\n");
 
             byte[] payload = json.toString().getBytes("UTF-8");
@@ -193,6 +212,13 @@ public final class SpanEmitter {
 
     private static String truncate(String value) {
         return value.length() <= MAX_RETURN_TYPE_CHARS ? value : value.substring(0, MAX_RETURN_TYPE_CHARS);
+    }
+
+    static String quote(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return appendQuoted(new StringBuilder(value.length() + 2), value).toString();
     }
 
     private static StringBuilder appendStringField(StringBuilder json, String name, String value) {

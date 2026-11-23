@@ -13,6 +13,11 @@
     SELECT id, order_no, status, amount FROM orders ORDER BY id
   </select>
 
+  <!-- S5 L1 demo: read-only lookup, never instrumented (no mapper/sql span). -->
+  <select id="findById" resultMap="OrderMap">
+    SELECT id, order_no, status, amount FROM orders WHERE id = #{id}
+  </select>
+
   <select id="countById" resultType="int">
     SELECT COUNT(*) FROM orders WHERE id = #{id}
   </select>

@@ -63,6 +63,9 @@ function makeSandbox(options = {}) {
   if (options.config !== undefined) {
     sandbox.__TRACEBOARD_CONFIG__ = options.config;
   }
+  if (options.manifest !== undefined) {
+    sandbox.__TRACEBOARD_MANIFEST__ = options.manifest;
+  }
   const context = vm.createContext(sandbox);
   return { sandbox, context, clicks, pagehide, posts, warnings };
 }
@@ -205,4 +208,50 @@ test("IIFE bad config: fail-open, invalid sessionId is rejected without throwing
     "invalid sessionId must be reported as a warning"
   );
   assert.equal(typeof sandbox.TraceBoardSDK, "object");
+});
+
+test("IIFE inline manifest: data-tb-fn click and wrapFn get source; no JSON fallback", async () => {
+  const manifest = {
+    functions: [
+      { name: "previewDiscount", file: "src/App.vue", line: 120 },
+      { name: "validateForm", file: "src/App.vue", line: 86 }
+    ]
+  };
+  const { sandbox, context, clicks, posts } = makeSandbox({
+    config: { sessionId: "s_preview", ingestUrl: "/ingest", appName: "app", observeMs: 20 },
+    manifest
+  });
+  run(context);
+
+  assert.equal(clicks.length, 1);
+  const target = {
+    tagName: "BUTTON",
+    id: "btn-discount",
+    textContent: "折扣",
+    parentElement: null,
+    children: [],
+    getAttribute(name) {
+      return name === "data-tb-fn" ? "previewDiscount" : null;
+    }
+  };
+  clicks[0]({ type: "click", target });
+  sandbox.TraceBoardSDK.wrapFn("validateForm", () => true)();
+  await sleep(120);
+
+  const events = ingestEvents(posts);
+  const root = events.find((event) => event.kind === "ui_event");
+  assert.ok(root);
+  assert.deepEqual(JSON.parse(JSON.stringify(root.source)), { file: "src/App.vue", line: 120 });
+  assert.ok(root.flags.includes("SOURCE_MAPPED"));
+
+  const js = events.find((event) => event.kind === "js_method");
+  assert.ok(js);
+  assert.deepEqual(JSON.parse(JSON.stringify(js.source)), { file: "src/App.vue", line: 86 });
+  assert.ok(js.flags.includes("SOURCE_MAPPED"));
+
+  assert.equal(
+    posts.some((post) => String(post.url).includes("traceboard-manifest.json")),
+    false,
+    "the IIFE/preview build must never fetch the manifest fallback"
+  );
 });

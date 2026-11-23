@@ -1,12 +1,12 @@
 # TraceBoard
 
-面向本地 Java（Spring Boot）Web 应用的“全链路事实”调试工具。当前完成 **S4（本地接入与节点详情，MVP）**：
+面向本地 Java（Spring Boot）Web 应用的“全链路事实”调试工具。当前完成 **S5（L1 与前端浅层，MVP 收尾）**：
 
-- S0 契约/骨架 → S1 ingest/查询 → S2 真实 H2 0 行事实链 → S3 runtime SDK/EXACT 关联/只读回放 → **S4 launcher（IDEA/JAR）、preview 注入、agent 握手/诊断、节点详情/×N/缺口**。
-- 仍**没有** S5/S6/S7：无 sourcemap/构建插件/L1/L2 局部变量，无 Tomcat/WAR、React、云端、SSE/WS、像素回放、持久化。
-- S3 的案例 A/B 结论不变；S4 新增的能力都可在本机断网复跑。
+- S0 契约/骨架 → S1 ingest/查询 → S2 真实 H2 0 行事实链 → S3 runtime SDK/EXACT 关联/只读回放 → S4 launcher/preview/握手/详情×N → **S5 L1 参数/字段 `100→0`、脱敏/截断、graph 15 字段、函数级 manifest/sourcemap、性能基线**。
+- 仍**没有** S6–S10：无 L2 行级局部变量/异步/运行时 ×3，无 Tomcat/WAR、React、云端、SSE/WS、像素回放、持久化。
+- 案例 A/B 行为不变；S5 的 L1 是新增演示路径（`preview-discount`），不改 0 行链。
 
-## 已真实可用（S0–S4，均可复跑）
+## 已真实可用（S0–S5，均可复跑）
 
 - **Java agent（JDK8 目标，major 52）**：Byte Buddy 插桩 demo 的 `OrderController#cancel`、`OrderService#cancel`、MyBatis `OrderMapper#cancelById`、`PreparedStatementHandler#update`，形成 controller→service→mapper→sql 4-span 链；SQL `rowsAffected=0`、transaction `UNKNOWN`；异步有界发送、fail-open。
 - **EXACT 关联**：浏览器 SDK 在 fetch 上带 `traceparent` + `X-TraceBoard-Click`；agent 反射读头，controller 继承 trace/parent/root，children 继承 EXACT；无头/非法头保持 S2 的 4-span `LOST` 链，不合成成功。
@@ -15,11 +15,12 @@
 - **runtime SDK（`frontend/sdk`）**：ESM + IIFE 两种产物；点击/fetch/XHR/wrapFn/uiEffect；案例 A（0 行 + EXACT）与案例 B（纯前端校验，1500ms 观察窗后 `fetchCount=0`，确认本次点击没有请求）；不采集请求体/表单值/cookie/query。
 - **workbench（Vue3+TS）**：S3 混合事实树/状态图例/时间轴只读回放；**S4 节点详情**（status/reason/return/flags/thread/source/confidence、SQL/UI 页签、逐次调用、按 nodeKey ×N、缺口清单）；S0/S1/S2 面板保留为次级。
 - **launcher（`server/launcher`，Java21）**：`idea` 打印 IDEA VM options；`jar` 用 JDK8 启动 demo+agent（detach/PID/日志/健康等待）、`stop`；`preview` 反代静态 HTML 并注入外部 `config.js`+`sdk.js`（仅 200 text/html、无内联脚本/CSP 改写、`not-injected:*` 原因）；`diagnose` 复核 collector/app/handshake/events/preview/SDK。
+- **S5 L1 + 前端浅层**：demo `preview-discount` 在内存把 `amount 100→0`、DB 仍 100；agent 采 5 项 values（`requestedAmount` 100、`demoSecret` `[REDACTED len=6]`、`note` 截断 2KB、`amount` 100→0、`return` 0），不采局部变量/L2；graph 增加 `values`（15 字段）；workbench 详情显示 L1/脱敏/截断/old→new；`frontend/build-plugin` 生成函数 manifest，SDK 写入 `source {file,line}` + `SOURCE_MAPPED`；demo 开启 `build.sourcemap`。性能基线见下（**WARN，未达 25% 目标**）。
 
 ## 明确未实现（勿据此承诺）
 
-- 无 sourcemap/构建插件/源码行号/JS 局部变量/字段 diff（S5）；节点详情会明确写“未采集”，不猜。
-- 无 S6：行级 L2、异步上下文传播、运行时 ×3、预算/循环折叠。工作台的 ×N 是**已采集 graph 的只读前端聚合**；`fixtures/s4-details` 的 ×3 是 UI/测试数据，不是运行时 ×3。
+- **无 S6**：行级 L2/局部变量、异步上下文传播、运行时 ×3、预算/循环折叠。工作台的 ×N 是**已采集 graph 的只读前端聚合**；`fixtures/s4-details` 的 ×3 是 UI/测试数据，不是运行时 ×3。
+- **S5 限制**：manifest 只提供函数/文件/行号（不采局部变量，L2 属 S6）；sourcemap 是构建产物，不承诺跨构建原始行号；`preview-discount` 未知 id 也返回 200 `data:0`（演示接口，非产品 API）；perf ratio **1.29** 超 1.25 目标，已记录 WARN（source 方法级缓存已加，仍超标）。
 - 无 S7–S10：Tomcat/WAR/SSM、React/Webpack、云端上传/沙箱/DB/发布。
 - 无 SSE/WebSocket/实时推送；workbench 5 秒轮询；replay 只隐藏未来事件，不重跑程序、不重发请求、不写数据库。
 - collector/H2 均为内存存储，重启即清空；agent 握手记录 collector 重启即丢；无鉴权/保留/淘汰/CORS。
@@ -40,8 +41,10 @@ Windows + Git Bash；仓库路径含中文与空格，**所有路径/命令加�
 ## 构建
 
 ```bash
-# 1) SDK（ESM + .d.ts + IIFE；13 tests）
+# 1) SDK（ESM + .d.ts + IIFE；17 tests）
 (cd "frontend/sdk" && npm ci && npm run build && npm test)
+# 1b) 前端浅层插件（manifest 扫描；6 tests）
+(cd "frontend/build-plugin" && npm test)
 
 # 2) 根 reactor（agent + collector + launcher），JDK21
 JAVA_HOME="C:/Program Files/Java/jdk-21" mvn -B -q -DskipTests package
@@ -117,26 +120,29 @@ COLLECTOR="http://127.0.0.1:8601"
 
 ```bash
 (cd "tools/verify" && npm ci && node verify.mjs)
-# 期望：61 PASS / 0 FAIL，末行 S4 TEST (full S0–S4): PASS，exit 0
+# 期望：70 PASS / 0 FAIL，末行 S5 TEST (full S0–S5): PASS，exit 0
 ```
 
 覆盖：S0 契约/fixture；S1 ingest/查询；S2 H2 0 行/4-span/DB 不变；S3 SDK/案例 B/EXACT/replay 0 写；
-S4 launcher idea/jar/stop/PID_MISMATCH、握手、preview 注入（头/内容/not-injected）、诊断 PASS/FAIL、详情×3/缺口、S0–S3 回归、范围/安全/清理。
-冷启动嵌套回归：`node work/flake-nesting.mjs`（8 个新 JVM，期望 8/8；S4 已修复 `startNs`/`durNs` 时钟口径）。
+S4 launcher/握手/preview/详情×3/缺口；S5 L1 values 100→0/脱敏/截断、graph 15 字段、manifest/sourcemap、perf 报告、S0–S4 回归、范围/安全/清理。
+性能基线（report-only，WARN 不伪装成达标）：`node tools/perf/l1-overhead.mjs` → ratio **1.29**（>1.25 目标）。
+冷启动嵌套回归：`node work/flake-nesting.mjs`（8 个新 JVM，期望 8/8；S4 已修复）。
 
 ## 地址与限制
 
 - collector/launcher preview 只绑 `127.0.0.1`；浏览器入口用 `localhost`（Vite 可能绑 `[::1]`）。
 - 端口：collector 8601、demo 8080、workbench 5173、demo 前端 5174、preview 8602、Vite preview 4173/4174、静态测试 18080。
 - 代理仅在 dev 生效；静态 dist 无代理。H2/collector 无持久化，重启清空。
+- S5 demo 前后端需同一会话：demo 前端 SDK 使用 `s_s3demo`，后端 agent 也必须用 `-Dtraceboard.sessionId=s_s3demo` 才能 EXACT 关联。
 - git 分支 `master`；无 secret/真实客户数据；不暴露到非回环网络。
 
 ## 契约与 fixture
 
-- `schema/traceboard.event.v1.json`：v1 schema（2020-12，无网络 `$ref`；S4 字节不变）。
-- `fixtures/s4-details/`：×3/缺口 UI 测试数据（README 明确：运行时 ×3 属 S6，不是运行时证据）。
+- `schema/traceboard.event.v1.json`：v1 schema（2020-12，无网络 `$ref`；S5 字节不变）。
+- `fixtures/s5-l1-values/`：L1 values 100→0/脱敏/截断、return 0 的测试数据；`fixtures/s4-details/`：×3/缺口 UI 测试数据（README 明确：运行时 ×3 属 S6，不是运行时证据）。
 - `fixtures/s3-frontend-facts/`、`s2-zero-row-chain/`、`s1-walking-skeleton/`、`case-a-zero-rows/`：历史阶段 fixture（字节未变）。
-- 契约：`docs/contracts/api.v1.md`（S4 矩阵/握手/详情字段）、`transport.v1.md`（preview/握手）、`event-model.v1.md`、`status-semantics.md`。
+- 契约：`docs/contracts/api.v1.md`（S5 graph 15 字段/values/preview-discount）、`transport.v1.md`（preview/握手）、`event-model.v1.md`（values/L1/SOURCE_MAPPED）、`status-semantics.md`。
+- 前端浅层插件说明：`docs/guides/frontend-shallow-plugin.md`。
 - 换行：`.gitattributes` 强制 jsonl/ndjson/json/md/java/ts/vue 为 LF。
 
 ## 文档索引
@@ -146,6 +152,8 @@ S4 launcher idea/jar/stop/PID_MISMATCH、握手、preview 注入（头/内容/no
 | `docs/plans/STAGE-PROGRESS.md` | **S0–S10 进度看板（持久化；暂停/恢复以此为准）** |
 | `docs/plans/SOLO-PLAN.md` | 检查点 S0–S10 与自检协议 |
 | `docs/plans/00-master-plan.md` | 产品主计划（技术事实权威） |
+| `docs/guides/frontend-shallow-plugin.md` | S5 manifest/sourcemap 浅层插件说明 |
+| `docs/plans/stages/S5/` | S5 分发/计划/G1/测试/验收/进度 |
 | `docs/guides/local-launcher.md` | IDEA/JAR/preview/diagnose 接入指南 |
 | `docs/plans/stages/S4/` | S4 分发/修订/计划/G1/测试/验收/进度 |
 | `docs/plans/archive/stage-S4-2026-11-23/` | S4 归档快照（MANIFEST/SUMMARY） |

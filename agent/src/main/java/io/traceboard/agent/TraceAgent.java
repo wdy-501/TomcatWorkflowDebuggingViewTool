@@ -11,7 +11,8 @@ import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
 
 /**
- * S2 java agent: instruments exactly FOUR demo points and emits the 0-row fact chain.
+ * S5 java agent: instruments the S2 four-point chain plus three S5 advice points (7 advice /
+ * 5 types) and emits L1 {@code values} for the demo preview-discount path.
  *
  * <pre>
  * controller  com.example.shop.controller.OrderController#cancel(long)               -> root span
@@ -19,6 +20,9 @@ import net.bytebuddy.utility.JavaModule;
  * mapper      org.apache.ibatis.binding.MapperProxy#invoke  (filter: OrderMapper#cancelById) -> child
  * sql         org.apache.ibatis.executor.statement.PreparedStatementHandler#update
  *             (filter: mapped statement id .OrderMapper.cancelById)                  -> child (rowsAffected)
+ * controller  com.example.shop.controller.OrderController#previewDiscount(long,double,String,String) -> span (S5, no values)
+ * service     com.example.shop.service.OrderService#previewDiscount(long,double,String,String)       -> span (S5, 5 values, flag L1)
+ * field       com.example.shop.model.Order#setAmount(double)                          -> no span (S5, appends amount 100->0)
  * </pre>
  *
  * <p>Nothing else is instrumented. The agent is fail-open: every {@code Throwable} is swallowed and
@@ -34,6 +38,7 @@ public final class TraceAgent {
     static final String SERVICE_TYPE = "com.example.shop.service.OrderService";
     static final String MAPPER_PROXY_TYPE = "org.apache.ibatis.binding.MapperProxy";
     static final String STATEMENT_HANDLER_TYPE = "org.apache.ibatis.executor.statement.PreparedStatementHandler";
+    static final String ORDER_TYPE = "com.example.shop.model.Order";
 
     private TraceAgent() {
         // utility class, never instantiated
@@ -53,9 +58,10 @@ public final class TraceAgent {
             install(inst);
             // S4 handshake: daemon thread, <=3 attempts, 1s timeouts, fail-open (never blocks).
             AgentHello.start(config);
-            log("premain installed: targets=" + CONTROLLER_TYPE + "#cancel(long), "
-                    + SERVICE_TYPE + "#cancel(long), " + MAPPER_PROXY_TYPE + "#invoke, "
-                    + STATEMENT_HANDLER_TYPE + "#update; ingestUrl=" + config.ingestUrl()
+            log("premain installed: targets=" + CONTROLLER_TYPE + "#cancel(long)/#previewDiscount(long,double,String,String), "
+                    + SERVICE_TYPE + "#cancel(long)/#previewDiscount(long,double,String,String), "
+                    + MAPPER_PROXY_TYPE + "#invoke, " + STATEMENT_HANDLER_TYPE + "#update, "
+                    + ORDER_TYPE + "#setAmount(double); ingestUrl=" + config.ingestUrl()
                     + ", sessionId=" + config.sessionId());
         } catch (Throwable t) {
             log("premain failed, continuing without instrumentation (fail-open): " + t);
@@ -79,9 +85,18 @@ public final class TraceAgent {
                 .type(ElementMatchers.named(CONTROLLER_TYPE))
                 .transform(advice(ControllerAdvice.class,
                         ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))
+                .transform(advice(PreviewControllerAdvice.class,
+                        ElementMatchers.named("previewDiscount").and(ElementMatchers.takesArguments(
+                                long.class, double.class, String.class, String.class))))
                 .type(ElementMatchers.named(SERVICE_TYPE))
                 .transform(advice(ServiceAdvice.class,
                         ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))
+                .transform(advice(PreviewServiceAdvice.class,
+                        ElementMatchers.named("previewDiscount").and(ElementMatchers.takesArguments(
+                                long.class, double.class, String.class, String.class))))
+                .type(ElementMatchers.named(ORDER_TYPE))
+                .transform(advice(FieldWriteAdvice.class,
+                        ElementMatchers.named("setAmount").and(ElementMatchers.takesArguments(double.class))))
                 .type(ElementMatchers.named(MAPPER_PROXY_TYPE))
                 .transform(advice(MapperAdvice.class,
                         ElementMatchers.named("invoke").and(ElementMatchers.takesArguments(3))))

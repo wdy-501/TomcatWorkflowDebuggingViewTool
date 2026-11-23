@@ -182,7 +182,8 @@ public class TraceDeriver {
             positionBySpanId.put(span.spanId(), i);
             nodes.add(new GraphNode(span.spanId(), span.parentSpanId(), span.kind(), span.nodeKey(),
                     span.status(), span.returnValue(), span.sideEffects(), span.startNs(), span.durNs(),
-                    span.thread(), span.flags(), span.reason(), span.source(), span.confidence()));
+                    span.thread(), span.flags(), span.reason(), span.source(), span.confidence(),
+                    span.values()));
         }
 
         // One edge per parent/child pair (count is always 1: spanId is unique per session).
@@ -302,12 +303,20 @@ public class TraceDeriver {
                 event.get("thread"),
                 arrayOrEmpty(event.get("flags")),
                 text(event, "reason"),
-                event.get("source"));
+                event.get("source"),
+                // S5 (api.v1.md §10.9): the raw values[] array verbatim; events without the
+                // field (all S0–S4 events) yield null — never an empty array, never re-derived.
+                nullIfMissing(event.get("values")));
     }
 
     private static String text(JsonNode event, String field) {
         JsonNode value = event.get(field);
         return value == null || value.isNull() ? null : value.asText();
+    }
+
+    /** S5: raw node {@code values} verbatim; missing/JSON-null stays {@code null} (never {@code []}). */
+    private static JsonNode nullIfMissing(JsonNode value) {
+        return value == null || value.isNull() ? null : value;
     }
 
     private static JsonNode arrayOrEmpty(JsonNode value) {

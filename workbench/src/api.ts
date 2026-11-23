@@ -355,10 +355,11 @@ export interface SideEffectItem {
 }
 
 /**
- * One graph node. S4 (api.v1.md §8.2/§10.8) makes this a fixed 14-field shape:
- * the S2/S3 11 fields plus additive read-only `reason`/`source`/`confidence`
+ * One graph node. S4 (api.v1.md §8.2/§10.8) made this a fixed 14-field shape;
+ * S5 (api.v1.md §8.2/§10.9) appends the 15th additive read-only field `values`
  * taken verbatim from the node's own event. Nothing here is aggregated or
- * inferred; reason/source are `null` when the event did not carry them.
+ * inferred; reason/source are `null` when the event did not carry them and
+ * `values` is `null` when the event had no `values` field (never `[]`).
  */
 export interface GraphNode {
   spanId: string;
@@ -378,6 +379,26 @@ export interface GraphNode {
   source: EventSourceLocation | null;
   /** S4 additive: event `confidence` verbatim (no re-derivation). */
   confidence: string;
+  /** S5 additive (15th field): event `values` verbatim; null when absent (never []). */
+  values: L1Value[] | null;
+}
+
+/**
+ * One S5 L1 value fact (event-model.v1.md §4.4, api.v1.md §10.9).
+ * `kind` is `param|field|return` in S5 (the `local` kind belongs to S6 and is
+ * not produced here). `line` is always null in S5 (line-level capture is S6);
+ * `invocation` is omitted for a single call. `from`/`to` are scalars (or the
+ * `[REDACTED len=N]` placeholder); nothing is decoded or recomputed here.
+ */
+export interface L1Value {
+  name: string;
+  kind: string;
+  line: number | null;
+  from: unknown;
+  to: unknown;
+  truncated: boolean;
+  redacted: boolean;
+  invocation?: number;
 }
 
 export interface GraphEdge {
@@ -428,6 +449,33 @@ function toSideEffectItem(value: unknown): SideEffectItem {
   };
 }
 
+/**
+ * S5 L1 value row: raw event fields only. `from`/`to` stay `unknown` (scalar or
+ * placeholder) and are never recomputed; `invocation` is kept only when it is a
+ * positive integer. Key order inside a value item is not contractual.
+ */
+function toL1Value(value: unknown): L1Value {
+  const record = isRecord(value) ? value : {};
+  return {
+    name: asString(record.name, ""),
+    kind: asString(record.kind, ""),
+    line:
+      typeof record.line === "number" && Number.isFinite(record.line)
+        ? record.line
+        : null,
+    from: record.from,
+    to: record.to,
+    truncated: record.truncated === true,
+    redacted: record.redacted === true,
+    invocation:
+      typeof record.invocation === "number" &&
+      Number.isFinite(record.invocation) &&
+      record.invocation >= 1
+        ? record.invocation
+        : undefined,
+  };
+}
+
 function toGraphNode(value: unknown): GraphNode {
   const record = isRecord(value) ? value : {};
   const rawThread = isRecord(record.thread) ? record.thread : null;
@@ -463,6 +511,11 @@ function toGraphNode(value: unknown): GraphNode {
         }
       : null,
     confidence: asString(record.confidence, ""),
+    // S5 additive: absent/JSON-null stays null — an empty array would claim
+    // "collected, zero values", which the contract explicitly forbids.
+    values: Array.isArray(record.values)
+      ? record.values.filter(isRecord).map(toL1Value)
+      : null,
   };
 }
 

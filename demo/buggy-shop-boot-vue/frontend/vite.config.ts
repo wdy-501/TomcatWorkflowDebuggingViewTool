@@ -1,22 +1,30 @@
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import traceboardShallow from "../../../frontend/build-plugin/index.mjs";
 
-// S3 demo frontend: fixed port 5174.
+// S3/S5 demo frontend: fixed port 5174.
 // - `@traceboard/sdk` resolves to the repo SDK source (dev + build); its dist is also installed
-//   as a file: dependency, but the alias keeps a single source of truth with no build plugin.
+//   as a file: dependency, but the alias keeps a single source of truth.
+// - S5 build plugin emits function/file/line manifest (no .map decoding); local variables remain S6.
+// - `build.sourcemap=true` only gives browser devtools a demo `.map` (dist is gitignored; the SDK
+//   never reads or uploads it and the workbench only uses the manifest).
 // - `/api`    -> demo backend 8080 (JDK8 + javaagent), same-origin semantics preserved.
 // - `/ingest` -> TraceBoard collector 8601 (runtime SDK NDJSON), no CORS on either side.
 // IPv4 literals avoid the localhost/[::1] resolution pitfall on Windows.
 // Dev + preview proxies are included; preview serves `dist` and still needs the collector running
 // for `/ingest` (a documented S3 limitation: no collector = fail-open drops, page keeps working).
+// Preview (8602) never gets the manifest: it is not served by this plugin and injects no inline script.
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const sdkEntry = fileURLToPath(new URL("../../../frontend/sdk/src/index.ts", import.meta.url));
 const backendTarget = "http://127.0.0.1:8080";
 const collectorTarget = "http://127.0.0.1:8601";
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), traceboardShallow()],
+  build: {
+    sourcemap: true
+  },
   resolve: {
     alias: {
       "@traceboard/sdk": sdkEntry

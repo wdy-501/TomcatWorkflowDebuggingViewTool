@@ -1,6 +1,6 @@
 # 事件模型 v1（event-model.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S3 增补：2026-11-24）｜作者：plan-writer（S0）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S3 增补：2026-11-24；S4 增补：2026-11-24；S5 增补：2026-11-27）｜作者：plan-writer（S0）
 > 变更记录：**2026-11-23 S1 增补（G1 第 1 轮返工）**——§2/§5/§7/§9/§11 记录“游离后端根（isolated backend request）”这一**唯一例外**
 >   （`parentSpanId=null` + `kind=controller` + `confidence=LOST` + 合成 `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）。
 >   **仅文档修订：schema 与 fixture 字节未变。**
@@ -14,6 +14,10 @@
 >   **2026-11-24 S3 G1 前补丁（时钟模型，仅语义，无字段/枚举/约束变更）**：`startNs` 由“相对会话/SDK init”统一为**本机 epoch 纳秒**；
 >   新增 §12.10（SDK/agent 公式、collector 原样存储、工作台显示归一化、fixture 示意值、NTP/墙钟跳变风险、V1 仅单机）。
 >   **schema 字节不变**：`startNs` 仍是 `integer ≥ 0`；schema 内 `description` 文字不改（其“since session start”按 §12.10 解释）。
+>   **2026-11-27 S5 增补（仅语义，无字段/枚举/约束变更）**：`values[]` 首次被真实使用——S5 只输出 `param|field|return`（§4.4），
+>   并新增 flag `L1`/`SOURCE_MAPPED`/`VALUES_CAPPED=<n>`/`L1_SKIPPED=<n>`（§7）、脱敏/截断/预算口径（§4.4/§8）、
+>   前端 manifest 的 `source` 语义（§12.11，**不是** `.map` 解码）。**`kind=local`、行级变量、对象深采、异步续体、运行时 ×3 仍属 S6，S5 不产生。**
+>   **schema 字节不变**（`values` 自 v1 起就是可选字段，`items` 已含 `param|field|return`；S5 未新增任何字段/枚举/约束）。
 > 机器可校验版本：`schema/traceboard.event.v1.json`（JSON Schema 2020-12，`$id=urn:traceboard:schema:event:v1`）
 > 语义来源：主计划 §13.4 / §2.3 / §8.3 / §9.2；分发书 §4.1。本文与 schema 冲突时以 schema 为机器事实、以本文为语义解释。
 
@@ -44,7 +48,7 @@
 | `status` | string | 是 | 8 值枚举，见 §3.2 / `status-semantics.md` |
 | `reason` | string | 条件必填 | 非空，1–512 字符；`NOT_COLLECTED*` 时必填（if/then 强制） |
 | `return` | object \| null | 否 | `{type:string, value:any}` 或 `null`；见 §4.3 |
-| `values` | array | 否 | 值级事实数组，见 §4.4；S0 案例 A 不使用 |
+| `values` | array | 否 | 值级事实数组，见 §4.4；S0 案例 A 不使用，S5 起 demo `previewDiscount` 使用 |
 | `sideEffects` | array | 否 | 数据副作用，v1 仅 SQL，见 §4.5 |
 | `confidence` | string | 是 | `EXACT\|INFERRED\|LOST\|MANUAL`，见 §3.3 |
 | `flags` | array\<string\> | 是 | 去重，元素 `^[A-Za-z0-9_.:=+-]+$`，≤32 项；见 §7 |
@@ -118,7 +122,7 @@
 - **HTTP 约定**：`fetch`（或 `controller`）事件的 HTTP 状态码写在 `return={type:"http", value:200}`。
   case A 选择把它放在 `fetch` 事件上；回调事件的 `return.type="ui_effect"`，`value` 为用户可见提示文案。
 - **S2 澄清（controller）**：后端 controller 没有前端 `fetch` 事件时，可直接在 controller span 上用真实返回类型的 FQCN 作为 `type`、
-  用 HTTP 状态码作为 `value`，例如 `{"type":"org.springframework.http.ResponseEntity","value":200}`（未知 id 为 404）。
+  用 HTTP 状态码作为 `value`，例如 `{"type":"org.springframework.http.ResponseEntity","value":200}`（S0/S2 `cancel` 未知 id 为 404 是历史口径；S5 `preview-discount` 的未知 id 仍 `200 {"data":0}`，见 `api.v1.md` 附录 D，两者不冲突）。
   这是同一 HTTP 约定的后端写法（agent 反射读取状态码，读不到就 `value=null`，不猜）；仍不记录响应 body。
 - 对象值只放摘要：深度 ≤4、字段 ≤30、字符串 ≤2KB（主计划 §9.2）；大对象去重（`valueRef`）为 v1 预留，见 §9。
 
@@ -138,6 +142,75 @@
 - 值级标记是 `REDACTED`/`TRUNCATED` 语义的落点；事件级 `status=TRUNCATED` 时至少一个值项或
   `flags` 说明截断范围。
 - S0 案例 A 不含 `values`（不暗示 L2 采集能力）。
+
+#### 4.4.1 S5 语义：`param` / `field` / `return`（唯一被使用的三种 kind）
+
+| kind | 含义 | `from` | `to` | `line` |
+|---|---|---|---|---|
+| `param` | 方法**入参**（按声明顺序） | 恒 `null`（没有“旧值”） | 实参值（标量；脱敏/截断后） | `null`（S5 不行级采集） |
+| `field` | **对象字段写入**的 old→new（同一方法内，按发生顺序） | 写入前的值 | 写入后的值 | `null`（S6 才带行号） |
+| `return` | 方法**返回值** | 恒 `null` | 返回值（标量；脱敏/截断后） | `null` |
+
+- S5 **只采集** `String`/`number`/`boolean` 标量；对象/数组/集合/异常**不递归**（`depth ≤4` 只是为将来的对象摘要预留，S5 不实现深采）。
+- `kind=local`（局部变量）与行级写入**属 S6**：S5 事件中出现 `kind=local` 即越界。
+- 顺序固定：**参数声明顺序 → 字段写入发生顺序 → 返回**；`line` 恒 `null`；单次调用省略 `invocation`（×N 逐次属 S6）。
+- **省略规则**：一个 span 没有值级事实时**整个 `values` 键省略**（不得写 `[]`），以保持 S0–S4 事件字节兼容；graph 派生层把“无该键”呈现为 `values:null`（`api.v1.md` §10.9）。
+- `values` 不改 `status`：`truncated=true` 是**值级**标记，事件仍是 `OK`（不改成 `TRUNCATED`）。
+
+#### 4.4.2 脱敏（先于截断；绝不出现原值）
+
+- 名称正则（大小写不敏感，**名称包含即命中**）：`password|token|secret|authorization|cookie|idcard|phone|email|bankcard`。
+- 命中后：`redacted=true`，`to` **只能**是占位符 `[REDACTED len=<n>]`（`<n>` = 原值 UTF-8 字节数；ASCII 下等于字符数），`from` 恒 `null`（param/return）或同样占位符（field）。
+  原值**不得**出现在 `to`/`from`/`flags`/`reason`/`nodeKey`/任何字段里。
+- demo `demoSecret`（值 `s3cr3t`）必须命中 → `"[REDACTED len=6]"`、`redacted=true`。
+- 脱敏**先于**截断：先按名字判定占位符，再谈长度预算（占位符本身远小于 2KB）。
+- 无“关闭脱敏”开关（S5 不提供；主计划 §9.3 的本地关闭能力不在本阶段范围）。
+
+#### 4.4.3 截断（值级、按 UTF-8 字符边界）
+
+- 单值字符串上限 **2048 UTF-8 字节**；按**字符边界**截断（不切开多字节字符 / 代理对），结果 **≤2048 字节**。
+- 截断时 `truncated=true`，`to` 就是**截断后的值本身**；S5 **不追加**省略号 `…` 或其他标记字符（预算只算值本身）。
+- demo `note`（3000 个 `x`）→ `to` 恰为前 **2048** 个 `x`、`truncated=true`。
+- 截断不改 `status`；UI 用 `已截断` 徽标呈现。
+
+#### 4.4.4 预算与“不静默丢弃”
+
+| 预算 | 值 | 超出时 |
+|---|---|---|
+| 单 span 字节 | ≤64KB（collector 行上限；**agent 侧在 `values` 序列化后自行测量，现有 `SpanEmitter`/`EventSender` 没有该限制**） | 按顺序丢弃尾部值项并追加 flag `VALUES_CAPPED=<n>`（`n`=丢弃项数），**不静默** |
+| 单 span 值项数 | ≤30 | 保留前 30 项，追加 `VALUES_CAPPED=<n>`（`n`=被截掉的项数） |
+| 对象深度 | ≤4（**预留**，S5 不递归对象） | 非标量参数/返回值**跳过**，追加 `L1_SKIPPED=<n>`（`n`=跳过项数） |
+| 对象字段 | ≤30（**预留**，S5 不递归对象） | 对象不展开（S5 整体按“非标量”跳过并计入 `L1_SKIPPED`） |
+| 单值字符串 | ≤2048 UTF-8 字节 | `truncated=true`（§4.4.3） |
+
+- demo 的 5 个值（1 个 2KB 字符串 + 4 个标量）**不触发** `VALUES_CAPPED`/`L1_SKIPPED`；测试断言这两个 flag **不存在**（S5-B）。
+- 跳过只允许发生在“非标量/不可读”上，且必须**计数可见**；静默丢弃是契约违规（主计划 §9.2）。
+
+#### 4.4.5 S5 demo 的精确 `values`（`OrderService#previewDiscount`）
+
+```json
+[
+ {"name":"requestedAmount","kind":"param","line":null,"from":null,"to":100,"truncated":false,"redacted":false},
+ {"name":"demoSecret","kind":"param","line":null,"from":null,"to":"[REDACTED len=6]","truncated":false,"redacted":true},
+ {"name":"note","kind":"param","line":null,"from":null,"to":"<恰 2048 个 x>","truncated":true,"redacted":false},
+ {"name":"amount","kind":"field","line":null,"from":100,"to":0,"truncated":false,"redacted":false},
+ {"name":"return","kind":"return","line":null,"from":null,"to":0,"truncated":false,"redacted":false}
+]
+```
+
+- 只在 **service** span 上；`flags` 含 `L1`（并沿用 `S2_ZERO_ROW_CHAIN`）；`return={"type":"double","value":0}`。
+- **参数项恰 3 个**：`requestedAmount`/`demoSecret`/`note`（按声明顺序）；服务签名的第 0 参 `long id` 是路径参数，**不进入 `values`**（不得出现 `name="id"`），因此总数恰 5 项。
+- controller span **无 `values`**（链上也没有 mapper/sql span）。
+- 字段 100→0 **恰一条**：MyBatis hydration 的 0→100（装载订单）必须在 advice 层被排除（类名精确匹配 + 顶层 frame 是 `previewDiscount` + 栈中无 `org.apache.ibatis` 帧 + `old != new`；见 `s5-plan.md` §6）。
+- 明细行为/端点口径见 `api.v1.md` 附录 D。
+
+#### 4.4.6 明确不在 `values` 里（S5）
+
+- 局部变量、行级变量表、逐行写入（`kind=local`/`line` 非空，S6）。
+- 对象深字段、集合元素、`toString()`/getter 调用结果（S5 不递归、不调用 getter 之外的方法）。
+- 异常类型/message/栈（`THREW` 仍只表状态）。
+- SQL 文本与 SQL 参数（§4.5 不变）。
+- 请求/响应体、HTTP 头、cookie、表单值、查询串。
 
 ### 4.5 `sideEffects[]`（v1 仅 SQL）
 
@@ -198,8 +271,14 @@
 | `SDK_ACTIVE` | 该事件由 runtime SDK 采集（click 根与同 operation 的前端事件）；只说明来源，不承载关联语义 | S3 使用（SDK 写入） |
 | `S3_RUNTIME_SDK` | S3 runtime SDK 的**阶段标记**（F0、无构建插件/sourcemap）；advisory | S3 使用（SDK 写入 click 根） |
 | `OBSERVE_MS=<n>` | click 根实际的观察窗毫秒数（正常 1500；`pagehide` 提前关闭时为实际值）；只说明窗口，不是 `durNs` | S3 使用（SDK 写 click 根） |
+| `L1` | 该 span 走 **L1** 值级采集（参数/字段写入/返回摘要；**不是** L2、不含局部变量） | S5 使用（agent 写 `OrderService#previewDiscount`） |
+| `SOURCE_MAPPED` | 该事件的 `source` 来自**构建 manifest** 而非 `.map` 解码（函数/文件/原始行号）；只说明来源，不承载关联语义 | S5 使用（SDK 写 manifest 命中的 `js_method`/click 根） |
+| `VALUES_CAPPED=<n>` | 该 span 的值项因预算被截掉 `n` 项（`n`>0）；可见的丢弃计数 | S5 使用（demo 不触发） |
+| `L1_SKIPPED=<n>` | 该 span 有 `n` 个非标量/不可读参数或返回值被跳过（未采集） | S5 使用（demo 不触发） |
 
 - flag 是**提示**，不改变 `status`；未知 flag 读取方必须忽略而非报错（但 schema 只允许上述字符集）。
+- `L2` 仍是**预留**：S5 不写 `L2`，也不因写了 `L1` 就暗示 L2 可用（S6）。
+- `SOURCE_MAPPED`/`values` 只在**该事件自身**上说明来源；不从父节点继承，也不按 `nodeKey` 传播。
 - `SKELETON`/`S1_ONE_METHOD`/`S1_WALKING_SKELETON` 是本阶段标记：读取方一律按“未知 flag 忽略”规则处理，不得据此推断关联或能力。
 - 静默丢弃不可接受：任何丢弃都必须以 `DROP_COUNT` 或 `NOT_COLLECTED_LOST + reason` 出现（主计划 §9.2）。
 
@@ -208,6 +287,8 @@
 - 事件按 session 分区；单 span ≤64KB、单请求 ≤4MB（目标值，见 `transport.v1.md`）。
 - 默认脱敏字段名/注解/正则：password、token、secret、authorization、cookie、idcard、phone、email、bankcard 等。
 - 脱敏值必须是占位符/长度/哈希；`redacted=true` 但含原值属于契约违规。
+- **S5（`values[]` 落地时）**：单值字符串 ≤2048 UTF-8 字节（字符边界截断）；值项 ≤30；对象深度 ≤4 预留但**不递归**；
+  脱敏先于截断；占位符形如 `[REDACTED len=<n>]`；超预算必须带 `VALUES_CAPPED`/`L1_SKIPPED`，不得静默丢弃（§4.4.2–§4.4.4）。
 - 无遥测、无外部上报；collector 只监听本机（S0 端口 8601）。
 
 ## 9. v1 明确不含（预留，需契约变更）
@@ -215,7 +296,7 @@
 | 项 | 说明 |
 |---|---|
 | 异常详情（类型/message/栈） | `THREW` 只表状态；异常 payload 属 S1/S2 契约变更 |
-| SQL 文本与参数 | L1 计划；v1 仅 `sqlId` + `rowsAffected` |
+| SQL 文本与参数 | L1 计划；v1 仅 `sqlId` + `rowsAffected`。**S5 仍不实现 SQL 参数**：`values[]` 只承载方法参数/字段写入/返回（§4.4） |
 | `valueRef` 内容寻址 | 大对象去重预留；v1 只放摘要 |
 | 事件类型扩展 | `session_start`/`graph_patch` 等未定义 |
 | 异步上下文/跨服务字段 | `async` kind 已留，上下文传播字段未定义 |
@@ -227,6 +308,9 @@
 仍无前端 SDK/`traceparent`/clickId 传播、无关联/合并/推断、无 `values`/异常 payload、无回放/实时。0 行只是返回事实，不是错误状态。
 **S3 边界**：S3 采集前端 `ui_event/js_method/fetch/render`（F0 runtime SDK，显式 `wrapFn`）与后端 4 span 的 **EXACT 头关联**；
 纯前端零请求链可被证明；仍无构建插件/sourcemap/行号/局部变量、无 `values`/异常 payload、无 `INFERRED/MANUAL`、无 S4/S5 接入或实时。
+**S4 边界**：S4 只加诊断握手与只读连接状态；事件模型**零改动**（无新事件类型/字段/枚举；`values` 仍不使用）。
+**S5 边界**：S5 起 `values[]` 首次使用（只 `param|field|return`，§4.4），`source` 可由构建 manifest 提供（§12.11）；
+**仍无** L2/`kind=local`/行级变量/对象深采/异常 payload/异步续体/运行时 ×3/`INFERRED`/实时/持久化；schema 字节不变。
 
 ## 10. 变更流程
 
@@ -251,6 +335,9 @@
 - **S3 案例 B 纯前端零请求样例（3 行，单 trace，全 `EXACT`）**：`fixtures/s3-frontend-facts/case-b-frontend-only/events.ndjson`
   （click 根 → `OrderEdit.vue#validateForm` `RETURNED_FALSE` → render `金额必须大于 0`；零 fetch/后端）；
   期望事实：同目录 `expected-facts.json`（6 条 fact + `caseBVerdict` + `replayWindows`）。
+- **S5 L1 值样例（4 行，单 trace，全 `EXACT`/`OK`）**：`fixtures/s5-l1-values/events.ndjson`
+  （click `#btn-discount`[`source`+`SOURCE_MAPPED`] → fetch → controller[无 values] → service[`values` 5 项、flags `L1`]）；
+  期望事实：同目录 `expected-facts.json`（100→0 / 脱敏 / 截断 / return 0 / graph 15 字段）。
 - 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0/S1/S2 门禁；S3 由 tester 扩展 S3-A..S3-J）。
 ## 12. S3 runtime SDK 事件与头关联（仅语义；schema 字节不变）
 
@@ -272,6 +359,8 @@
 - 线程固定 `{"id":0,"name":"browser-main"}`；`startNs` 是 **epoch 纳秒** `round((performance.timeOrigin + performance.now()) * 1e6)`（≥0），
   `durNs` 用 `performance.now()` 差值；见 §12.10（不再“相对 SDK init”）。
 - SDK 事件**不写** `source`（无 sourcemap/插件；不猜文件/行号），不写 `values`/`reason`/异常 message/栈。
+  **S5 例外（见 §12.11）**：构建 manifest 命中时，`js_method` 与带 `data-tb-fn` 的 click 根**可以**写 `source` 与 flag `SOURCE_MAPPED`；
+  其余规则（不猜、缺失即不写、字节与 S3 一致）不变。`values` 仍**不由 SDK** 产生。
 
 ### 12.2 事件字段（唯一前端事实形状；以 dispatch §4.2 为基础，差异见 `s3-plan.md` D3）
 
@@ -363,6 +452,7 @@ ui_event(#btn-save-b, SDK_ACTIVE, OBSERVE_MS=1500)
 ### 12.9 S3 明确不做（事件模型层）
 
 - 无构建插件/sourcemap/行号/局部变量/`values[]`/字段 diff（S5）；无 S4 详情抽屉/×N/手工关联/预览注入。
+  > **S5 变更**：`values[]`（`param|field|return`）与 manifest `source` 已在 **§4.4/§12.11** 定义；`kind=local`/行级/对象深采仍属 S6。
 - 无异步上下文传播、无跨线程/跨服务、无 `INFERRED` 时间窗推断、无后台轮询车道（S6/S4）。
 - 无实时推送、无持久化、无采样/淘汰；回放只读窗口不产生新事件。
 
@@ -404,3 +494,41 @@ ui_event(#btn-save-b, SDK_ACTIVE, OBSERVE_MS=1500)
 - 单机假设不覆盖多浏览器/多 JVM/容器时钟漂移；S4+ 若跨机器再引入偏移/同步设计（需契约变更）。
 - 时间容差仅用于测试断言（建议 ≤1s），不是契约字段；运行时头关联成功不要求时间窗吻合。混合链（fetch→controller）的区间包含在测试中按同一容差校验；
   EXACT 的唯一依据是 `traceparent`/`X-TraceBoard-Click`（§12.4），不是时间吻合。
+
+### 12.11 S5 前端浅层：构建 manifest 的 `source`（仅语义；schema 字节不变）
+
+> S5 只把前端事件从 **F0（无 source）** 提升到 **F1/F2 浅层（函数名/文件/1-based 原始行号）**：
+> `source` 来自**构建插件生成的 manifest**，**不是** `.map` 解码、不是堆栈反混淆、不是服务端映射。
+> 不新增字段/枚举（`source` 是 v1 既有可选对象，`SOURCE_MAPPED` 是 §7 新增 flag）；不改变无 manifest 时的事件字节。
+
+**manifest（构建产物 / dev 端点）**
+
+```json
+{"functions":[{"name":"cancelOrder","file":"src/App.vue","line":44},
+              {"name":"validateForm","file":"src/App.vue","line":86},
+              {"name":"previewDiscount","file":"src/App.vue","line":120}]}
+```
+
+- `file`：相对 demo 前端根的 POSIX 路径（非绝对路径，遵守 §4.1 “不得写本机绝对路径”）；`line`：**原始源文件 1-based 行号**（`.vue` 用全文行号）。
+- 行号随源码变化，上面的数字**只是示意**；测试从源文件重新计算，禁止硬编码。
+- 出口：dev `GET /traceboard-manifest.json`、build `dist/traceboard-manifest.json`、build 内联 `window.__TRACEBOARD_MANIFEST__`（详见 `docs/guides/frontend-shallow-plugin.md`）。
+- SDK 启动时**同步**读内联 manifest；ESM demo 缺失时可**一次性** `fetch("/traceboard-manifest.json")` 兜底（相对路径、fail-open、无重试、无缓存、不产生事件）。
+  **IIFE/preview 构建不做兜底**。
+
+**附加规则（硬约束）**
+
+1. `js_method`（`wrapFn`）只要 manifest 有**同名**条目 → 写 `source={file,line}` + flag `SOURCE_MAPPED`；`nodeKey` 仍是 `<appName>#<name>`，不改写。
+2. click 根（`ui_event`）**仅当**目标元素有 `data-tb-fn="<name>"` 且 manifest 命中该 name 时才附加同样两项；缺失则不写。
+3. `fetch`/`render`/其它 kind **永不**附加（不猜）；后端 span 的 `source` 只来自 JVM 栈，且**不带** `SOURCE_MAPPED`。
+4. `source` 仅在 `file` 为非空字符串、`line` 为 ≥1 整数时写入；无效/不完整条目**忽略**（整条 manifest 坏掉同样按“无 manifest”处理，fail-open）。
+5. 无 manifest / 坏 manifest / CSP 拦截内联且兜底失败：事件字节与 S3 **完全一致**（无 `source`、无 `SOURCE_MAPPED`）；不得用压缩后的函数名猜行号。
+6. **preview（8602）注入页不注入 manifest** → 前端事件无 `source`；工作台显示 `未采集`（如实，不是缺陷）。
+7. `SOURCE_MAPPED` 只说明“来源是 manifest”，不表示 L2、不表示局部变量可得；`values[]` 不由 SDK 产生（§4.4）。
+8. 工作台文案：完整 source → `file:line`；flags 含 `SOURCE_MAPPED` → 追加 `（manifest 映射）`；缺失/不完整 → `未采集`。
+   旧文案 `JS 内部变量本次未采集（无构建插件/sourcemap）` 由 S5 迁移为 `JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）`。
+
+**明确不做（S5）**
+
+- 不解析 `.map`、不做堆栈反混淆、不做服务端 source map 映射、不上传/提交 `.map`（`build.sourcemap=true` 只服务浏览器 devtools）。
+- 不采集行级变量/局部变量/对象深字段（S6）；不把“函数入口行号”冒充“赋值行号”。
+- 不因 manifest 命中而改变 `status`/`return`/`confidence`/`values`。

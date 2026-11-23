@@ -2121,6 +2121,142 @@ code {
   color: #e3b341;
 }
 
+/* S5 L1 Values section (param/field/return + redaction/truncation badges). */
+.s5-values {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.s5-values__head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.s5-l1-badge {
+  background: rgba(74, 158, 255, 0.16);
+  border: 1px solid rgba(74, 158, 255, 0.6);
+  border-radius: 4px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+}
+
+.s5-values__note {
+  color: #e3b341;
+  font-size: 11px;
+  margin: 0;
+}
+
+.s5-values__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.s5-value {
+  align-items: baseline;
+  border-left: 2px solid #5b6775;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.s5-value--redacted {
+  border-left-color: #8f9cad;
+}
+
+.s5-value--truncated {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(143, 156, 173, 0.12) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.s5-value__kind {
+  background: rgba(143, 156, 173, 0.12);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 0 5px;
+  text-transform: uppercase;
+}
+
+.s5-value__name {
+  color: #c8d6e5;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.s5-value__value {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  /* The 2048-char truncated value is stored verbatim; CSS may clip the box,
+     the rendered text (and the DOM) is never rewritten. */
+  overflow: hidden;
+}
+
+.s5-value__value--diff {
+  background: rgba(227, 179, 65, 0.16);
+  border-radius: 3px;
+  color: #e3b341;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.s5-value__lock {
+  background: rgba(143, 156, 173, 0.16);
+  border: 1px solid #5b6775;
+  border-radius: 3px;
+  color: #aab6c4;
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 0 4px;
+}
+
+.s5-value__badge {
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 0 5px;
+}
+
+.s5-value__badge--redacted {
+  background: rgba(143, 156, 173, 0.12);
+  border: 1px solid #5b6775;
+  color: #aab6c4;
+}
+
+.s5-value__badge--truncated {
+  background: rgba(227, 179, 65, 0.12);
+  border: 1px dashed #8a6d1f;
+  color: #e3b341;
+}
+
+.s5-value__footer {
+  color: var(--text-dim);
+  font-size: 10px;
+  margin-left: auto;
+}
+
 /* Narrow viewports: single column, keep tables scrollable instead of clipping. */
 @media (max-width: 900px) {
   .app-shell {

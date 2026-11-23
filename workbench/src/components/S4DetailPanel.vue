@@ -2,10 +2,16 @@
 /**
  * S4 node detail drawer (read-only derivation over GET .../graph).
  *
- * Shows the selected span's 14 documented graph fields, the SQL sideEffects
- * ticket (missing = 未采集, never 0), the UI effect ticket (ui_effect/render/
- * callback listed per trace, causality not inferred), the per-invocation ×N
- * list/selector and the gap list (F > N > R, one gap per span).
+ * Shows the selected span's 15 documented graph fields (S4 14 + S5 `values`),
+ * the SQL sideEffects ticket (missing = 未采集, never 0), the UI effect ticket
+ * (ui_effect/render/callback listed per trace, causality not inferred), the
+ * per-invocation ×N list/selector, the S5 L1 Values section (param/field/
+ * return, redaction/truncation badges, 行号未采集/第 i/N 次) and the gap list
+ * (F > N > R, one gap per span).
+ *
+ * S5 reads `values` straight from the graph node; it never decodes `.map`,
+ * never recomputes redaction/truncation and never claims local variables or
+ * line-level values (L2/S6).
  */
 import { computed, ref } from "vue";
 import type { GraphNode } from "../api";
@@ -24,13 +30,23 @@ import {
   rowsForInvocation,
   rowsText,
   sortNodes,
-  sourceText,
   statusMeta,
   threadText,
   uiEffectText,
   type InvocationRows,
   type NodeGroup,
 } from "../s4/derive";
+import {
+  L1_STATIC_NOTE,
+  VALUES_EMPTY_TEXT,
+  hasL1Flag,
+  invocationText,
+  isFieldDiff,
+  lineFooterText,
+  s5SourceText,
+  valueLineText,
+  valueRows,
+} from "../s5/values";
 
 const props = defineProps<{
   nodes: GraphNode[];
@@ -112,6 +128,22 @@ const selectedEffect = computed<string | null>(() => {
 });
 
 const gaps = computed(() => deriveGaps(props.nodes));
+
+/** S5: node flags carry L1 → show the L1 badge (never a L2/local claim). */
+const l1Badge = computed<boolean>(() =>
+  selectedNode.value !== null && hasL1Flag(selectedNode.value)
+);
+
+/** S5 rows verbatim in collected order (param → field → return); null/[] = empty. */
+const values = computed(() => (selectedNode.value === null ? [] : valueRows(selectedNode.value)));
+
+/** Value-row invocation denominator: collected spans sharing the nodeKey. */
+const valuesTotal = computed<number>(() => Math.max(1, selectedGroup.value.length));
+
+/** S5 source display from the graph node; manifest hits get the suffix. */
+const sourceLabel = computed<string>(() =>
+  selectedNode.value === null ? MISSING : s5SourceText(selectedNode.value)
+);
 
 const emptyText = computed<string>(() => {
   if (props.nodes.length === 0) {
@@ -226,7 +258,9 @@ function onClose(): void {
         </div>
         <div class="s4-facts__row">
           <dt>source</dt>
-          <dd>{{ sourceText(selectedNode) }}<span class="s4-detail__muted">（无 sourcemap/行号映射；缺失即未采集）</span></dd>
+          <dd>
+            <code id="s5-source">{{ sourceLabel }}</code><span class="s4-detail__muted">（manifest 命中显示 file:line；缺失即未采集；无 .map 解码）</span>
+          </dd>
         </div>
         <div class="s4-facts__row">
           <dt>时间</dt>
@@ -240,6 +274,73 @@ function onClose(): void {
           <dd><code>{{ selectedNode.spanId }}</code></dd>
         </div>
       </dl>
+
+      <section id="s5-values" class="s5-values" aria-label="L1 值">
+        <header class="s5-values__head">
+          <h4 class="s4-detail__section-title">Values · L1（参数 / 字段写入 / 返回）</h4>
+          <span
+            v-if="l1Badge"
+            id="s5-l1-badge"
+            class="s5-l1-badge"
+            title="该节点 flags 含 L1：L1 参数/字段写入/返回摘要（不是 L2）"
+          >
+            L1
+          </span>
+        </header>
+        <p id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
+        <p class="s4-detail__hint">
+          字段写入行显示 old → new（例如 100 → 0，高亮）；参数/返回行显示 to。
+          值行序号来自 values.invocation；S4 ×N 组序号来自同 nodeKey 的已采集 span 分组，两者不混用。
+        </p>
+        <ul v-if="values.length > 0" class="s5-values__list">
+          <li
+            v-for="(value, index) in values"
+            :key="`${value.kind}-${value.name}-${index}`"
+            class="s5-value"
+            :class="{
+              's5-value--truncated': value.truncated,
+              's5-value--redacted': value.redacted,
+            }"
+            :data-value-kind="value.kind"
+          >
+            <span class="s5-value__kind">{{ value.kind }}</span>
+            <code class="s5-value__name">{{ value.name }}</code>
+            <span
+              class="s5-value__value"
+              :class="{ 's5-value__value--diff': isFieldDiff(value) }"
+              title="值原样来自采集端（不重算脱敏/截断）"
+            >
+              {{ valueLineText(value) }}
+            </span>
+            <span
+              v-if="value.redacted"
+              class="s5-value__lock"
+              title="锁：值级已脱敏，原值不出现"
+              aria-label="已脱敏（锁）"
+            >
+              锁
+            </span>
+            <span
+              v-if="value.redacted"
+              class="s5-value__badge s5-value__badge--redacted"
+              title="值级已脱敏：只显示占位符，原值不出现"
+            >
+              已脱敏
+            </span>
+            <span
+              v-if="value.truncated"
+              class="s5-value__badge s5-value__badge--truncated"
+              title="值级已截断：超过 2048 字节且未追加省略号"
+            >
+              已截断
+            </span>
+            <span class="s5-value__footer">
+              {{ lineFooterText(value) }} · {{ invocationText(value, valuesTotal) }}
+            </span>
+          </li>
+        </ul>
+        <p v-else id="s5-values-empty" class="s4-detail__missing">{{ VALUES_EMPTY_TEXT }}</p>
+      </section>
 
       <div id="s4-detail-tabs" class="s4-tabs" role="tablist" aria-label="节点详情票签">
         <button

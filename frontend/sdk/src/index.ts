@@ -1,23 +1,30 @@
 /**
- * @traceboard/sdk — TraceBoard S3 runtime SDK (F0).
+ * @traceboard/sdk — TraceBoard S3/S5 runtime SDK.
  *
  * What it does (only these facts):
  * - document capture-phase clicks -> `ui_event` root per click (new traceId/clickId/spanId);
  * - wraps `window.fetch` and `XMLHttpRequest` -> `fetch` spans (same click window only);
  * - `wrapFn(name, fn)` -> `js_method` spans (OK / RETURNED_FALSE / THREW);
- * - `uiEffect(text)` -> `render` spans (`return.type = "ui_effect"`; the SDK never reads/writes the DOM).
+ * - `uiEffect(text)` -> `render` spans (`return.type = "ui_effect"`; the SDK never reads/writes the DOM);
+ * - S5: reads `window.__TRACEBOARD_MANIFEST__` (build-plugin manifest) and attaches
+ *   `source={file,line}` + flag `SOURCE_MAPPED` to matching `js_method` spans and to click roots
+ *   whose target has `data-tb-fn="<name>"`.
  *
- * Hard boundaries (S3; see docs/contracts/event-model.v1.md §12):
- * - no build plugin, no sourcemap, no file/line, no local variables, no `values[]`;
+ * Hard boundaries (S5; see docs/contracts/event-model.v1.md §12):
+ * - no `.map` decoding; file/line only via build manifest (SOURCE_MAPPED); no local variables, no `values[]`;
  * - no request/response bodies, form values, query strings/hashes, cookies, arbitrary return values;
  * - only same-origin, non-ingest requests get `traceparent` + `X-TraceBoard-Click`;
  * - ingest uses the native fetch captured at init (no recursion), NDJSON batches, fire-and-forget;
  * - `startNs` is single-machine epoch nanoseconds: round((performance.timeOrigin + performance.now()) * 1e6);
  * - all SDK failures are swallowed (fail-open) and never change page behavior.
  *
- * Intentionally NOT implemented (S4/S5): async context propagation (await/.then/timer continuations
+ * Manifest loading: synchronous inline read at init; when absent, the ESM build may fetch
+ * `/traceboard-manifest.json` exactly once (relative path, fail-open, no retry, no cache, no event).
+ * The IIFE/preview build never fetches the manifest (preview injection pages have no manifest).
+ *
+ * Intentionally NOT implemented (S6): async context propagation (await/.then/timer continuations
  * fall back to the click root), background request lanes outside a click window, `callback` events,
- * `INFERRED`/`MANUAL` confidence, DOM diffing/screenshots.
+ * `INFERRED`/`MANUAL` confidence, DOM diffing/screenshots, local variables / line-level values.
  */
 
 /** SDK version; keep in sync with package.json (asserted by the IIFE tests). */
@@ -62,6 +69,12 @@ interface EventReturn {
   value?: unknown;
 }
 
+/** Manifest-derived source fact: relative POSIX file + 1-based original line. */
+interface SourceRef {
+  file: string;
+  line: number;
+}
+
 interface SpanEvent {
   schema: "traceboard.event.v1";
   type: "span";
@@ -72,6 +85,7 @@ interface SpanEvent {
   rootEventId: string;
   kind: FrontendKind;
   nodeKey: string;
+  source?: SourceRef;
   thread: { id: number; name: string };
   startNs: number;
   durNs: number;
@@ -86,6 +100,7 @@ interface Operation {
   clickId: string;
   rootSpanId: string;
   nodeKey: string;
+  source: SourceRef | null;
   startPerfMs: number;
   lastEndPerfMs: number;
   pending: number;
@@ -115,6 +130,59 @@ const MAX_NODE_KEY = 200;
 const MAX_BATCH_LINES = 100;
 const MAX_BATCH_BYTES = 4 * 1024 * 1024;
 const MAX_KEEPALIVE_BYTES = 60 * 1024;
+const MANIFEST_URL = "/traceboard-manifest.json";
+
+/** Build-plugin manifest: function name -> {file, line}. Loaded once per page (fail-open). */
+let manifestSources: Map<string, SourceRef> | null = null;
+let manifestFallbackStarted = false;
+
+function normalizeManifest(raw: any): Map<string, SourceRef> | null {
+  try {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return null;
+    }
+    const functions = (raw as any).functions;
+    if (!Array.isArray(functions)) {
+      return null;
+    }
+    const map = new Map<string, SourceRef>();
+    for (const entry of functions) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const name = (entry as any).name;
+      const file = (entry as any).file;
+      const line = (entry as any).line;
+      if (typeof name !== "string" || name === "") {
+        continue;
+      }
+      if (typeof file !== "string" || file.trim() === "") {
+        continue;
+      }
+      if (typeof line !== "number" || !Number.isInteger(line) || line < 1) {
+        continue;
+      }
+      if (!map.has(name)) {
+        map.set(name, { file, line });
+      }
+    }
+    return map;
+  } catch {
+    return null;
+  }
+}
+
+function lookupSource(name: string): SourceRef | null {
+  try {
+    if (!manifestSources || typeof name !== "string") {
+      return null;
+    }
+    const ref = manifestSources.get(name);
+    return ref ? { file: ref.file, line: ref.line } : null;
+  } catch {
+    return null;
+  }
+}
 
 function perfNow(): number {
   const perf = (globalThis as any).performance;
@@ -421,9 +489,92 @@ class TraceBoardRuntime {
     this.installXhr();
   }
 
+  /**
+   * S5: load the build-plugin manifest once (fail-open, never emits events).
+   * - inline `window.__TRACEBOARD_MANIFEST__` is read synchronously;
+   * - the ESM build (not the IIFE/preview bundle) may fetch `/traceboard-manifest.json` exactly once;
+   * - bad/missing manifests leave the SDK on the S3 baseline (no `source`, no `SOURCE_MAPPED`).
+   */
+  loadSourceManifest(): void {
+    try {
+      if (manifestSources !== null) {
+        return;
+      }
+      const inline = this.win ? this.win.__TRACEBOARD_MANIFEST__ : undefined;
+      const parsed = normalizeManifest(inline);
+      if (parsed) {
+        manifestSources = parsed;
+        return;
+      }
+      if (typeof __TRACEBOARD_IIFE__ !== "undefined" && __TRACEBOARD_IIFE__) {
+        return;
+      }
+      if (manifestFallbackStarted) {
+        return;
+      }
+      manifestFallbackStarted = true;
+      const native = this.nativeFetch;
+      if (!native) {
+        return;
+      }
+      let response: any;
+      try {
+        response = native(MANIFEST_URL, { method: "GET", credentials: "same-origin", cache: "no-store" });
+      } catch {
+        return;
+      }
+      if (!isPromiseLike(response)) {
+        return;
+      }
+      response.then(
+        (resolved: any) => {
+          try {
+            if (!resolved) {
+              return;
+            }
+            let read: any = null;
+            if (typeof resolved.json === "function") {
+              read = resolved.json();
+            } else if (typeof resolved.text === "function") {
+              read = resolved.text().then((text: string) => JSON.parse(text));
+            }
+            if (!read || !isPromiseLike(read)) {
+              return;
+            }
+            read.then(
+              (data: any) => {
+                const fallbackSources = normalizeManifest(data);
+                if (fallbackSources) {
+                  manifestSources = fallbackSources;
+                }
+              },
+              () => {
+                // fail-open: fallback is best effort
+              }
+            );
+          } catch {
+            // fail-open
+          }
+        },
+        () => {
+          // fail-open: no retry
+        }
+      );
+    } catch {
+      // fail-open
+    }
+  }
+
   private onClick = (event: any): void => {
     try {
-      this.beginOperation(elementIdentity(event && event.target));
+      let source: SourceRef | null = null;
+      try {
+        const fnName = attributeOf(event && event.target, "data-tb-fn");
+        source = fnName ? lookupSource(fnName) : null;
+      } catch {
+        source = null;
+      }
+      this.beginOperation(elementIdentity(event && event.target), source);
     } catch {
       // fail-open
     }
@@ -445,7 +596,7 @@ class TraceBoardRuntime {
     }
   };
 
-  private beginOperation(nodeKey: string): void {
+  private beginOperation(nodeKey: string, source: SourceRef | null): void {
     this.closeCurrentOperation();
     const startPerfMs = perfNow();
     const op: Operation = {
@@ -453,6 +604,7 @@ class TraceBoardRuntime {
       clickId: `click_${randomHex(16)}`,
       rootSpanId: randomHex(16),
       nodeKey,
+      source,
       startPerfMs,
       lastEndPerfMs: startPerfMs,
       pending: 0,
@@ -524,7 +676,12 @@ class TraceBoardRuntime {
     }
     op.rootEmitted = true;
     this.openOps.delete(op);
-    this.enqueue({
+    const flags = ["SDK_ACTIVE", "S3_RUNTIME_SDK"];
+    if (op.source) {
+      flags.push("SOURCE_MAPPED");
+    }
+    flags.push(`OBSERVE_MS=${op.observeMs}`);
+    const event: SpanEvent = {
       schema: EVENT_SCHEMA,
       type: "span",
       sessionId: this.opts.sessionId,
@@ -540,8 +697,12 @@ class TraceBoardRuntime {
       status: "OK",
       return: null,
       confidence: "EXACT",
-      flags: ["SDK_ACTIVE", "S3_RUNTIME_SDK", `OBSERVE_MS=${op.observeMs}`]
-    });
+      flags
+    };
+    if (op.source) {
+      event.source = op.source;
+    }
+    this.enqueue(event);
   }
 
   private emitChild(
@@ -553,14 +714,19 @@ class TraceBoardRuntime {
     startPerfMs: number,
     endPerfMs: number,
     status: FrontendStatus,
-    returnValue: EventReturn | null
+    returnValue: EventReturn | null,
+    source: SourceRef | null = null
   ): void {
     if (op.rootEmitted) {
       this.drops += 1;
       return;
     }
     op.lastEndPerfMs = Math.max(op.lastEndPerfMs, endPerfMs);
-    this.enqueue({
+    const flags = ["SDK_ACTIVE"];
+    if (source) {
+      flags.push("SOURCE_MAPPED");
+    }
+    const event: SpanEvent = {
       schema: EVENT_SCHEMA,
       type: "span",
       sessionId: this.opts.sessionId,
@@ -576,8 +742,12 @@ class TraceBoardRuntime {
       status,
       return: returnValue,
       confidence: "EXACT",
-      flags: ["SDK_ACTIVE"]
-    });
+      flags
+    };
+    if (source) {
+      event.source = source;
+    }
+    this.enqueue(event);
   }
 
   private afterChild(op: Operation): void {
@@ -606,6 +776,7 @@ class TraceBoardRuntime {
       const parentSpanId = runtime.parentFor(op);
       const nodeKey = `${runtime.opts.appName}#${name}`;
       runtime.stack.push({ spanId, op });
+      const source = lookupSource(name);
       let result: any;
       try {
         result = fn.apply(this, args);
@@ -620,7 +791,8 @@ class TraceBoardRuntime {
           startPerfMs,
           perfNow(),
           "THREW",
-          null
+          null,
+          source
         );
         runtime.afterChild(op);
         throw error;
@@ -629,15 +801,16 @@ class TraceBoardRuntime {
       if (isPromiseLike(result)) {
         try {
           result.then(
-            (value: any) => runtime.finishJsMethod(op!, nodeKey, spanId, parentSpanId, startPerfMs, value, false),
-            () => runtime.finishJsMethod(op!, nodeKey, spanId, parentSpanId, startPerfMs, undefined, true)
+            (value: any) =>
+              runtime.finishJsMethod(op!, nodeKey, spanId, parentSpanId, startPerfMs, value, false, source),
+            () => runtime.finishJsMethod(op!, nodeKey, spanId, parentSpanId, startPerfMs, undefined, true, source)
           );
         } catch {
           // Non-standard thenable: keep behavior, skip the completion record.
         }
         return result;
       }
-      runtime.finishJsMethod(op, nodeKey, spanId, parentSpanId, startPerfMs, result, false);
+      runtime.finishJsMethod(op, nodeKey, spanId, parentSpanId, startPerfMs, result, false, source);
       return result;
     };
     return wrapped as T;
@@ -650,7 +823,8 @@ class TraceBoardRuntime {
     parentSpanId: string,
     startPerfMs: number,
     value: any,
-    threw: boolean
+    threw: boolean,
+    source: SourceRef | null = null
   ): void {
     let status: FrontendStatus = "OK";
     let returnValue: EventReturn | null = null;
@@ -660,7 +834,7 @@ class TraceBoardRuntime {
       status = "RETURNED_FALSE";
       returnValue = { type: "boolean", value: false };
     }
-    this.emitChild(op, "js_method", nodeKey, spanId, parentSpanId, startPerfMs, perfNow(), status, returnValue);
+    this.emitChild(op, "js_method", nodeKey, spanId, parentSpanId, startPerfMs, perfNow(), status, returnValue, source);
     this.afterChild(op);
   }
 
@@ -1131,6 +1305,7 @@ export function initTraceBoard(options: InitOptions = {}): TraceBoardHandle {
     }
     const runtime = new TraceBoardRuntime(normalizeOptions(options));
     runtime.install();
+    runtime.loadSourceManifest();
     activeRuntime = runtime;
     markSdkActive(windowObject());
     return runtime.handle;

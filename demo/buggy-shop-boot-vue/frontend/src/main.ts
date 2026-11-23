@@ -4,5 +4,6 @@ import "./traceboard";
 import "./style.css";
 
 // S3 demo: the runtime SDK is initialized before mount (see src/traceboard.ts).
-// SDK events go to the collector through the Vite `/ingest` proxy; no build plugin, no sourcemap.
+// S5 build plugin emits function/file/line manifest (no .map decoding); local variables remain S6.
+// SDK events go to the collector through the Vite `/ingest` proxy.
 createApp(App).mount("#app");

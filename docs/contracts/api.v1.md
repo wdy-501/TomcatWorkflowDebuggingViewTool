@@ -1,6 +1,6 @@
 # HTTP API 契约 v1（api.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24；S4 增补：2026-11-24；S4-AMD-01：2026-11-26，日期笔误按 2026-11-23 生效）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24；S4 增补：2026-11-24；S4-AMD-01：2026-11-26，日期笔误按 2026-11-23 生效；S5 增补：2026-11-27）
 > 变更记录：**2026-11-23 S1 增补**——ingest 与两个只读查询转为 IMPLEMENTED，meta `capabilities.ingestEvents=true`；
 >   S0 的矩阵/端点章节按原样保留为历史（§2、§3、§4、§6），S1 当时权威定义在 **§7**。graph/replay/stream/links 当时仍为 RESERVED。
 >   **2026-11-23 G1 第 1 轮**：§7.5 补一句“agent controller span 为游离后端根”，指向 `event-model.v1.md` §5 第 2 条例外（仅文档）。
@@ -22,6 +22,13 @@
 >   `reason`/`source`/`confidence`（11 → **固定 14 字段**；`flags` 语义不变；`nodes`/`edges`/排序/节点数/`rootEventId`/顶层 `confidence` 与
 >   `events`/`seq`/`requests`/`replay` 全部零改动；不改 schema、不改 S0–S3 fixture）。字段定义见 **§8.2** 与 **§10.8**；
 >   CLI `--collector` 寻址、`diagnose` 七项/SKIP/WARN/`SUMMARY` 语义、预览响应改写规则见 `s4-plan.md` §4 与 `docs/guides/local-launcher.md`。
+>   **2026-11-27 S5 增补（加性、只读；历史 §2–§10 全部保留不改写）**：graph `nodes[]` 从 S4 的 14 字段**加性**扩为**固定 15 字段**——
+>   末尾追加第 15 个 `values`（事件 `values` 原样数组；事件无该字段 → `null`，**不默认 `[]`**），字段定义见 **§8.2** 与 **§10.9**；
+>   `events`/`seq`/`requests`/`replay` 零改动，`edges`/排序/节点数/`rootEventId`/顶层 `confidence`/错误码/只读/两次一致不变，
+>   meta `capabilities` 仍**恰好 5 键**。S5 **不新增 collector 路由**、不改任何路径/参数/状态码（§2.5）；
+>   demo 侧新增 `POST /api/orders/{id}/preview-discount`（**demo 应用 API**，非 collector 路由，附录 D）与其 L1 事实；
+>   前端 manifest/`source`/`SOURCE_MAPPED` 的浏览器侧形状见**附录 E** 与 `docs/guides/frontend-shallow-plugin.md`。
+>   **schema 字节不变**（`values` 自 v1 起就是可选字段，见 `event-model.v1.md` §4.4）；S0–S4 fixture 字节不变。
 > 范围：collector HTTP API + demo 应用 API（附录）。**S3 的写入面仍只有 `POST /ingest/v1/events`**，其余 collector 端点全部只读。
 > 关联：`transport.v1.md`（ingest 线上格式与 202/400/413/415、查询通路 C）、`event-model.v1.md`（事件体）。
 
@@ -144,6 +151,30 @@ S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不
 - S3 的 7 条业务路由（meta/ingest/sessions/events/requests/graph/replay）**除 graph 节点按 §10.8 加性新增 3 个只读字段外**，形状与语义零改动；S4 只新增 hello（POST）与 agent（GET）两条。
 - `stream`/`ws`/`links` 仍不得注册路径字符串；未注册 404、方法不匹配 405；错误信封见 `transport.v1.md` §4.3。
 - S4 的 ×N/详情/缺口**全部在前端派生**，collector 不新增端点；graph 只按 §10.8 加性新增只读字段，不做聚合（同 `nodeKey` 多次调用仍是多个节点）；运行时 ×3 属 S6。
+
+### 2.5 S5 实现矩阵（当前权威；S0–S4 矩阵保留为历史）
+
+| 方法 | 路径 | S5 状态 | 说明 |
+|---|---|---|---|
+| GET | `/actuator/health` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/meta` | **IMPLEMENTED** | `capabilities` 仍**恰好 5 键**、取值与 S4 **逐字相同**（`replay=true`、`realtime=false`）；L1 不是能力开关 |
+| POST | `/ingest/v1/events` | **IMPLEMENTED** | 线上格式/202/400/413/415/幂等/`seq` 全部不变；`values` 是**既有 schema 可选字段**，ingest 只做 schema 校验，不做 L1 语义校验 |
+| POST | `/ingest/v1/agent-hello` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/sessions` | **IMPLEMENTED** | 不变（事件计数仍按行计，不含 `values` 项数） |
+| GET | `/api/v1/sessions/{sessionId}/events` | **IMPLEMENTED** | 不变；`event` 逐字回显（S5 起可能含 `values`，因为它一直在 schema 里） |
+| GET | `/api/v1/sessions/{sessionId}/requests` | **IMPLEMENTED** | 不变（**不**因 L1 新增字段/改变 `status` 聚合） |
+| GET | `/api/v1/sessions/{sessionId}/graph?traceId=<32hex>` | **IMPLEMENTED** | S5 **加性**：节点 14 → **固定 15 字段**（末尾 `values`，§8.2/§10.9）；其余一切不变 |
+| GET | `/api/v1/sessions/{sessionId}/replay?fromNs=&toNs=` | **IMPLEMENTED** | 不变（只读窗口；窗口内事件里的 `values` 原样回显，不新增过滤/裁剪） |
+| GET | `/api/v1/sessions/{sessionId}/agent` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/stream` | RESERVED | SSE 不实现（404） |
+| WS | `/ws/v1/events` | RESERVED | WebSocket 不实现（404） |
+| POST | `/api/v1/sessions/{sessionId}/links` | RESERVED | 手工关联不实现（S6，404） |
+
+- **S5 不新增 collector 路由**：业务路由仍 **9 条**（meta、ingest、hello、sessions、events、requests、graph、replay、agent），含 `/actuator/health` 共 **10 条**；路径/参数/状态码/错误信封零改动。
+- `events`/`seq`/`requests`/`replay` 的响**形状与字节**与 S4 逐字一致；唯一加性变化是 graph 节点末尾的 `values`（只读派生，不写存储、不消耗 `seq`、不缓存）。
+- `values` 的数据来源是**已存事件原值**（采集端已完成脱敏/截断/预算）；collector 不重算、不合并、不裁剪、不排序、不改写（§10.9）。
+- demo 的 `POST /api/orders/{id}/preview-discount` 是 **demo 应用 API**（附录 D），不是 collector 路由；它不改变 collector 契约面，也不新增 collector 能力键。
+- **没有** L2/`kind=local`/对象深采/异步续体/运行时 ×3/SSE/WS/持久化/sourcemap 解码/图库（S6+，见 §11 与附录 E 的“浅层”口径）。
 
 ## 3. S0 已实现端点（S0 历史；S1 现状见 §7）
 
@@ -565,10 +596,11 @@ Host: 127.0.0.1:8601
 | `rootEventId` | string \| null | 根 span 的 `rootEventId`（S2 为 `click_lost_<根spanId>`）；无根时 `null` |
 | `confidence` | string | 根 span 的 `confidence`；无根时固定 `"LOST"` |
 
-**`nodes[]`（S2–S3：每条固定 11 个字段；S4 起：每条固定 14 个字段，字段恒出现）**
+**`nodes[]`（S2–S3：每条固定 11 个字段；S4 起：每条固定 14 个字段；**S5 起：每条固定 15 个字段**，字段恒出现）**
 
 > 上例为 S2 历史形状（11 字段）。S4 起每个节点**加性**多出 `reason`/`source`/`confidence` 三个只读字段（见下表末三行与 §10.8）；
 > 其余字段、`nodes` 顺序、`edges`、节点数、`rootEventId`、顶层 `confidence` 不变。
+> **S5 起**在末尾再加第 15 个只读字段 `values`（见下表最后一行与 §10.9）：14 字段的语义、顺序与取值一字不改，只在其后追加一项。
 
 | 字段 | 类型 | 语义 |
 |---|---|---|
@@ -586,8 +618,11 @@ Host: 127.0.0.1:8601
 | `reason` | string \| null | **S4 加性**；事件 `reason` 原样；事件无该字段（非 `NOT_COLLECTED_*`）→ `null`；不改写/截断 |
 | `source` | object \| null | **S4 加性**；事件 `source` 原样 `{"file": string\|null, "line": int\|null}`；事件无 → `null`；不补默认值 |
 | `confidence` | string | **S4 加性**；事件 `confidence` 原样（`EXACT/INFERRED/LOST/MANUAL`）；不按节点重算、不伪造 |
+| `values` | array \| null | **S5 加性（第 15 字段）**；事件 `values` 原样数组（元素形状见 `event-model.v1.md` §4.4）；事件无该字段 → `null`（**不默认 `[]`**）；不重算/不合并/不裁剪/不排序/不改写 |
 
 - S4 加性字段的顺序固定为节点字段末尾：`spanId, parentSpanId, kind, nodeKey, status, return, sideEffects, startNs, durNs, thread, flags, reason, source, confidence`（14 项，每项恒出现）。
+- **S5 起**顺序固定为 `spanId, parentSpanId, kind, nodeKey, status, return, sideEffects, startNs, durNs, thread, flags, reason, source, confidence, values`（**15 项**，每项恒出现；`values` 是唯一新项）。
+- `values` 只描述“该节点对应事件采集到的值级事实”，**不等于** L2：S5 只允许 `param|field|return`，`kind=local`/行级变量属 S6 且 S5 不产生（§10.9）。
 - `flags` 是**既有**字段（S2 起 11 字段之一），S4 **不改其语义**；`reason/source/confidence` 只来自该节点对应事件，不聚合、不跨节点继承。
 
 **`edges[]`**
@@ -790,6 +825,11 @@ Host: 127.0.0.1:8601
   `NOT_COLLECTED_*` 灰虚线 + `reason`；`TRUNCATED` 条纹“已截断/已折叠”；`REDACTED` 锁形（S3 fixture 不使用但 UI 必须支持）；
   `UNKNOWN` 问号；`confidence=LOST` 游离标注；`MANUAL` 虚线（S3 不产生）。
 
+> **S5 变更（取代本节“无 sourcemap/行号”的历史文案，历史保留不改写）**：S5 起 demo 前端加了浅层 Vite 插件与 `build.sourcemap=true`，
+> `validateForm` 这类 `wrapFn`/`data-tb-fn` 命中 manifest 的事件会带 `source={file,line}` + flag `SOURCE_MAPPED`（附录 E、`event-model.v1.md` §12.11）。
+> 因此工作台文案从 `JS 内部变量本次未采集（无构建插件/sourcemap）` 迁移为 `JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）`；
+> **局部变量/行级变量仍然未采集**，`source` 只到“函数/文件/原始行号”，不是 `.map` 解码，也不是 L2。
+
 ### 9.4 `GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex>`（S3 语义补充）
 
 - 形状、节点字段、`edges[{from,to,count}]`、排序、400/404/405、只读与两次一致**全部沿用 §8.2**；S3 当时**不新增字段**、不改形状；S4 起按 §8.2/§10.8 **加性**新增 `reason/source/confidence`（其余仍不变）。
@@ -985,6 +1025,10 @@ Host: 127.0.0.1:8601
 - 无 WAR/Tomcat/React/cloud（S7+）；不改 demo 后端、H2 seed 与案例 A 行为。
 - 预览代理不改写 CSP、不注入内联脚本、不做 TLS、不重写绝对 URL/`Location`；受 CSP/压缩/无 `</body>` 限制（见 `docs/guides/local-launcher.md`）。
 
+> **S5 变更（取代上文 S4 边界，其余仍有效）**：S5 起 demo `previewDiscount` 的**参数/字段写入/返回**会写入事件 `values[]` 并经 graph 第 15 字段 `values` 暴露（§10.9、附录 D）；
+> demo 前端另有**浅层构建插件/manifest/`sourcemap`**（附录 E、§9.3）：只有函数/文件/原始行号，**不解析 `.map`**、无源码片段、无局部变量；preview（8602）不注入 manifest；
+> **L2/局部变量/行级变量/对象深采/异步/运行时 ×3 仍不在范围内（S6）**。S4 的其余边界（无 SSE/WS/持久化、无 WAR/Tomcat/React/cloud、案例 A 行为不变）继续有效。
+
 ### 10.7 S4 冒烟命令
 
 ```bash
@@ -1033,6 +1077,47 @@ capabilities 仍为 5 键（`replay=true`、`realtime=false`）。S4 不改变 `
 - 工作台**直接从 graph 读取** `reason/source/confidence/flags` 展示详情，不再为这三个字段翻页 join 事件；`reason` 缺失且 status 为
   `NOT_COLLECTED_*` → `未采集（无 reason）`；`source` 非完整 `file:line` → `未采集`。
 - `fixtures/s4-details/**` 无需修改事件字节；S2/S3 graph 回归与 `tools/verify` 的 `GRAPH_NODE_KEYS` 迁移为 14 键（仅加性），节点值/边/顺序断言不变。
+
+### 10.9 S5 注记：graph 节点第 15 字段 `values`（加性、只读）
+
+> 这是**加性契约变更**，不是 schema 变更：`values` 自 v1 起就是事件的**可选**字段（`event-model.v1.md` §4.4），
+> 事件字节、`events`/`seq`、`requests`/`replay`、ingest、hello 全部零改动；只允许 collector 在只读派生层
+> （`SpanFacts`/`GraphNode`/`TraceDeriver` 及对应测试）把节点从 14 字段扩为 **固定 15 字段**。
+
+**位置与恒出现**
+
+```text
+spanId, parentSpanId, kind, nodeKey, status, return, sideEffects, startNs, durNs,
+thread, flags, reason, source, confidence, values        （15 项，顺序固定，每项恒出现）
+```
+
+**`values` 的取值规则（逐条硬约束）**
+
+1. **原样**：节点 `values` = 该节点对应事件 `values` 的**逐字**反序列化结果（数组；元素携带 `name/kind/line/from/to/truncated/redacted`，单次调用可省略 `invocation`）。
+2. **缺失即 `null`**：事件**没有** `values` 字段 → 节点 `values` 为 `null`；**不得**写成 `[]`、不得省略该键、不得补默认值。
+3. **不加工**：不重算脱敏、不重算截断、不按 `name` 去重、不按 `nodeKey` 合并、不排序、不裁剪、不补 `line`/`invocation`。
+   脱敏/截断/预算由采集端（agent / 对应 emitter）完成（`event-model.v1.md` §4.4/§8）。
+4. **不聚合、不跨节点继承**：同 `nodeKey` 多次调用仍是多个节点，各自携带自己的 `values`（S6 才做 ×N 聚合与逐次选择）。
+5. **不影响其它字段**：`status` 不因 `truncated=true` 改成 `TRUNCATED`（值级标记 ≠ 事件级状态）；`flags`/`reason`/`source`/`confidence`/`return`/`sideEffects` 独立原样。
+6. **只读**：两次相同 GET 逐字一致；不写事件、不消耗 `seq`、不缓存、不落 DB/文件、不改变 `requests`/`replay` 的响应。
+7. **能力口径**：S5 只产生 `kind=param|field|return`；`kind=local` 属 S6，S5 **不得**出现（出现即越界）。
+8. **meta 不变**：`capabilities` 仍恰好 5 键；L1 不是能力开关，不新增第 6 键。
+
+**工作台读取口径（只读派生，前端）**
+
+- 详情 Values 区直接从 graph 节点读 `values`（无需为 `values` 翻页 join `events`），按数组顺序渲染：`param` → `field` → `return`。
+- 空/缺失（`null` 或空数组）：**逐字** `未采集（该节点无 values；S5 只采参数/字段写入/返回摘要）`。
+- 静态说明（逐字，必须与详情同屏）：`S5 L1：参数/字段写入/返回摘要；局部变量（L2）与行级属 S6，本阶段未采集`。
+- `field` 行显示 `from → to`（含 `100 → 0` 高亮）；`redacted=true` 行标 `已脱敏` 且**只显示占位符**；`truncated=true` 行标 `已截断`；`line` 为 `null` 时显示 `行号未采集`。
+- 值行页脚显示调用序号：`invocation` 缺省（S5 单次）→ 逐字 `第 1/1 次`；存在 `invocation` 时 → `第 i/N 次`（`i` 从 1 起）。
+  值行序号来自 `values.invocation`；上方 S4 ×N 组序号来自同 `nodeKey` 的已采集 span 分组（前端聚合）——两者来源不同，UI 不得混用（S5 demo 单次，值行仍 `第 1/1 次`）。
+- 节点 flag 含 `L1` 时显示 `L1` 徽标；**不得**出现 `local`/L2/行级变量的宣示。
+
+**不变项（S5 回归清单）**
+
+- `nodes` 排序（`startNs` 升序、同值 `spanId`）、`edges`（`count` 恒 1）、节点数、`rootEventId`、顶层 `confidence`、`sessionId`/`traceId`；
+- `events`/`seq`/`requests`/`replay` 响应形状与字节；400/404/405、ingest 202/400/413/415、hello 200/400/413/415、只读与两次一致；
+- schema 字节、S0–S4 fixture 字节、`transport.v1.md`/`status-semantics.md` 字节（S5 不改传输与状态语义）。
 
 ## 附录 A：demo 应用 API（非 TraceBoard API，S0 历史）
 
@@ -1093,3 +1178,93 @@ capabilities 仍为 5 键（`replay=true`、`realtime=false`）。S4 不改变 `
   窗口外的后台轮询在本阶段不采集，UI 文案只声明“本次点击因果链内”。
 - 期望 fixture：`fixtures/s3-frontend-facts/case-b-frontend-only/**`（3 行：click → validateForm `RETURNED_FALSE` → render；零 fetch）。
   fixture 是契约形状，不是运行时证据；运行时“确认没发”必须来自浏览器 SDK 的真实事件。
+
+## 附录 D：S5 demo L1（`preview-discount`；非 TraceBoard API）
+
+> 这是 demo 应用为 S5 新增的**演示端点**，不是 collector 路由，也不改变 collector 契约面。
+> 它故意把金额在**内存对象**上从 100 改成 0、数据库仍是 100.00 —— 用来演示 L1 的“参数 100 / 字段 100→0 / 返回 0”三段事实（主计划 §16 T3）。
+> `demoSecret=s3cr3t` 是**演示假值**，只用于证明脱敏。
+
+| 方法 | 路径 | 响应 | 行为 |
+|---|---|---|---|
+| POST | `/api/orders/{id}/preview-discount?requestedAmount=<double>&demoSecret=<string>&note=<string>` | `200 {"data":0}` | `OrderService#previewDiscount`：`findById` → `o != null` 时 `o.setAmount(0)`（**仅内存，绝不 UPDATE**）→ `return 0`；DB `amount` 仍 `100.00` |
+| POST | `/api/orders/{id}/preview-discount`（未知 `id`，如 `999`） | `200 {"data":0}` | `findById=null` → **不写字段、不 NPE**；响应与已知 id 相同 |
+
+- **精确口径（不得按“直觉 REST”改）**：未知 `id` **不返回 404**，**也不返回** `{"data":-1}` / `{"data":null}`；S5 只有 `200 {"data":0}` 一种成功形状。
+  理由：未知 id 只是“不写字段”的健壮性分支（`findById=null` 不得 NPE），S5 不为它引入第二套业务错误协议；
+  验收信号是 L1 三段事实（参数/字段/返回），不是错误码矩阵（dispatch §3 为 binding）。
+- 缺失/非法 query（`requestedAmount` 非 double 等）保持 **Boot 默认 400**；S5 不新增业务错误码，也不对该分支做业务断言。
+- **不新增其它 API**：`GET /api/orders`、`POST /api/orders/{id}/cancel` 的方法/状态码/0 行事实一字不改（附录 B 继续有效）。
+- **DB 不动**：不 `UPDATE`、不写 `orders`、不改变 H2 seed；`amount` 永远 `100.00`（案例 A 的 `cancelById` 影响 0 行也照旧）。
+- 前端：固定值按钮 `#btn-discount`（`data-tb-fn="previewDiscount"`）→ 固定 URL（`requestedAmount=100&demoSecret=s3cr3t&note=` + 3000 个 ASCII `x`，`encodeURIComponent`）；
+  页面显示 `{"data":0}` 与“仅内存返回 0、数据库金额未改”提示；**不调用** `loadOrders`，不改变案例 A/B。
+- 后端实现：`OrderMapper` 新增只读查询 `Order findById(@Param("id") long id)` + XML `SELECT ... WHERE id=#{id}`；
+  **该 mapper/sql 不插桩**（不产生 mapper/sql 节点；S2 的 `cancelById` 过滤器与 SQL 事实不变）。
+- 隐私：不写日志、不打印 query；agent 只记录脱敏后的 `values`（占位符 + 长度），**原值绝不入库**；单请求 URL 约 3.2KB（Spring 默认头/行长度内）。
+
+**运行时 L1 事实（S5-B 断言口径；离线 fixture 形状见 `fixtures/s5-l1-values/`）**
+
+| # | `name` | `kind` | `line` | `from` | `to` | `truncated` | `redacted` |
+|---|---|---|---|---|---|---|---|
+| 1 | `requestedAmount` | `param` | `null` | `null` | `100` | `false` | `false` |
+| 2 | `demoSecret` | `param` | `null` | `null` | `"[REDACTED len=6]"` | `false` | **`true`** |
+| 3 | `note` | `param` | `null` | `null` | 前 **2048** 个 `x` | **`true`** | `false` |
+| 4 | `amount` | `field` | `null` | `100` | `0` | `false` | `false` |
+| 5 | `return` | `return` | `null` | `null` | `0` | `false` | `false` |
+
+- 顺序固定：**参数声明顺序 → 字段写入发生顺序 → 返回**；每项固定输出 `name/kind/line/from/to/truncated/redacted`，`line` 恒 `null`，单次 `invocation` 省略。
+- **参数项恰 3 个**（`requestedAmount`/`demoSecret`/`note`）；路径参数 `long id` **不进入 `values`**（不得出现 `id` 项；与 `s5-plan.md` §5.3 的 `@Advice.Argument(1..3)` 一致）。
+- service span：`status=OK`、`return={"type":"double","value":0}`、`flags` 含 `L1`（并沿用 `S2_ZERO_ROW_CHAIN`）、
+  `source` 来自 JVM 栈（`OrderService.java:<line>`）、`confidence` 继承（有合法头 `EXACT`、无头 `LOST`）。
+- controller span：`return={"type":"org.springframework.http.ResponseEntity","value":200}`，**无 `values`**；该链**没有** mapper/sql span。
+- 字段 100→0 **恰一条**：MyBatis hydration（装载订单时的 0→100）必须被排除
+  （`com.example.shop.model.Order` 精确类名 + 顶层 frame 是 `OrderService#previewDiscount` + 调用栈无 `org.apache.ibatis` 帧 + `old != new`；见 `s5-plan.md` §6）。
+- **这不是 L2**：没有行号、没有局部变量、没有对象深字段、没有逐行写入、没有异常 payload；`kind=local` 与行级变量属 S6。
+
+```bash
+curl -s -X POST "http://localhost:8080/api/orders/1/preview-discount?requestedAmount=100&demoSecret=s3cr3t&note=$(printf 'x%.0s' $(seq 1 3000))"
+# 期望 200 {"data":0}；随后
+curl -s "http://localhost:8080/api/orders"          # amount 仍 100.0（DB 未改）
+curl -s -X POST "http://localhost:8080/api/orders/999/preview-discount?requestedAmount=100&demoSecret=s3cr3t&note=x"  # 200 {"data":0}
+curl -s -X POST "http://localhost:8080/api/orders/1/cancel"   # 案例 A 不变：200 {"data":true}
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/graph?traceId=<32hex>"   # 节点第 15 字段 values
+```
+
+## 附录 E：S5 前端浅层 manifest 与 `source`（非 TraceBoard API；浏览器/构建侧）
+
+> 这是 demo 前端（5174）与 SDK 的**浏览器侧**形状，不属于 collector API。collector 只接收既有 `source` 字段
+> （`event-model.v1.md` §4.1）与既有 `flags`；schema 不变、ingest 不变、graph 第 14 字段 `source` 的语义不变。
+
+**manifest（构建插件产物；`frontend/build-plugin`）**
+
+```json
+{"functions":[{"name":"cancelOrder","file":"src/App.vue","line":44},
+              {"name":"validateForm","file":"src/App.vue","line":86},
+              {"name":"previewDiscount","file":"src/App.vue","line":120}]}
+```
+
+- `file`：相对 demo 前端根的 POSIX 路径；`line`：**原始源文件 1-based 行号**（`.vue` 按全文行号，不剥离 `<template>`）。
+  上例行号仅示意；实现按扫描结果产出，测试**从源文件重新计算**，不硬编码（源码改动后行号会变）。
+- 三个出口：dev `GET /traceboard-manifest.json`（`application/json; charset=utf-8`、`Cache-Control: no-store`）；
+  build 产物 `dist/traceboard-manifest.json`；build 时 `transformIndexHtml` 内联 `window.__TRACEBOARD_MANIFEST__`（`<` 转义为 `\u003c`）。
+- SDK 启动时**同步**读 `window.__TRACEBOARD_MANIFEST__`；ESM demo 在缺失时可**一次性** `fetch("/traceboard-manifest.json")` 兜底
+  （相对路径、fail-open、无重试、无缓存、不产生事件）。**IIFE/preview 构建不做兜底**（避免预览页额外请求与 S4-E 计数回归）。
+
+**`source` + `SOURCE_MAPPED` 的附加规则（不猜、不伪造）**
+
+| 事件 | 附加 `source` 的条件 | flag |
+|---|---|---|
+| `js_method`（`wrapFn`） | manifest 中存在**同名**函数 | `SOURCE_MAPPED` |
+| `ui_event`（click 根） | 目标元素有 `data-tb-fn="<name>"` **且** manifest 命中该 name | `SOURCE_MAPPED` |
+| `fetch` / `render` / 其它 | **永不**附加（不猜） | 无 |
+
+- `source` 必须 `file` 为非空字符串、`line` 为 ≥1 的整数才附加；无效/缺失项**忽略**（不写 `source`、不加 flag）。
+- `SOURCE_MAPPED` 只表示“manifest 命中的**原始函数/文件/行号**”，**不是** `.map` 解码；SDK 不读 `.map`、不解析 sourcemap、不上传。
+- 无 manifest（或坏 manifest / CSP 拦截内联且兜底失败）时，事件字节与 S3 **完全一致**（无 `source`、无 `SOURCE_MAPPED`）。
+- **preview（8602）注入页没有 manifest** → 前端事件没有 `source`；工作台必须显示 `未采集`（如实），不得用函数名猜行号。
+- 后端 `source` 来自 JVM 栈（`OrderController.java:<line>` 等），**不加** `SOURCE_MAPPED`，工作台也不追加“manifest 映射”。
+
+- 工作台 source 文案：完整 source → `file:line`；flags 含 `SOURCE_MAPPED` → 追加 `（manifest 映射）`；缺失/不完整 → `未采集`。
+- 这是 **F1/F2 浅层**（函数/文件/行号）：**没有**局部变量、没有行级变量表、没有对象深采（L2/S6）；不改 schema、不新增事件类型/枚举。
+- `build.sourcemap=true` 只让 demo 构建产出 `dist/*.map` 供浏览器 devtools；**不提交、不上传、不解析**，SDK 不读。
+- 详细设计、扫描规则、限制与排障见 `docs/guides/frontend-shallow-plugin.md`。

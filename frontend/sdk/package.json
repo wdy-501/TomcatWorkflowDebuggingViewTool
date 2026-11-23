@@ -1,7 +1,7 @@
 {
   "name": "@traceboard/sdk",
   "version": "0.1.0",
-  "description": "TraceBoard S3 runtime SDK (click/fetch/XHR/wrapFn/uiEffect facts; no build plugin, no sourcemap, no CDN)",
+  "description": "TraceBoard runtime SDK (click/fetch/XHR/wrapFn/uiEffect facts; S5 manifest source mapping; no build-time locals/L2, no CDN)",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -22,7 +22,7 @@
     "build": "tsc -p tsconfig.json && npm run build:iife",
     "build:iife": "esbuild src/index.ts --bundle --format=iife --global-name=TraceBoardSDK --target=es2018 --outfile=dist/traceboard-sdk.iife.js --legal-comments=none --minify=false --define:__TRACEBOARD_IIFE__=true",
     "pretest": "npm run build",
-    "test": "node --test test/sdk.test.js test/iife.test.js"
+    "test": "node --test test/sdk.test.js test/iife.test.js test/manifest.test.js"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

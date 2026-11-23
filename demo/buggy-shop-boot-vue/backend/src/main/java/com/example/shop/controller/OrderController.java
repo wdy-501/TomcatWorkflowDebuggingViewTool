@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.shop.model.Order;
@@ -46,5 +47,25 @@ public class OrderController {
         body.put("data", Boolean.valueOf(cancelled));
         HttpStatus status = cancelled ? HttpStatus.OK : HttpStatus.NOT_FOUND;
         return ResponseEntity.status(status).body(body);
+    }
+
+    /**
+     * S5 L1 demo (api.v1.md Appendix D): always {@code 200 {"data":0}} - for known ids the service
+     * mutates the in-memory amount (100 -> 0, DB untouched), for unknown ids {@code findById=null}
+     * writes nothing and still returns 0 (no 404 / {"data":-1} / null).
+     *
+     * <p>Query values ({@code demoSecret} is a fake demo value) are never logged or echoed; the
+     * agent records them as redacted/truncated L1 {@code values}.</p>
+     */
+    @PostMapping("/{id}/preview-discount")
+    public ResponseEntity<Map<String, Object>> previewDiscount(
+            @PathVariable long id,
+            @RequestParam(value = "requestedAmount", defaultValue = "100") double requestedAmount,
+            @RequestParam(value = "demoSecret", defaultValue = "s3cr3t") String demoSecret,
+            @RequestParam(value = "note", defaultValue = "") String note) {
+        orderService.previewDiscount(id, requestedAmount, demoSecret, note);
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("data", Integer.valueOf(0));
+        return ResponseEntity.ok(body);
     }
 }

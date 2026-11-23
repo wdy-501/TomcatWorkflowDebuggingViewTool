@@ -40,4 +40,24 @@ public class OrderService {
         orderMapper.cancelById(id, STATUS_CANCELLED);
         return true;
     }
+
+    /**
+     * S5 L1 demo (api.v1.md Appendix D): mutates the amount on an <strong>in-memory</strong> order
+     * only (100 -> 0) and returns 0. The database row is never updated, so {@code GET /api/orders}
+     * keeps showing {@code 100.00}.
+     *
+     * <p>{@code requestedAmount}, {@code demoSecret} and {@code note} are intentionally unused by
+     * the business logic: they are captured (and redacted/truncated) by the agent's L1 advice.
+     * Nothing is logged and no value is persisted ({@code demoSecret} is a fake demo value).</p>
+     *
+     * @return always 0.0 (the demo L1 "return" fact)
+     */
+    public double previewDiscount(long id, double requestedAmount, String demoSecret, String note) {
+        Order order = orderMapper.findById(id);
+        if (order != null) {
+            // In-memory only: never persisted (no UPDATE, DB amount stays 100.00).
+            order.setAmount(0.0d);
+        }
+        return 0.0d;
+    }
 }

@@ -25,6 +25,13 @@ const amountB = ref("");
 const caseBError = ref<string | null>(null);
 const caseBPass = ref<string | null>(null);
 
+// Case L1 (fixed-URL discount preview). demoSecret=s3cr3t is a fake demo value; the agent
+// redacts it in the collected event. The note is a fixed 3000-char string (truncated server-side).
+const discountRaw = ref("");
+const discountStatus = ref<string | null>(null);
+const discountError = ref<string | null>(null);
+const discountPending = ref(false);
+
 async function loadOrders(): Promise<void> {
   try {
     const response = await fetch("/api/orders");
@@ -90,17 +97,48 @@ function saveB(): void {
   validateForm();
 }
 
+// Case L1: fixed-URL discount preview. `previewDiscount` is a plain declaration (manifest R1 hit);
+// the wrapped alias emits the js_method span whose `source` comes from the build manifest
+// (`SOURCE_MAPPED`). The button also carries `data-tb-fn` so the click root gets the same source.
+// No loadOrders(): the service mutates the in-memory object only, so the DB amount stays 100.00.
+async function previewDiscount(): Promise<void> {
+  discountPending.value = true;
+  discountError.value = null;
+  try {
+    const note = "x".repeat(3000);
+    const url =
+      `/api/orders/1/preview-discount?requestedAmount=100&demoSecret=s3cr3t` +
+      `&note=${encodeURIComponent(note)}`;
+    const response = await fetch(url, { method: "POST" });
+    const text = await response.text();
+    discountRaw.value = text;
+    discountStatus.value = `HTTP ${response.status}`;
+    if (!response.ok) {
+      discountError.value = `HTTP ${response.status} ${response.statusText}`;
+      return;
+    }
+    discountError.value = null;
+  } catch (cause) {
+    discountError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    discountPending.value = false;
+  }
+}
+
+const previewDiscountWrapped = traceboard.wrapFn("previewDiscount", previewDiscount);
+
 onMounted(loadOrders);
 </script>
 
 <template>
   <div class="page">
     <header class="header">
-      <h1>BuggyShop · S3 案例 A / 案例 B</h1>
+      <h1>BuggyShop · S5 案例 A / 案例 B / L1</h1>
       <p class="subtitle">
-        S3 runtime SDK · 无构建插件/sourcemap（行号/局部变量属 S5，本次未采集）·
+        S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）·
         案例 A 故意缺陷：取消返回 200，但数据库 UPDATE 0 行，订单仍为 CREATED ·
-        案例 B 纯前端校验：无论通过与否都不发请求
+        案例 B 纯前端校验：无论通过与否都不发请求 ·
+        案例 L1：折扣预览按钮由 agent 采集参数/字段写入/返回（仅内存，DB 金额不变）
       </p>
       <p class="subtitle">
         SDK 事件经 <code>/ingest</code> 代理发往 TraceBoard collector；
@@ -158,6 +196,29 @@ onMounted(loadOrders);
       </div>
       <p v-if="caseBError" id="b-error" class="error">{{ caseBError }}</p>
       <p v-else-if="caseBPass" id="b-pass" class="toast">{{ caseBPass }}</p>
+    </section>
+
+    <section id="case-l1" class="card">
+      <h2>案例 L1 · 折扣预览（参数/字段写入/返回）</h2>
+      <p class="hint">
+        固定请求 <code>POST /api/orders/1/preview-discount</code>：requestedAmount=100、demoSecret=s3cr3t（演示假值，事件中脱敏为占位符）、
+        note=3000 个 x（事件中截断到 2KB）。按钮只调用 previewDiscount，不刷新订单列表：仅内存返回 0、数据库金额未改。
+        SDK 的 click/js_method 事件带 manifest 映射的函数/文件/行号（不采集局部变量，L2 属 S6）。
+      </p>
+      <div class="actions">
+        <button
+          id="btn-discount"
+          type="button"
+          data-tb-fn="previewDiscount"
+          :disabled="discountPending"
+          @click="previewDiscountWrapped"
+        >
+          {{ discountPending ? "请求中…" : "折扣预览" }}
+        </button>
+      </div>
+      <p v-if="discountStatus" id="discount-status" class="hint">状态：{{ discountStatus }}</p>
+      <pre id="discount-json">{{ discountRaw || "（尚未发送折扣预览请求）" }}</pre>
+      <p v-if="discountError" id="discount-error" class="error">{{ discountError }}</p>
     </section>
   </div>
 </template>

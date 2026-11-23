@@ -20,6 +20,14 @@ public interface OrderMapper {
 
     List<Order> findAll();
 
+    /**
+     * S5 L1 demo (api.v1.md Appendix D): read-only lookup used by
+     * {@code OrderService#previewDiscount}. This mapper method is intentionally NOT instrumented.
+     *
+     * @return the order, or {@code null} for an unknown id (callers must not write fields then)
+     */
+    Order findById(@Param("id") long id);
+
     int countById(@Param("id") long id);
 
     /**

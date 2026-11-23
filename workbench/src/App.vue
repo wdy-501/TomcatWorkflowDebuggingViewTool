@@ -19,7 +19,9 @@ const app = useAppStore();
       <p class="app-header__note">
         S3 · runtime SDK 前端事实（点击/请求/DOM） + 案例 B 确认没发 + 只读回放 ·
         S4 节点详情/×N 聚合/缺口（只读前端派生，运行时 ×3 属 S6）·
-        无构建插件/sourcemap/局部变量 · 非实时（无 SSE/WS）· 回放不重发请求/不写数据库
+        S5 L1 值（参数/字段写入/返回；脱敏/截断可见；节点详情只读）·
+        S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）·
+        非实时（无 SSE/WS）· 回放不重发请求/不写数据库
       </p>
     </header>
 

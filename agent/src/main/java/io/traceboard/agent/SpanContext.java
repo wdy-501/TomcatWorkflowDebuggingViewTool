@@ -3,6 +3,8 @@ package io.traceboard.agent;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -35,11 +37,20 @@ public final class SpanContext {
 
     static final String CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#cancel";
     static final String SERVICE_NODE_KEY = SERVICE_CLASS + "#cancel";
+    /** S5: preview-discount controller/service span keys (L1 values live on the service only). */
+    static final String PREVIEW_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#previewDiscount";
+    static final String PREVIEW_SERVICE_NODE_KEY = SERVICE_CLASS + "#previewDiscount";
     static final String MAPPER_CLASS = "com.example.shop.mapper.OrderMapper";
     static final String MAPPER_METHOD = "cancelById";
     static final String MAPPER_NODE_KEY = MAPPER_CLASS + "#" + MAPPER_METHOD;
     static final String SQL_NODE_KEY = "OrderMapper.cancelById";
     static final String SQL_STATEMENT_SUFFIX = ".OrderMapper.cancelById";
+
+    /** S5 field advice target (exact class name, never {@code instanceof}, no compile dependency). */
+    static final String ORDER_CLASS = "com.example.shop.model.Order";
+    static final String ORDER_AMOUNT_FIELD = "amount";
+    static final String PREVIEW_SERVICE_METHOD = "previewDiscount";
+    static final String MYBATIS_PACKAGE_PREFIX = "org.apache.ibatis";
 
     private static final int MAX_DEPTH = 64;
     private static final String MAPPED_STATEMENT_FIELD = "mappedStatement";
@@ -74,6 +85,12 @@ public final class SpanContext {
         final String confidence;
         /** True only on the controller frame that joined a real frontend fetch via headers. */
         final boolean exactLink;
+        /** S5 L1 value facts (param -> field writes -> return); empty for S2-S4 spans. */
+        final java.util.List<L1Values.Item> values = new java.util.ArrayList<L1Values.Item>();
+        /** S5 flags appended after {@code S2_ZERO_ROW_CHAIN} (e.g. {@code L1}, {@code VALUES_CAPPED=<n>}). */
+        final java.util.List<String> extraFlags = new java.util.ArrayList<String>();
+        /** S5: value facts skipped as non-scalar/unreadable, reported as {@code L1_SKIPPED=<n>}. */
+        int skipped;
 
         Frame(String kind, String nodeKey, String spanId, String traceId, String rootEventId,
               String parentSpanId, long startNs, boolean root, String confidence, boolean exactLink) {
@@ -99,13 +116,25 @@ public final class SpanContext {
      * inherit trace/root/confidence.
      */
     public static void enterController(long enterNs) {
+        enterController(enterNs, CONTROLLER_NODE_KEY);
+    }
+
+    /**
+     * S5: {@code OrderController#previewDiscount} controller span; header join / LOST rules are
+     * identical to {@link #enterController(long)} (no L1 values on the controller).
+     */
+    public static void enterPreviewController(long enterNs) {
+        enterController(enterNs, PREVIEW_CONTROLLER_NODE_KEY);
+    }
+
+    private static void enterController(long enterNs, String nodeKey) {
         RequestHeaders.Link link = null;
         try {
             link = RequestHeaders.current();
         } catch (Throwable ignored) {
             // fail-open: treat as missing headers (S2 LOST)
         }
-        enter(KIND_CONTROLLER, CONTROLLER_NODE_KEY, enterNs, link);
+        enter(KIND_CONTROLLER, nodeKey, enterNs, link);
     }
 
     public static void exitController(long enterNs, Object returned, Throwable thrown) {
@@ -131,7 +160,7 @@ public final class SpanContext {
                 }
             }
             SpanEmitter.emit(frame, duration(enterNs), status, returnType, returnValue, null,
-                    findSource(CONTROLLER_CLASS));
+                    findSource(CONTROLLER_CLASS, frame.nodeKey));
         } catch (Throwable ignored) {
             // fail-open
         }
@@ -164,9 +193,141 @@ public final class SpanContext {
                 returnValue = "false";
             }
             SpanEmitter.emit(frame, duration(enterNs), status, returnType, returnValue, null,
-                    findSource(SERVICE_CLASS));
+                    findSource(SERVICE_CLASS, frame.nodeKey));
         } catch (Throwable ignored) {
             // fail-open
+        }
+    }
+
+    // ---------------------------------------------------------------- preview service (S5 L1)
+
+    /**
+     * S5 {@code OrderService#previewDiscount(long,double,String,String)}: opens the service frame
+     * and records the three business params in declaration order. The path param {@code long id}
+     * (argument index 0) is deliberately NOT captured, so the demo has exactly 3 param items.
+     */
+    public static void enterPreviewService(long enterNs, double requestedAmount,
+                                           String demoSecret, String note) {
+        try {
+            Frame frame = enter(KIND_SERVICE, PREVIEW_SERVICE_NODE_KEY, enterNs, null);
+            if (frame == null) {
+                return;
+            }
+            frame.extraFlags.add(SpanEmitter.FLAG_L1);
+            if (!L1Values.appendParam(frame, "requestedAmount", requestedAmount)) {
+                frame.skipped++;
+            }
+            if (!L1Values.appendParam(frame, "demoSecret", demoSecret)) {
+                frame.skipped++;
+            }
+            if (!L1Values.appendParam(frame, "note", note)) {
+                frame.skipped++;
+            }
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /**
+     * S5: emits the preview service span with {@code values} (params -> field writes -> return).
+     * A {@code THREW} exit emits the params only (no return item) but still carries {@code L1}.
+     */
+    public static void exitPreviewService(long enterNs, double returned, Throwable thrown) {
+        try {
+            Frame frame = exit(KIND_SERVICE);
+            if (frame == null) {
+                return;
+            }
+            String status = (thrown == null) ? "OK" : "THREW";
+            String returnType = null;
+            String returnValue = null;
+            if (thrown == null) {
+                returnType = "double";
+                returnValue = L1Values.formatDouble(returned);
+                if (!L1Values.appendReturn(frame, returned)) {
+                    frame.skipped++;
+                }
+            }
+            String valuesJson = L1Values.toValuesJson(frame);
+            SpanEmitter.emit(frame, duration(enterNs), status, returnType, returnValue, null,
+                    findSource(SERVICE_CLASS, frame.nodeKey), valuesJson);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    // ---------------------------------------------------------------- field write (S5 L1)
+
+    /**
+     * S5 field advice entry for {@code com.example.shop.model.Order#setAmount(double)}. Never emits
+     * its own span; appends one {@code field} item ({@code amount 100 -> 0}) to the current preview
+     * service frame only when all guards hold:
+     *
+     * <ol>
+     *   <li>{@code target} is exactly {@code com.example.shop.model.Order};</li>
+     *   <li>the stack top is the {@code OrderService#previewDiscount} service frame;</li>
+     *   <li>no {@code org.apache.ibatis} frame sits between this advice and that method (skips the
+     *       MyBatis hydration {@code 0 -> 100} decoy);</li>
+     *   <li>the old amount (read reflectively via {@code getAmount()}) differs from the new one.</li>
+     * </ol>
+     *
+     * <p>Must stay {@code public}: the advice body is inlined into {@code com.example.shop.model.Order},
+     * which lives in another package (a package-private method causes {@code IllegalAccessError}).</p>
+     */
+    public static void recordFieldWrite(Object target, String field, double newValue) {
+        try {
+            if (!SpanEmitter.isEnabled() || target == null) {
+                return;
+            }
+            if (!ORDER_CLASS.equals(target.getClass().getName()) || !ORDER_AMOUNT_FIELD.equals(field)) {
+                return;
+            }
+            ArrayDeque<Frame> stack = STACK.get();
+            Frame top = stack.peek();
+            if (top == null || !KIND_SERVICE.equals(top.kind)
+                    || !PREVIEW_SERVICE_NODE_KEY.equals(top.nodeKey) || top.traceId == null) {
+                return;
+            }
+            if (!calledFromPreviewService()) {
+                return;
+            }
+            Object old = readAmount(target);
+            if (!(old instanceof Number)) {
+                return;
+            }
+            double oldValue = ((Number) old).doubleValue();
+            if (Double.compare(oldValue, newValue) == 0) {
+                return;
+            }
+            if (!L1Values.appendField(top, ORDER_AMOUNT_FIELD, oldValue, newValue)) {
+                top.skipped++;
+            }
+        } catch (Throwable ignored) {
+            // fail-open: the field advice never affects the host application
+        }
+    }
+
+    /** True when {@code previewDiscount} is on the stack before any MyBatis frame. */
+    private static boolean calledFromPreviewService() {
+        StackTraceElement[] frames = new Throwable().getStackTrace();
+        for (StackTraceElement frame : frames) {
+            String className = frame.getClassName();
+            if (SERVICE_CLASS.equals(className) && PREVIEW_SERVICE_METHOD.equals(frame.getMethodName())) {
+                return true;
+            }
+            if (className != null && className.startsWith(MYBATIS_PACKAGE_PREFIX)) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static Object readAmount(Object target) {
+        try {
+            Method getAmount = target.getClass().getMethod("getAmount");
+            return getAmount.invoke(target);
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -210,7 +371,7 @@ public final class SpanContext {
                         : "null";
             }
             SpanEmitter.emit(frame, duration(enterNs), status, returnType, returnValue, null,
-                    findSource(MAPPER_PROXY_CLASS));
+                    findSource(MAPPER_PROXY_CLASS, frame.nodeKey));
         } catch (Throwable ignored) {
             // fail-open
         }
@@ -252,7 +413,7 @@ public final class SpanContext {
                         + "\",\"rowsAffected\":" + rows + ",\"transaction\":\"UNKNOWN\"}]";
             }
             SpanEmitter.emit(frame, duration(enterNs), status, null, null, sideEffects,
-                    findSource(STATEMENT_HANDLER_CLASS));
+                    findSource(STATEMENT_HANDLER_CLASS, frame.nodeKey));
         } catch (Throwable ignored) {
             // fail-open
         }
@@ -260,10 +421,10 @@ public final class SpanContext {
 
     // ---------------------------------------------------------------- stack
 
-    private static void enter(String kind, String nodeKey, long enterNs, RequestHeaders.Link link) {
+    private static Frame enter(String kind, String nodeKey, long enterNs, RequestHeaders.Link link) {
         try {
             if (!SpanEmitter.isEnabled()) {
-                return;
+                return null;
             }
             ArrayDeque<Frame> stack = STACK.get();
             if (stack.size() >= MAX_DEPTH) {
@@ -300,8 +461,10 @@ public final class SpanContext {
                         parent.rootEventId, parent.spanId, startNs, false, parent.confidence, false);
             }
             stack.push(frame);
+            return frame;
         } catch (Throwable ignored) {
             // fail-open
+            return null;
         }
     }
 
@@ -391,14 +554,24 @@ public final class SpanContext {
         }
     }
 
-    private static StackTraceElement findSource(String className) {
+    private static final Map<String, StackTraceElement> SOURCE_CACHE = new ConcurrentHashMap<String, StackTraceElement>();
+    private static final StackTraceElement NO_SOURCE = new StackTraceElement("", "", "", -1);
+
+    private static StackTraceElement findSource(String className, String methodKey) {
         try {
+            String key = className + "|" + (methodKey == null ? "" : methodKey);
+            StackTraceElement cached = SOURCE_CACHE.get(key);
+            if (cached != null) {
+                return cached == NO_SOURCE ? null : cached;
+            }
             StackTraceElement[] frames = new Throwable().getStackTrace();
-            for (StackTraceElement frame : frames) {
-                if (className.equals(frame.getClassName())) {
-                    return frame;
+            for (StackTraceElement candidate : frames) {
+                if (className.equals(candidate.getClassName())) {
+                    SOURCE_CACHE.put(key, candidate);
+                    return candidate;
                 }
             }
+            SOURCE_CACHE.put(key, NO_SOURCE);
         } catch (Throwable ignored) {
             // source is optional
         }

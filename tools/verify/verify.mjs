@@ -47,13 +47,13 @@
  *   S3-7   case B evidence: fixture + collector requests prove sdkActive/fetchCount 0/
  *          hasBackend false/root EXACT; workbench verdict strings; SDK tests prove the
  *          RETURNED_FALSE wrapFn shape and the zero-fetch path.
- *   S3-8   scope/security: no S5/S6 (sourcemap/build plugin/L2, pixel replay, SSE/WS,
- *          persistence), no secrets/telemetry/CDN/mirrors/PII in the SDK, loopback only,
+ *   S3-8   scope/security: S5 values/manifest allowed, still no L2/.map-decoding/pixel replay/SSE/WS,
+ *          persistence, no secrets/telemetry/CDN/mirrors/PII in the SDK, loopback only,
  *          no external $ref. S4 launcher/IDEA/JAR is allowed (removed from the markers).
  *   S3-9   regression: S2 no-header 4-span LOST, DB 0 rows, demo unknown 404, S1 ingest/query,
  *          S0 fixture, S2 workbench panel.
  *   S3-10  cleanup: ports free (S4 adds 8602/18080), no java leftovers, git index untouched,
- *          git status within the S4 whitelist, no product file modified by the verify run.
+ *          git status within the S5 whitelist, no product file modified by the verify run.
  *
  *   S4-A   launcher `idea` (JDK21 jar built by the reactor): exact absolute -javaagent, derived
  *          <collector>/ingest/v1/events, session, 5-step checklist, exit 0, no child process;
@@ -70,17 +70,17 @@
  *          /ingest/v1/events proxy 202 + other /ingest/* 404 + target down 502, TLS/non-loopback/
  *          SDK_IIFE_MISSING tokens, port cleanup.
  *   S4-E   SDK IIFE: dist 3 files, no sourcemap/CDN, global version, vm auto-init exactly once,
- *          double-load guard, no-config and bad-config fail-open, ESM tests still green (13/13).
+ *          double-load guard, no-config and bad-config fail-open, ESM tests still green (17/17).
  *   S4-F   fixtures/s4-details: 9 schema-valid events -> requests (LOST/9 spans), graph 9/8 with
- *          exactly the 14 ordered node fields (reason/source/confidence from the event), replay;
+ *          exactly the 15 ordered node fields (reason/source/confidence + S5 values:null), replay;
  *          static ×N grouping/gaps (exactly 3, F>N>R, no browser) + workbench dist selectors and
  *          strings; fixture F rule asserted with an inline ui_event+fetch batch (not the fixture).
  *   S4-G   diagnose: 7 checks/SUMMARY both branches (no --preview-url -> skip=2 exit 0; full
  *          preview -> fail=0 exit 0); missing session/app down/preview not injected -> FAIL exit 3;
  *          counts sum 7, no fake PASS.
  *   S4-H   regression: S0–S3 gates still PASS, agent hello is not an event (span counts unchanged),
- *          schema/S0–S3 fixture bytes unchanged, S4 G1 freeze zero drift.
- *   S4-I   scope/security/cleanup: no S5/S6/S7 capability, no secrets/CDN/mirrors, launcher/preview
+ *          schema/S0–S3 fixture bytes unchanged, S4/S5 G1 freeze zero drift.
+ *   S4-I   scope/security/cleanup: S5 allowed, no S6+, no secrets/CDN/mirrors, launcher/preview
  *          loopback + no TLS/CSP rewrite/inline script, ports 8601/8080/5173/5174/4173/4174/8602/
  *          18080 free, no java/node leftovers, git index untouched, product files stable.
  *
@@ -92,8 +92,9 @@
  * closes S4 with S4-H (S0–S3 regression + freeze) and S4-I (scope/security/cleanup). S4-H reads
  * the earlier RESULTS, so it only passes in a full run. A normal run executes S0–S3 plus A..I.
  *
- * Usage (from tools/verify):  npm ci && node verify.mjs [--json]                  (full S0–S4)
+ * Usage (from tools/verify):  npm ci && node verify.mjs [--json]                  (full S0–S5)
  *                             node verify.mjs --s4[=A,B,C,D,E,F,G,H,I] [--json]   (S4-only)
+ *                             node verify.mjs --s5[=A,B,C,D,E,F,G,H] [--json]    (S5-only; G anchors need a full run)
  */
 
 import { createHash } from "node:crypto";
@@ -210,7 +211,10 @@ const S3_WORKBENCH_TOKENS = [
   "sdkActive",
   "fetchCount",
   "回放不会重发请求、不写数据库、不调用 demo、不执行程序；",
-  "JS 内部变量本次未采集（无构建插件/sourcemap）",
+  // S5 migration (B3): the old "JS 内部变量本次未采集（无构建插件/sourcemap）" copy is gone.
+  "JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）",
+  // S5 canonical capability banner (workbench header/footnote).
+  "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
 ];
 const S3_STATE_SEMANTICS = [
   "OK", "RETURNED_FALSE", "THREW", "NOT_COLLECTED_", "TRUNCATED", "REDACTED", "UNKNOWN", "LOST",
@@ -245,6 +249,8 @@ const S4_HELLO_ACCEPTED = '{"schema":"traceboard.agent.v1","sessionId":"s_s4hell
 const S4_GRAPH_NODE_KEYS_ORDERED = [
   "spanId", "parentSpanId", "kind", "nodeKey", "status", "return", "sideEffects",
   "startNs", "durNs", "thread", "flags", "reason", "source", "confidence",
+  // S5 additive 15th field (api.v1.md §10.9): raw values[] or null; S2–S4 fixtures expect null.
+  "values",
 ];
 const S4_SELECTORS = [
   "s4-detail", "s4-detail-title", "s4-detail-status", "s4-detail-tabs", "s4-sideeffects",
@@ -304,7 +310,7 @@ const S4_H_ANCHORS = [
 ];
 const S4_H_SCHEMA_HASH = "927937dfaa2d1f47883d3e412185c19be1770a85c9b19b6858b1e097b96a489a";
 
-/** S4-I: S4-owned source trees scanned for S5/S6/S7 capabilities. */
+/** S4-I: source trees scanned for S6+ capabilities (S5 values/manifest are allowed). */
 const S4_SCOPE_TREES = [
   "server/launcher/src", "server/collector/src", "agent/src",
   "frontend/sdk/src", "workbench/src", "demo/buggy-shop-boot-vue/frontend/src",
@@ -329,6 +335,125 @@ function parseS4Request(argv) {
 
 const S4_ONLY = process.argv.some((item) => item.startsWith("--s4"));
 const S4_SELECTED = S4_ONLY ? (parseS4Request(process.argv) ?? new Set(S4_IMPLEMENTED)) : null;
+
+/* ------------------------------------------------------------------ */
+/* S5 L1 + front-end shallow constants (tester part 1: builds/demo/agent)*/
+/* ------------------------------------------------------------------ */
+
+const S5_PLAN_REVIEW_REL = "docs/plans/stages/S5/plan-review.md";
+const S5_FIXTURE_DIR = "fixtures/s5-l1-values";
+const S5_EVENTS_REL = `${S5_FIXTURE_DIR}/events.ndjson`;
+const S5_FACTS_REL = `${S5_FIXTURE_DIR}/expected-facts.json`;
+const S5_README_REL = `${S5_FIXTURE_DIR}/README.md`;
+/** Runtime agent session for the S5 L1 E2E (never the demo frontend session s_s3demo). */
+const S5_SESSION = "s_s5agent";
+const S5_FIXTURE_SESSION = "s_s5values";
+const S5_DEMO_BACKEND_REL = "demo/buggy-shop-boot-vue/backend";
+const S5_DEMO_FRONTEND_REL = "demo/buggy-shop-boot-vue/frontend";
+const S5_BUILD_PLUGIN_REL = "frontend/build-plugin";
+const S5_L1_FLAG = "L1";
+const S5_FLAG_EXACT_LINK = "S3_EXACT_LINK";
+const S5_PREVIEW_CONTROLLER_NODE_KEY = "com.example.shop.controller.OrderController#previewDiscount";
+const S5_PREVIEW_SERVICE_NODE_KEY = "com.example.shop.service.OrderService#previewDiscount";
+const S5_PREVIEW_PATH = "/api/orders/1/preview-discount";
+const S5_PREVIEW_UNKNOWN_PATH = "/api/orders/999/preview-discount";
+const S5_DEMO_SECRET = "s3cr3t";
+const S5_NOTE_3000 = "x".repeat(3000);
+const S5_NOTE_2048 = "x".repeat(2048);
+/** api.v1.md §10.9 / dispatch §4.3: fixed 15 ordered graph node fields (15th = values). */
+const S5_GRAPH_NODE_KEYS_ORDERED = [
+  "spanId", "parentSpanId", "kind", "nodeKey", "status", "return", "sideEffects",
+  "startNs", "durNs", "thread", "flags", "reason", "source", "confidence", "values",
+];
+/** Exact value-item order (api.v1.md Appendix D / s5-plan §5.3): params -> field -> return. */
+const S5_VALUE_NAMES = ["requestedAmount", "demoSecret", "note", "amount", "return"];
+const S5_VALUE_KINDS = ["param", "param", "param", "field", "return"];
+/** S5 perf script (report-only; S5-F runs it and parses PERF_RESULT). */
+const S5_PERF_REL = "tools/perf/l1-overhead.mjs";
+const S5_VALUES_SELECTOR = "#s5-values";
+/** Text that must be absent from workbench/demo src+dist after S5 (B3 honesty migration). */
+const S5_STALE_TEXTS = ["无构建插件/sourcemap", "S5 待做", "无 S5", "S5/S6", "无 sourcemap/行号映射"];
+/** Claim text that must always stay absent (S5 is not L2). */
+const S5_FORBIDDEN_CLAIMS = ["kind=local", "L2 已采集"];
+/** S5 demo backend files allowed to change (order path + findById SELECT). */
+const S5_DEMO_BACKEND_ALLOWED = [
+  "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/controller/OrderController.java",
+  "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/service/OrderService.java",
+  "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/mapper/OrderMapper.java",
+  "demo/buggy-shop-boot-vue/backend/src/main/resources/mapper/OrderMapper.xml",
+];
+/**
+ * S5 G1 freeze (plan-review §7.1): supersedes the S4 hashes for api.v1.md / event-model.v1.md
+ * and adds the frontend guide + S5 fixture + S5 plan/dispatch. S0–S4 transport/status/S4 files
+ * stay at their frozen bytes.
+ */
+const S5_G1_FREEZE = {
+  ...S4_G1_FREEZE,
+  "docs/contracts/api.v1.md": "c95022d1d3e7c732d4ace6f519d245ffacb5179568a3ed3a60c39d73b78d5aa5",
+  "docs/contracts/event-model.v1.md": "2a7fa58a1ab56cb10eeab98e8e084da401aa1b09cc4e32d19e40578d4c290706",
+  "docs/guides/frontend-shallow-plugin.md": "5be0e29312b827c9bc60c71d1674b977af54f9b9b6886684bce0875d10136b9b",
+  "fixtures/s5-l1-values/events.ndjson": "9fc9a62e11e39c933a6695282f52ac79331a094070aa2a85f5ea25b878c6126b",
+  "fixtures/s5-l1-values/expected-facts.json": "705f5d12addf3756796cf13934f2d9cb49214ceeb8711a290e58534863c597f9",
+  "fixtures/s5-l1-values/README.md": "94ddce605a5fb3fd9feaee6a5fe8d23e28c6987e49f912153a7be39ff1b80b20",
+  "docs/plans/stages/S5/s5-plan.md": "11e7fa585504e9db74f4183c323c55409b1e1702c8f4308452e23371746dc5b1",
+  "docs/plans/stages/S5/dispatch.md": "dd105631426c6c755b44f5c8952431829c0358e542e7320e57f9cd0813ec5fe9",
+};
+
+/**
+ * S5 gates implemented by tester part 2: A/B/C (part 1) + D values/workbench,
+ * E manifest/sourcemap, F perf, G regression/freeze, H scope/cleanup.
+ */
+const S5_IMPLEMENTED = ["A", "B", "C", "D", "E", "F", "G", "H"];
+const S5_EVIDENCE = {
+  javaBuild: null,
+  demo: null,
+  agent: null,
+  fixture: null,
+  sdk: null,
+  plugin: null,
+  demoFrontend: null,
+  workbenchDist: null,
+  perf: null,
+};
+/** One-run memoization for the S5 front-end builds/tests shared by S5-A/D/E. */
+const S5_BUILD_CACHE = { sdk: null, plugin: null, demo: null, workbench: null };
+
+/**
+ * `npm ci` can transiently fail on Windows with EPERM/EBUSY (errno -4048) while a previous
+ * build's esbuild.exe is still held by the OS scanner. Retry a few times with a short backoff;
+ * the gate still requires a real exit 0 (no assertion is relaxed).
+ */
+function s5NpmCi(cwd, { attempts = 8, backoffMs = 5000, timeout = 600000 } = {}) {
+  let result = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // Release a lingering esbuild service from the previous Vite build before deleting node_modules.
+    spawnSync("taskkill", ["/F", "/T", "/IM", "esbuild.exe"], { windowsHide: true });
+    result = runShell("npm ci", { cwd, timeout });
+    const out = `${result.stdout}\n${result.stderr}`;
+    if (result.code === 0 && !result.error) return result;
+    const transient = /EPERM|EBUSY|resource busy|errno -4048|operation not permitted/i.test(out);
+    if (attempt === attempts || !transient) return result;
+    // The binary can still be held (Windows scanner): back off and retry the clean install.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, backoffMs);
+  }
+  return result;
+}
+
+/**
+ * Parse the S5-only CLI selector. `--s5` (no value) runs every implemented S5 gate;
+ * `--s5=A,B,C` restricts the selection. Returns null when `--s5` is absent.
+ */
+function parseS5Request(argv) {
+  const arg = argv.find((item) => item === "--s5" || item.startsWith("--s5="));
+  if (arg === undefined) return null;
+  const raw = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1).trim() : "";
+  if (!raw) return new Set(S5_IMPLEMENTED);
+  return new Set(raw.split(",").map((part) => part.trim().toUpperCase()).filter(Boolean));
+}
+
+const S5_ONLY = process.argv.some((item) => item.startsWith("--s5"));
+const S5_SELECTED = S5_ONLY ? (parseS5Request(process.argv) ?? new Set(S5_IMPLEMENTED)) : null;
+const REPRO_S5 = `(cd "tools/verify" && node verify.mjs --s5=${S5_IMPLEMENTED.join(",")})`;
 
 const COLLECTOR_BASE = "http://127.0.0.1:8601";
 const DEMO_BASE = "http://localhost:8080";
@@ -2976,7 +3101,23 @@ async function checkS1CDF(validate) {
 const GRAPH_NODE_KEYS = [
   "spanId", "parentSpanId", "kind", "nodeKey", "status", "return", "sideEffects",
   "startNs", "durNs", "thread", "flags", "reason", "source", "confidence",
+  // S5 additive 15th field (api.v1.md §10.9): raw values[] or null (never []).
+  "values",
 ].sort();
+
+/** A graph node's values must equal the event's raw values array, or null when absent (never []). */
+function graphValuesProblems(node, event, label) {
+  const problems = [];
+  if (!Object.prototype.hasOwnProperty.call(node ?? {}, "values")) {
+    problems.push(`${label} values key missing`);
+    return problems;
+  }
+  const expected = event && Object.prototype.hasOwnProperty.call(event, "values") ? event.values : null;
+  if (!deepEqual(node.values, expected ?? null)) {
+    problems.push(`${label} values=${show(node.values)}`);
+  }
+  return problems;
+}
 
 /**
  * S3-4 (uses the already running S1 collector): ingest the frozen case A/B events into two
@@ -3063,6 +3204,7 @@ async function checkS3CollectorReplay(validate) {
       if (!deepEqual(node.reason, event.reason ?? null)) graphNodeProblemsA.push(`node${index} reason=${show(node.reason)}`);
       if (!deepEqual(node.source, event.source ?? null)) graphNodeProblemsA.push(`node${index} source=${show(node.source)}`);
       if (!deepEqual(node.confidence, event.confidence)) graphNodeProblemsA.push(`node${index} confidence=${show(node.confidence)}`);
+      graphNodeProblemsA.push(...graphValuesProblems(node, event, `node${index}`));
     });
   }
   const graphEdgesExpectedA = graphExpectedA.edges ?? [];
@@ -3074,22 +3216,31 @@ async function checkS3CollectorReplay(validate) {
       graphA.nodes.map((node) => node.kind).join(",") === graphExpectedA.kindOrder.join(",") &&
       graphA.edges.length === 6 && deepEqual(graphA.edges, graphEdgesExpectedA) &&
       graphA.edges.every((edge) => edge.count === 1) && graphNodeProblemsA.length === 0,
-    label: "graph A: 7 nodes / 6 edges match expected order+edges; 14 node fields verbatim (S4 additive reason/source/confidence); click->fetch->controller->service->mapper->sql",
+    label: "graph A: 7 nodes / 6 edges match expected order+edges; 15 node fields verbatim (S4 reason/source/confidence + S5 values:null); click->fetch->controller->service->mapper->sql",
     detail: graphNodeProblemsA.length ? graphNodeProblemsA.slice(0, 5).join(" || ") : `${graphA.nodes.length} nodes, ${graphA.edges.length} edges`,
   });
   S3_EVIDENCE.caseA.graph = { nodes: graphA.nodes.length, edges: graphA.edges.length, confidence: graphA.body.confidence };
 
   const graphExpectedB = caseB.facts?.apiExpectations?.graph ?? {};
   const graphB = await graphOf(S3_VERIFY_B_SESSION, graphExpectedB.traceId);
+  const graphNodeProblemsB = graphB.nodes.flatMap((node, index) => {
+    const keys = Object.keys(node ?? {}).sort();
+    const problems = deepEqual(keys, GRAPH_NODE_KEYS) ? [] : [`node${index} keys=${keys.join(",")}`];
+    const event = caseB.events.find((item) => item.spanId === node.spanId) ?? null;
+    return problems.concat(graphValuesProblems(node, event, `node${index}`));
+  });
   checks.push({
     ok: graphB.res.ok && graphB.res.status === 200 && graphB.body.sessionId === S3_VERIFY_B_SESSION &&
       graphB.body.traceId === graphExpectedB.traceId && graphB.body.rootEventId === graphExpectedB.rootEventId &&
       graphB.body.confidence === graphExpectedB.confidence &&
       graphB.nodes.length === 3 && graphB.nodes.map((node) => node.spanId).join(",") === graphExpectedB.nodeOrder.join(",") &&
       graphB.nodes.map((node) => node.kind).join(",") === graphExpectedB.kindOrder.join(",") &&
-      graphB.edges.length === 2 && deepEqual(graphB.edges, graphExpectedB.edges ?? []),
-    label: "graph B: 3 nodes / 2 edges (ui_event -> js_method -> render), no backend node",
-    detail: `${graphB.nodes.length} nodes, ${graphB.edges.length} edges`,
+      graphB.edges.length === 2 && deepEqual(graphB.edges, graphExpectedB.edges ?? []) &&
+      graphNodeProblemsB.length === 0,
+    label: "graph B: 3 nodes / 2 edges (ui_event -> js_method -> render), 15 fields with values:null, no backend node",
+    detail: graphNodeProblemsB.length
+      ? graphNodeProblemsB.slice(0, 5).join(" || ")
+      : `${graphB.nodes.length} nodes, ${graphB.edges.length} edges`,
   });
 
   /* ---------------- replay windows (deep comparison) ---------------- */
@@ -3255,6 +3406,8 @@ function graphProblems(graph, traceId) {
   nodes.forEach((node, index) => {
     const keys = Object.keys(node ?? {}).sort();
     if (!deepEqual(keys, GRAPH_NODE_KEYS)) problems.push(`node${index} fields=${keys.join(",")}`);
+    // S5: the S2 runtime events carry no values -> graph must echo null (never []).
+    if (node.values !== null) problems.push(`node${index} values=${show(node.values)}`);
     if (node.reason !== null && typeof node.reason !== "string") problems.push(`node${index} reason=${show(node.reason)}`);
     if (node.source !== null && (typeof node.source !== "object" || Array.isArray(node.source))) {
       problems.push(`node${index} source=${show(node.source)}`);
@@ -4567,8 +4720,8 @@ function checkS2Drift() {
   const s2Map = new Map(freeze.s2.map((entry) => [entry.rel, entry.hash]));
   const s3Freeze = s3FreezeSections();
   const s3Map = new Map(s3Freeze.s3.map((entry) => [entry.rel, entry.hash]));
-  // S4 re-hashed api/transport (and re-used the unchanged event-model); the latest freeze wins.
-  const latestMap = new Map([...s3Map, ...Object.entries(S4_G1_FREEZE)]);
+  // S4/S5 re-hashed api/transport/event-model (and re-used unchanged files); the latest freeze wins.
+  const latestMap = new Map([...s3Map, ...Object.entries(S5_G1_FREEZE)]);
   const contractRels = new Set([
     "docs/contracts/api.v1.md",
     "docs/contracts/transport.v1.md",
@@ -4583,7 +4736,7 @@ function checkS2Drift() {
       checks.push({
         ok,
         label: `S3/S4 migration: contract updated only through the latest G1 freeze (${entry.rel})`,
-        detail: ok ? "hash matches S4 G1" : `actual=${actual} latest=${expected ?? "missing"}`,
+        detail: ok ? "hash matches the latest (S5) G1 freeze" : `actual=${actual} latest=${expected ?? "missing"}`,
       });
     } else {
       checks.push({
@@ -4727,21 +4880,27 @@ function checkS2Scope() {
   const agentTargets = [
     "com.example.shop.controller.OrderController",
     "com.example.shop.service.OrderService",
+    "com.example.shop.model.Order",
     "org.apache.ibatis.binding.MapperProxy",
     "org.apache.ibatis.executor.statement.PreparedStatementHandler",
   ];
-  const adviceClasses = ["ControllerAdvice.class", "ServiceAdvice.class", "MapperAdvice.class", "SqlAdvice.class"];
+  const adviceClasses = [
+    "ControllerAdvice.class", "PreviewControllerAdvice.class",
+    "ServiceAdvice.class", "PreviewServiceAdvice.class", "FieldWriteAdvice.class",
+    "MapperAdvice.class", "SqlAdvice.class",
+  ];
   checks.push({
-    ok: typeMatchers === 4 && transformSites === 4 &&
+    ok: typeMatchers === 5 && transformSites === 7 &&
       agentTargets.every((target) => traceAgent.includes(target)) &&
       adviceClasses.every((name) => traceAgent.includes(name)),
-    label: "agent instruments exactly 4 types/advices (controller/service/MapperProxy/PreparedStatementHandler)",
+    label: "agent instruments exactly 5 types / 7 advices (cancel + preview controller/service, Order field write, MapperProxy, PreparedStatementHandler)",
     detail: `.type=${typeMatchers} .transform=${transformSites}`,
   });
   const shopClasses = [...new Set(agentSources.match(/com\.example\.shop\.[A-Za-z0-9_.]+/g) ?? [])].sort();
   const expectedShopClasses = [
     "com.example.shop.controller.OrderController",
     "com.example.shop.mapper.OrderMapper",
+    "com.example.shop.model.Order",
     "com.example.shop.service.OrderService",
   ];
   checks.push({
@@ -4760,12 +4919,20 @@ function checkS2Scope() {
   for (const file of agentCode) {
     for (const { name, re } of [
       { name: "browser/sdk", re: /EventSource|WebSocket|sendBeacon|addEventListener\("click"/ },
-      { name: "values/reason", re: /"values"|getMessage\(\)/ },
+      { name: "L2/local", re: /kind\s*=\s*["']local|LocalVariableTable|visitLocalVariable|localVariables/ },
+      { name: "exception-payload", re: /getMessage\(\)/ },
     ]) {
       if (re.test(file.text)) agentForbidden.push(`${file.rel} [${name}]`);
     }
   }
-  checks.push({ ok: agentForbidden.length === 0, label: "agent has no browser SDK/values/exception-payload code", detail: agentForbidden.join(",") || "none" });
+  checks.push({ ok: agentForbidden.length === 0, label: "agent has no browser SDK / local (L2) / exception-payload code (S5 values are param+field+return only)", detail: agentForbidden.join(",") || "none" });
+  const l1Values = agentCode.find((f) => f.rel.endsWith("L1Values.java"))?.text ?? "";
+  checks.push({
+    ok: /"param"/.test(l1Values) && /"field"/.test(l1Values) && /"return"/.test(l1Values) &&
+      !/["']local["']/.test(l1Values),
+    label: "S5 values kinds are limited to param/field/return (kind=local belongs to S6 and is never emitted)",
+    detail: "L1Values.java",
+  });
 
   const requestHeaders = agentCode.find((f) => f.rel.endsWith("RequestHeaders.java"))?.text ?? "";
   const spanContext = agentCode.find((f) => f.rel.endsWith("SpanContext.java"))?.text ?? "";
@@ -4984,7 +5151,7 @@ function checkS2Scope() {
 
   gate(
     "S2-8",
-    "S4 migration: 9 business routes + 4 agent ASM points exactly (handshake is handwritten HttpURLConnection), no S5/S6/persistence/stream, H2 embedded only, no secrets/mirrors",
+    "S4/S5 migration: 9 business routes + 5 agent types / 7 advices exactly (handshake is handwritten HttpURLConnection), no L2/persistence/stream, H2 embedded only, no secrets/mirrors",
     checks,
     `grep -rnE "EventSource|WebSocket|JdbcTemplate|SseEmitter" agent/src server/collector/src workbench/src demo/buggy-shop-boot-vue/backend/src`,
   );
@@ -5020,6 +5187,7 @@ function checkS3Cleanup() {
   // schema/S0–S2 fixtures/demo backend/status-semantics/S0 docs stay forbidden.
   const allowedExact = new Set([
     ...S3_DEMO_EXPECTED_FILES,
+    ...S5_DEMO_BACKEND_ALLOWED,
     "pom.xml",
     "README.md",
     ".gitattributes",
@@ -5037,11 +5205,14 @@ function checkS3Cleanup() {
     "docs/plans/stages/S2/",
     "docs/plans/stages/S3/",
     "docs/plans/stages/S4/",
+    "docs/plans/stages/S5/",
     "fixtures/s1-walking-skeleton/",
     "fixtures/s2-zero-row-chain/",
     "fixtures/s3-frontend-facts/",
     "fixtures/s4-details/",
+    "fixtures/s5-l1-values/",
     "tools/verify/",
+    "tools/perf/",
   ];
   const forbiddenPrefixes = [
     "schema/",
@@ -5055,6 +5226,11 @@ function checkS3Cleanup() {
     "docs/plans/SOLO-PLAN.md",
   ];
   const pathMatches = (rel, entry) => (entry.endsWith("/") ? rel.startsWith(entry) : rel === entry);
+  const backendAllowed = new Set(S5_DEMO_BACKEND_ALLOWED);
+  const forbiddenCheck = (rel) =>
+    (forbiddenPrefixes.some((entry) => pathMatches(rel, entry)) &&
+      !(rel.startsWith("demo/buggy-shop-boot-vue/backend/") && backendAllowed.has(rel))) ||
+    forbiddenExact.includes(rel);
   const unexpected = [];
   const forbiddenHits = [];
   const staged = [];
@@ -5066,18 +5242,18 @@ function checkS3Cleanup() {
     if (index[0] !== " " && index[0] !== "?") staged.push(line);
     const allowed = allowedExact.has(rel) || allowedPrefixes.some((entry) => pathMatches(rel, entry));
     if (!allowed) unexpected.push(line);
-    if (forbiddenPrefixes.some((entry) => pathMatches(rel, entry)) || forbiddenExact.includes(rel)) {
+    if (forbiddenCheck(rel)) {
       forbiddenHits.push(line);
     }
   }
   checks.push({
     ok: status.ok && forbiddenHits.length === 0,
-    label: "no git change under frozen paths (schema, case-A/S1/S2 fixtures, demo backend, S0 docs, status-semantics)",
+    label: "no git change under frozen paths (schema, case-A/S1/S2/S3/S4 fixtures, demo backend outside the 4 S5 files, S0 docs, status-semantics)",
     detail: forbiddenHits.slice(0, 4).join(" | ") || "none",
   });
   checks.push({
     ok: status.ok && unexpected.length === 0,
-    label: "git status only shows the S4 whitelist (product dirs incl. server/launcher, 9 demo-frontend files, S3/S4 fixtures/guides/contracts/docs, tools/verify)",
+    label: "git status only shows the S5 whitelist (product dirs incl. server/launcher + 9 demo-frontend files + 4 demo-backend L1 files, S3/S4/S5 fixtures/guides/contracts/docs, frontend/build-plugin, tools/verify+perf)",
     detail: unexpected.slice(0, 4).join(" | ") || `${status.lines.length} expected entries`,
   });
   checks.push({
@@ -5138,7 +5314,7 @@ function checkS3Cleanup() {
 
   gate(
     "S3-10",
-    "cleanup: ports free (incl. 8602/18080), no java leftovers, git index untouched, git status within the S4 whitelist, product files stable",
+    "cleanup: ports free (incl. 8602/18080), no java leftovers, git index untouched, git status within the S5 whitelist, product files stable",
     checks,
     `netstat -ano | grep -E ":(${S1_PORTS.join("|")})\\s" ; tasklist | grep -i java ; git status --porcelain`,
   );
@@ -5172,8 +5348,8 @@ function checkS3Builds(validate) {
     detail: `exit=${sdkBuild.code} ${lastLines(`${sdkBuild.stdout}\n${sdkBuild.stderr}`, 1).join(" ")}`,
   });
   checks.push({
-    ok: sdkTest.code === 0 && testsMatch?.[1] === "13" && passMatch?.[1] === "13" && failMatch?.[1] === "0",
-    label: "frontend/sdk npm test -> node --test: 13 tests / 13 pass / 0 fail (8 ESM + 5 IIFE)",
+    ok: sdkTest.code === 0 && testsMatch?.[1] === "17" && passMatch?.[1] === "17" && failMatch?.[1] === "0",
+    label: "frontend/sdk npm test -> node --test: 17 tests / 17 pass / 0 fail (S5 manifest/source cases included)",
     detail: `tests=${testsMatch?.[1] ?? "?"} pass=${passMatch?.[1] ?? "?"} fail=${failMatch?.[1] ?? "?"}`,
   });
 
@@ -5237,8 +5413,10 @@ function checkS3Builds(validate) {
       /backendTarget\s*=\s*"http:\/\/127\.0\.0\.1:8080"/.test(demoVite) &&
       proxyCount("/ingest", "collectorTarget") === 2 && proxyCount("/api", "backendTarget") === 2 &&
       !/0\.0\.0\.0/.test(demoVite) && /alias:\s*\{[\s\S]*@traceboard\/sdk/.test(demoVite) &&
-      (demoVite.match(/plugins:\s*\[vue\(\)\]/g) ?? []).length === 1 && !/vite-plugin-/.test(demoVite),
-    label: "demo vite: /ingest->8601 + /api->8080 in dev+preview, SDK alias, vue plugin only, no 0.0.0.0",
+      /import traceboardShallow from "\.\.\/\.\.\/\.\.\/frontend\/build-plugin\/index\.mjs"/.test(demoVite) &&
+      /plugins:\s*\[vue\(\),\s*traceboardShallow\(\)\]/.test(demoVite) && /sourcemap:\s*true/.test(demoVite) &&
+      !/0\.0\.0\.0/.test(demoVite),
+    label: "demo vite: /ingest->8601 + /api->8080 in dev+preview, SDK alias, vue()+traceboardShallow(), build.sourcemap=true",
     detail: `ingestProxies=${proxyCount("/ingest", "collectorTarget")} apiProxies=${proxyCount("/api", "backendTarget")}`,
   });
   const demoTsconfig = readFileSync(abs(`${S3_DEMO_FRONTEND_REL}/tsconfig.json`), "utf8");
@@ -5252,7 +5430,10 @@ function checkS3Builds(validate) {
   const demoDistText = demoDist.map((file) => file.text).join("\n");
   const demoTokens = [
     "amount-b", "btn-save-b", "金额必须大于 0", "校验通过（本案例不提交）",
-    "traceparent", "X-TraceBoard-Click", "s_s3demo", "无构建插件/sourcemap",
+    "traceparent", "X-TraceBoard-Click", "s_s3demo",
+    // S5 migration: stale "无构建插件/sourcemap" copy replaced by the canonical banner + manifest.
+    "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
+    "__TRACEBOARD_MANIFEST__", "previewDiscount",
   ];
   for (const token of demoTokens) {
     checks.push({
@@ -5261,10 +5442,23 @@ function checkS3Builds(validate) {
       detail: demoDist.filter((file) => file.text.includes(token)).map((file) => file.rel).join(",") || "not found",
     });
   }
+  // S5 migration: demo build.sourcemap=true is allowed (dist only, gitignored) and the shallow
+  // plugin must emit traceboard-manifest.json; the SDK still goes through the /ingest proxy.
+  const demoDistAll = walk(abs(DEMO_DIST_REL));
+  const demoMaps = demoDistAll.filter((file) => file.endsWith(".map"));
+  const demoManifestAbs = abs(`${DEMO_DIST_REL}/traceboard-manifest.json`);
+  const demoManifest = existsSync(demoManifestAbs) ? JSON.parse(readFileSync(demoManifestAbs, "utf8")) : null;
   checks.push({
-    ok: demoDist.length > 0 && demoDist.every((file) => !file.rel.endsWith(".map")) && !/:8601\b/.test(demoDistText),
-    label: "demo dist has no sourcemap and no direct collector port (SDK goes through the /ingest proxy)",
-    detail: `${demoDist.length} dist files`,
+    ok: demoDist.length > 0 && demoMaps.length >= 1 && !/:8601\b/.test(demoDistText),
+    label: "demo dist has S5 .map artifacts (build.sourcemap=true, dist-only) and no direct collector port (SDK goes through the /ingest proxy)",
+    detail: `${demoDistAll.length} dist files, ${demoMaps.length} map(s)`,
+  });
+  checks.push({
+    ok: demoManifest !== null && Array.isArray(demoManifest.functions) &&
+      demoManifest.functions.some((fn) => fn?.name === "previewDiscount" && fn.file === "src/App.vue" &&
+        Number.isInteger(fn.line) && fn.line >= 1),
+    label: "demo dist traceboard-manifest.json lists previewDiscount with file/line",
+    detail: demoManifest ? `${demoManifest.functions.length} functions` : "manifest missing",
   });
   const demoAppText = readFileSync(abs(`${S3_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
   const demoTraceboardText = readFileSync(abs(`${S3_DEMO_FRONTEND_REL}/src/traceboard.ts`), "utf8");
@@ -5312,7 +5506,7 @@ function checkS3Builds(validate) {
 
   gate(
     "S3-1",
-    "builds: SDK 13/13 tests + 3 dist files, demo frontend (file dep,/ingest proxy,case B,traceparent), workbench, root JDK21 (launcher), demo JDK8, agent 52",
+    "builds: SDK 17/17 tests + 3 dist files, demo frontend (file dep,/ingest proxy,case B,traceparent), workbench, root JDK21 (launcher), demo JDK8, agent 52",
     checks,
     `(cd "frontend/sdk" && npm ci && npm run build && npm test) && (cd "${S3_DEMO_FRONTEND_REL}" && npm ci && npm run build) && (cd "workbench" && npm ci && npm run build)`,
   );
@@ -5437,13 +5631,13 @@ function checkS3Fixtures(validate) {
   });
   const hashProblems = [];
   for (const entry of [...freeze.s3, ...freeze.legacy]) {
-    const expected = S4_G1_FREEZE[entry.rel] ?? entry.hash;
+    const expected = S5_G1_FREEZE[entry.rel] ?? entry.hash;
     const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
     if (actual !== expected) hashProblems.push(`${entry.rel} actual=${actual} expected=${expected}`);
   }
   checks.push({
     ok: hashProblems.length === 0,
-    label: "schema, contracts (latest = S4 G1 freeze), S3 fixtures/plan/dispatch, S0–S2 fixtures: every hash matches (bytes unchanged)",
+    label: "schema, contracts (latest = S5 G1 freeze), S3 fixtures/plan/dispatch, S0–S2 fixtures: every hash matches (bytes unchanged)",
     detail: hashProblems.length ? hashProblems.slice(0, 4).join(" || ") : `${freeze.s3.length + freeze.legacy.length} hashes match`,
   });
   const s2Freeze = s2FreezeSections();
@@ -5985,8 +6179,8 @@ function checkS3CaseB() {
   const testSource = readFileSync(abs(`${SDK_DIR}/test/sdk.test.js`), "utf8");
   const testOut = S3_EVIDENCE.sdkTestStdout ?? "";
   checks.push({
-    ok: S3_EVIDENCE.sdkTestStderr !== undefined && /# pass 13/.test(testOut) && /# fail 0/.test(testOut) && /1\.\.13/.test(testOut),
-    label: "SDK `npm test` run recorded in S3-1: 13/13 tests pass (8 ESM + 5 IIFE)",
+    ok: S3_EVIDENCE.sdkTestStderr !== undefined && /# pass 17/.test(testOut) && /# fail 0/.test(testOut) && /1\.\.17/.test(testOut),
+    label: "SDK `npm test` run recorded in S3-1: 17/17 tests pass (S5 manifest/source cases included)",
     detail: (testOut.match(/# pass \d+/) ?? ["missing"])[0],
   });
   checks.push({
@@ -6031,7 +6225,8 @@ function checkS3Scope() {
     { name: "pixel replay", re: /rrweb|html2canvas|MediaRecorder|toDataURL|screenshot/i },
     { name: "realtime", re: /new\s+EventSource|new\s+WebSocket|SseEmitter|@ServerEndpoint/ },
     { name: "persistence", re: /localStorage|sessionStorage|indexedDB/ },
-    { name: "sourcemap/build-plugin", re: /sourceMappingURL|sourcesContent|unplugin|webpack|rollup-plugin|vite-plugin-/i },
+    // S5 allows the shallow manifest + demo build.sourcemap; .map decoding/upload stays banned.
+    { name: "sourcemap-decoding", re: /SourceMapConsumer|sourcesContent|sourceMappingURL|source-map/i },
     { name: "cdn/telemetry", re: /cdn\.jsdelivr|unpkg\.com|cdnjs\.cloudflare|google-analytics|segment\.io/i },
   ];
   const markerHits = [];
@@ -6042,7 +6237,7 @@ function checkS3Scope() {
   }
   checks.push({
     ok: markerHits.length === 0,
-    label: "no S5/S6 capability: no pixel replay, no SSE/WS, no client persistence, no sourcemap/build plugin, no CDN/telemetry",
+    label: "no S6+ capability: no pixel replay, SSE/WS, client persistence, .map decoding/upload, CDN/telemetry (S5 manifest/sourcemap allowed)",
     detail: markerHits.slice(0, 5).join(",") || "none",
   });
 
@@ -6063,31 +6258,31 @@ function checkS3Scope() {
     detail: collectorHits.join(",") || "none",
   });
 
-  const valuesHits = productCode.filter((file) =>
-    // S5 values[] field diff is a JSON/event payload key; a TS local `values: number[]`
-    // (workbench per-invocation rows) is S4 UI state, not a values[] payload.
-    /["']values["']\s*:/.test(file.text)).map((file) => file.rel);
+  const l2Hits = productCode.filter((file) =>
+    // S5 values are param/field/return summaries; local variables/line tables are L2/S6.
+    /kind\s*=\s*["']local|LocalVariableTable|visitLocalVariable|localVariables/.test(file.text)).map((file) => file.rel);
   checks.push({
-    ok: valuesHits.length === 0,
-    label: "no values[] field diff / L2 payload in SDK, agent or collector",
-    detail: valuesHits.join(",") || "none",
+    ok: l2Hits.length === 0,
+    label: "no L2/local-variable payload in SDK/agent/collector/workbench (S5 values are param/field/return only)",
+    detail: l2Hits.join(",") || "none",
   });
 
-  const distDirs = [WORKBENCH_DIST_REL, DEMO_DIST_REL, SDK_DIST_REL];
-  const maps = distDirs.flatMap((rel) => (existsSync(abs(rel)) ? walk(abs(rel)) : [])).filter((file) => file.endsWith(".map"));
+  const workbenchSdkMaps = [WORKBENCH_DIST_REL, SDK_DIST_REL]
+    .flatMap((rel) => (existsSync(abs(rel)) ? walk(abs(rel)) : []))
+    .filter((file) => file.endsWith(".map"));
   checks.push({
-    ok: maps.length === 0,
-    label: "no sourcemap generator output in workbench/demo/SDK dist (S5 boundary)",
-    detail: maps.length ? maps.map(relOf).join(",") : "0 maps",
+    ok: workbenchSdkMaps.length === 0,
+    label: "workbench/SDK dist have no *.map (S5 maps exist only in the demo build, which is gitignored)",
+    detail: workbenchSdkMaps.length ? workbenchSdkMaps.map(relOf).join(",") : "0 maps",
   });
-  const viteConfigs = [
-    readFileSync(abs("workbench/vite.config.ts"), "utf8"),
-    readFileSync(abs(`${S3_DEMO_FRONTEND_REL}/vite.config.ts`), "utf8"),
-  ].join("\n");
+  const wbVite = readFileSync(abs("workbench/vite.config.ts"), "utf8");
+  const demoVite = readFileSync(abs(`${S3_DEMO_FRONTEND_REL}/vite.config.ts`), "utf8");
   checks.push({
-    ok: !/sourcemap:\s*true/.test(viteConfigs) && (viteConfigs.match(/plugins:\s*\[vue\(\)\]/g) ?? []).length === 2,
-    label: "Vite configs use only @vitejs/plugin-vue (no sourcemap/build-injection plugin)",
-    detail: "vue plugin only",
+    ok: /plugins:\s*\[vue\(\)\]/.test(wbVite) && !/traceboardShallow|@traceboard\/vite-plugin|sourcemap:\s*true/.test(wbVite) &&
+      /plugins:\s*\[vue\(\),\s*traceboardShallow\(\)\]/.test(demoVite) && /sourcemap:\s*true/.test(demoVite) &&
+      !/SourceMapConsumer|sourcesContent|sourceMappingURL/.test(wbVite + demoVite),
+    label: "Vite configs: workbench vue() only; demo vue()+traceboardShallow()+build.sourcemap (S5 shallow, no .map decoding)",
+    detail: `workbenchPlugin=${/traceboardShallow/.test(wbVite)} demoPlugin=${/traceboardShallow/.test(demoVite)}`,
   });
 
   /* -------- SDK privacy / secrets / telemetry / CDN -------- */
@@ -6162,7 +6357,7 @@ function checkS3Scope() {
 
   gate(
     "S3-8",
-    "scope/security: no S5/S6 (sourcemap/build plugin/L2, pixel replay, SSE/WS, persistence), SDK no secrets/CDN/PII, loopback, no external $ref; S4 launcher is allowed",
+    "scope/security: S5 values/manifest/sourcemap allowed but no L2/.map decoding/pixel replay/SSE/WS/persistence, SDK no secrets/CDN/PII, loopback, no external $ref; S4 launcher is allowed",
     checks,
     `grep -rnE "rrweb|EventSource|WebSocket|localStorage|sourceMappingURL" frontend/sdk/src workbench/src demo/buggy-shop-boot-vue/frontend/src server/collector/src agent/src`,
   );
@@ -6314,10 +6509,16 @@ function checkV6() {
     /^https?:\/\/vuejs\.org\/error-reference\//, // Vue runtime error-message link (never fetched)
     /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/, // local dev/proxy targets
   ];
+  // S5 migration: the demo build now emits `.js.map` (build.sourcemap=true). A sourcemap is a
+  // local devtools artifact that embeds vendored library source text (Vue/Vite doc links) and is
+  // never fetched by the page, so it is excluded from the *runtime* URL/asset scan. Maps are still
+  // asserted below to carry no CDN host, and index.html/js/css stay fully scanned.
+  const runtimeScanFiles = [...workbenchFiles, ...demoFiles, ...distTextFiles(SDK_DIST_REL)]
+    .filter((target) => !target.rel.endsWith(".map"));
+  const scannedMaps = [...workbenchFiles, ...demoFiles]
+    .filter((target) => target.rel.endsWith(".map"));
   const scanTargets = [
-    ...workbenchFiles,
-    ...demoFiles,
-    ...distTextFiles(SDK_DIST_REL),
+    ...runtimeScanFiles,
     { rel: "workbench/index.html", text: readFileSync(abs("workbench/index.html"), "utf8") },
     { rel: "demo/buggy-shop-boot-vue/frontend/index.html", text: readFileSync(abs("demo/buggy-shop-boot-vue/frontend/index.html"), "utf8") },
   ];
@@ -6341,16 +6542,28 @@ function checkV6() {
     }
   }
 
+  const mapCdnHits = [];
+  for (const target of scannedMaps) {
+    const lower = target.text.toLowerCase();
+    for (const host of ["unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "npmmirror.com", "mirrors.aliyun.com"]) {
+      if (lower.includes(host)) mapCdnHits.push(`${target.rel} -> ${host}`);
+    }
+  }
   const urlChecks = [
     {
       ok: offendingUrls.length === 0,
-      label: "no non-inert external http(s) URLs in built assets",
+      label: "no non-inert external http(s) URLs in built assets (runtime js/css/html; S5 demo *.map excluded as a devtools artifact)",
       detail: offendingUrls.length ? offendingUrls.join(", ") : `${allUrls.size} distinct URLs, all inert/loopback`,
     },
     {
       ok: externalAssetRefs.length === 0,
       label: "no external src/href/url() asset references",
       detail: externalAssetRefs.length ? externalAssetRefs.join(" | ") : "none",
+    },
+    {
+      ok: mapCdnHits.length === 0,
+      label: `S5 demo sourcemaps (${scannedMaps.length} *.map) reference no CDN/mirror host`,
+      detail: mapCdnHits.slice(0, 3).join(" | ") || "0 CDN hosts in maps",
     },
     {
       ok: true,
@@ -7549,13 +7762,13 @@ async function checkS4D() {
 }
 
 /**
- * S4-E: SDK IIFE gate. Builds and tests frontend/sdk (13 node --test cases: 8 ESM + 5 IIFE),
+ * S4-E: SDK IIFE gate. Builds and tests frontend/sdk (17 node --test cases, S5 manifest/source included),
  * asserts the 3-file dist with no sourcemap/external URL/CDN, then evaluates the real bundle in
  * a vm sandbox: auto-init exactly once from __TRACEBOARD_CONFIG__ (derived /ingest/v1/events),
  * double-load guard, no-config no-init, bad-config fail-open.
  */
 async function checkS4E() {
-  section("S4-E: SDK IIFE (13 tests, 3 dist files, global/version, vm auto-init/guard/fail-open)");
+  section("S4-E: SDK IIFE (17 tests, 3 dist files, global/version, vm auto-init/guard/fail-open)");
   const checks = [];
   const sdkDir = abs(SDK_DIR);
   const iifeRel = S4_SDK_IIFE_REL;
@@ -7586,8 +7799,8 @@ async function checkS4E() {
   const passMatch = testOut.match(/# pass (\d+)/);
   const failMatch = testOut.match(/# fail (\d+)/);
   checks.push({
-    ok: test.code === 0 && testsMatch?.[1] === "13" && passMatch?.[1] === "13" && failMatch?.[1] === "0",
-    label: "npm test (pretest build) -> node --test: 13 tests / 13 pass / 0 fail (8 ESM + 5 IIFE)",
+    ok: test.code === 0 && testsMatch?.[1] === "17" && passMatch?.[1] === "17" && failMatch?.[1] === "0",
+    label: "npm test (pretest build) -> node --test: 17 tests / 17 pass / 0 fail (S5 manifest/source included)",
     detail: `tests=${testsMatch?.[1] ?? "?"} pass=${passMatch?.[1] ?? "?"} fail=${failMatch?.[1] ?? "?"}`,
   });
 
@@ -7764,7 +7977,7 @@ async function checkS4E() {
 
   return gate(
     "S4-E",
-    "SDK IIFE: 13/13 tests, dist 3 files, global TraceBoardSDK/version, vm auto-init once + double-load guard + no-config no-init + bad-config fail-open, no sourcemap/external URLs",
+    "SDK IIFE: 17/17 tests, dist 3 files, global TraceBoardSDK/version, vm auto-init once + double-load guard + no-config no-init + bad-config fail-open, no sourcemap/external URLs",
     checks,
     repro,
   );
@@ -7860,7 +8073,7 @@ async function checkS4F() {
       detail: show(requestRows[0]),
     });
 
-    /* ---------------- graph: 9 nodes / 8 edges, 14 ordered fields ---------------- */
+    /* ---------------- graph: 9 nodes / 8 edges, 15 ordered fields (values:null) ---------------- */
     const graphUrl = `/api/v1/sessions/${S4_DETAIL_SESSION}/graph?traceId=${traceId}`;
     const graphRes = await requestBase(COLLECTOR_BASE, graphUrl);
     const graphParsed = graphRes.ok ? parseJson(graphRes.text) : { ok: false };
@@ -7892,6 +8105,7 @@ async function checkS4F() {
       if (!deepEqual(node.reason, event.reason ?? null)) nodeProblems.push(`node${index} reason=${show(node.reason)}`);
       if (!deepEqual(node.source, event.source ?? null)) nodeProblems.push(`node${index} source=${show(node.source)}`);
       if (!deepEqual(node.confidence, event.confidence)) nodeProblems.push(`node${index} confidence=${show(node.confidence)}`);
+      nodeProblems.push(...graphValuesProblems(node, event, `node${index}`));
     });
     checks.push({
       ok: graphRes.ok && graphRes.status === 200 && graph.sessionId === S4_DETAIL_SESSION &&
@@ -7900,7 +8114,7 @@ async function checkS4F() {
         nodes.map((node) => node.spanId).join(",") === (graphExpected.nodeOrder ?? []).join(",") &&
         deepEqual(edges, graphExpected.edges ?? []) && edges.every((edge) => edge.count === 1) &&
         nodeProblems.length === 0,
-      label: "graph: 9 nodes / 8 edges, every node has exactly the 14 ordered fields (reason/source/confidence from the event)",
+      label: "graph: 9 nodes / 8 edges, every node has exactly the 15 ordered fields (reason/source/confidence + S5 values:null)",
       detail: nodeProblems.length ? nodeProblems.slice(0, 6).join(" || ") : `${nodes.length} nodes, ${edges.length} edges`,
     });
     const mapper3 = nodes.find((node) => node.spanId === graphExpected.notCollectedNode?.spanId) ?? {};
@@ -8183,7 +8397,7 @@ async function checkS4F() {
 
   return gate(
     "S4-F",
-    "details/×N/gaps: 9 schema-valid fixture events -> requests/graph(9/8, 14 ordered fields)/replay; workbench dist+derive ×3/×3/×2, rows 未采集≠0, exactly 3 gaps, inline F rule",
+    "details/×N/gaps: 9 schema-valid fixture events -> requests/graph(9/8, 15 ordered fields incl. values:null)/replay; workbench dist+derive ×3/×3/×2, rows 未采集≠0, exactly 3 gaps, inline F rule",
     checks,
     repro,
   );
@@ -8474,7 +8688,7 @@ async function checkS4G() {
 /**
  * S4-H: regression closure. Reads the RESULTS of the S0–S3 suite (so it needs a full run),
  * re-hashes the frozen face (schema + S0–S3 fixtures via the S2/S3 plan-review baselines and the
- * S4 G1 freeze) and proves the agent hello stayed a control-plane message: no session, no event,
+ * S5 G1 freeze) and proves the agent hello stayed a control-plane message: no session, no event,
  * no seq, and the runtime backend span count/kinds are unchanged.
  */
 function checkS4H() {
@@ -8502,21 +8716,21 @@ function checkS4H() {
   /* -------- schema hash is the G1 value -------- */
   const schemaHash = existsSync(abs(SCHEMA_REL)) ? sha256File(abs(SCHEMA_REL)) : "missing";
   checks.push({
-    ok: schemaHash === S4_H_SCHEMA_HASH && S4_G1_FREEZE[SCHEMA_REL] === S4_H_SCHEMA_HASH,
-    label: "frozen schema hash is 927937df…a489a (same value in the S4 G1 freeze)",
+    ok: schemaHash === S4_H_SCHEMA_HASH && S5_G1_FREEZE[SCHEMA_REL] === S4_H_SCHEMA_HASH,
+    label: "frozen schema hash is 927937df…a489a (same value in the S5 G1 freeze)",
     detail: schemaHash,
   });
 
-  /* -------- S4 G1 freeze: zero drift over the 12 frozen files -------- */
-  const frozenEntries = Object.entries(S4_G1_FREEZE);
+  /* -------- S5 G1 freeze (supersedes S4 for api/event-model): zero drift -------- */
+  const frozenEntries = Object.entries(S5_G1_FREEZE);
   const freezeDrift = [];
   for (const [rel, expected] of frozenEntries) {
     const now = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
     if (now !== expected) freezeDrift.push(`${rel} (${expected.slice(0, 12)}… -> ${now.slice(0, 12)}…)`);
   }
   checks.push({
-    ok: frozenEntries.length === 12 && freezeDrift.length === 0,
-    label: "S4 G1 freeze zero drift: schema, 4 contracts, guide, 3 S4 fixtures, S4 plan/dispatch/amendment (12 files)",
+    ok: frozenEntries.length === 18 && freezeDrift.length === 0,
+    label: "S5 G1 freeze zero drift: schema, 4 contracts, 2 guides, S4/S5 fixtures, S4/S5 plan+dispatch/amendment (18 files)",
     detail: freezeDrift.length ? freezeDrift.slice(0, 4).join(" || ") : `${frozenEntries.length}/${frozenEntries.length} hashes match`,
   });
 
@@ -8526,7 +8740,7 @@ function checkS4H() {
   const collectFixtures = (entries) => {
     for (const entry of entries) {
       if (!entry.rel.startsWith("fixtures/")) continue;
-      const expected = S4_G1_FREEZE[entry.rel] ?? entry.hash;
+      const expected = S5_G1_FREEZE[entry.rel] ?? entry.hash;
       if (fixtureBaseline.has(entry.rel) && fixtureBaseline.get(entry.rel) !== expected) fixtureConflicts.push(entry.rel);
       fixtureBaseline.set(entry.rel, expected);
     }
@@ -8581,30 +8795,29 @@ function checkS4H() {
 
   return gate(
     "S4-H",
-    "regression: S0–S3 all PASS, schema 927937df…, S0–S3 fixtures + S4 G1 freeze zero drift, hello is not an event (span counts unchanged)",
+    "regression: S0–S3 all PASS, schema 927937df…, S0–S3 fixtures + S4/S5 G1 freeze zero drift, hello is not an event (span counts unchanged)",
     checks,
     repro,
   );
 }
 
 /**
- * S4-I: scope, security and cleanup closure. No S5/S6/S7 capability in the S4-owned sources, no
- * secrets/CDN/mirrors, injection is external-script-only with CSP untouched, loopback + no TLS,
- * fixed ports free, no java/node leftovers, git index/HEAD/status untouched, product files stable,
- * and the git change set stays inside the S4 whitelist.
+ * S4-I: scope, security and cleanup closure. S5 values/manifest are allowed; no S6+ capability
+ * in the S4-owned sources, no secrets/CDN/mirrors, injection is external-script-only with CSP
+ * untouched, loopback + no TLS, fixed ports free, no java/node leftovers, git index/HEAD/status
+ * untouched, product files stable, and the git change set stays inside the S5 whitelist.
  */
 function checkS4I() {
-  section("S4-I: scope/security/cleanup (no S5/S6/S7, no secrets/CDN/mirrors, loopback, ports, leftovers, whitelist)");
+  section("S4-I: scope/security/cleanup (S5 allowed, no S6+, no secrets/CDN/mirrors, loopback, ports, leftovers, whitelist)");
   const checks = [];
   const repro = `netstat -ano | grep -E ":(${S1_PORTS.join("|")})\\s" ; tasklist | grep -iE "java|node" ; git status --porcelain ; git diff --cached --name-only`;
 
-  /* -------- no S5/S6/S7 capability in the S4 sources -------- */
+  /* -------- no S6+ capability in the S4/S5 sources (S5 values/manifest allowed) -------- */
   const scopeFiles = S4_SCOPE_TREES.flatMap((rel) => dirTextFiles(rel))
     .map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
   const forbiddenMarkers = [
-    { name: "sourcemap", re: /sourceMappingURL|sourcesContent|--sourcemap\b|sourcemap:\s*true/ },
-    { name: "build-plugin", re: /unplugin|rollup-plugin|vite-plugin-|webpack/i },
-    { name: "L1/L2-values", re: /["']values["']\s*:/ },
+    { name: "map-decoding", re: /SourceMapConsumer|sourcesContent|sourceMappingURL|source-map/i },
+    { name: "L2/local", re: /kind\s*=\s*["']local|LocalVariableTable|visitLocalVariable|localVariables/ },
     { name: "WAR/Tomcat", re: /<packaging>\s*war|org\.apache\.catalina|\bwar\s*部署|Tomcat\s*(?:部署|容器)/i },
     { name: "cloud", re: /\b(kubernetes|k8s|terraform|cloudformation|lambda@edge)\b/i },
     { name: "SSE/WS", re: /new\s+EventSource|SseEmitter|@ServerEndpoint|new\s+WebSocket/ },
@@ -8620,7 +8833,7 @@ function checkS4I() {
   }
   checks.push({
     ok: markerHits.length === 0 && scopeFiles.length > 0,
-    label: "S4 sources contain no S5/S6/S7 capability (sourcemap, build plugin, L1/L2 values, WAR/Tomcat, cloud, SSE/WS, pixel replay, persistence)",
+    label: "S4 sources contain no S6+ capability (.map decoding, L2/local, WAR/Tomcat, cloud, SSE/WS, pixel replay, persistence); S5 values/manifest allowed",
     detail: markerHits.slice(0, 5).join(",") || `${scopeFiles.length} files clean`,
   });
 
@@ -8768,19 +8981,23 @@ function checkS4I() {
   });
 
   /* -------- cleanup: git changes stay inside the S4 whitelist -------- */
-  const allowedExact = new Set(["pom.xml", "README.md", ".gitattributes"]);
+  const allowedExact = new Set(["pom.xml", "README.md", ".gitattributes", ...S5_DEMO_BACKEND_ALLOWED]);
   const allowedPrefixes = [
     "agent/",
     "server/collector/",
     "server/launcher/",
     "frontend/sdk/",
+    "frontend/build-plugin/",
     "demo/buggy-shop-boot-vue/frontend/",
     "workbench/",
     "docs/contracts/",
     "docs/guides/",
     "docs/plans/stages/S4/",
+    "docs/plans/stages/S5/",
     "fixtures/s4-details/",
+    "fixtures/s5-l1-values/",
     "tools/verify/",
+    "tools/perf/",
   ];
   const forbiddenPrefixes = [
     "schema/",
@@ -8791,17 +9008,18 @@ function checkS4I() {
     "demo/buggy-shop-boot-vue/backend/",
     "docs/plans/stages/S0/",
   ];
+  const backendAllowed = new Set(S5_DEMO_BACKEND_ALLOWED);
   const unexpected = [];
   const forbidden = [];
   for (const line of status.lines) {
     const rel = line.slice(3).trim().replace(/^"|"$/g, "").split("\\").join("/");
     const allowed = allowedExact.has(rel) || allowedPrefixes.some((entry) => rel.startsWith(entry));
     if (!allowed) unexpected.push(line);
-    if (forbiddenPrefixes.some((entry) => rel.startsWith(entry))) forbidden.push(line);
+    if (forbiddenPrefixes.some((entry) => rel.startsWith(entry)) && !backendAllowed.has(rel)) forbidden.push(line);
   }
   checks.push({
     ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
-    label: "git change set is inside the S4 whitelist only (agent/collector/launcher/sdk/demo frontend/workbench/docs contracts+guides+S4/fixtures/s4-details/tools/pom)",
+    label: "git change set is inside the S5 whitelist only (agent/collector/launcher/sdk+build-plugin/demo frontend+4 backend files/workbench/docs contracts+guides+S4+S5/fixtures/s4-details+s5-l1-values/tools/verify+perf/pom)",
     detail: unexpected.length || forbidden.length
       ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
       : `${status.lines.length} entries within scope`,
@@ -8824,7 +9042,7 @@ function checkS4I() {
 
   return gate(
     "S4-I",
-    "scope/security/cleanup: no S5/S6/S7, no secrets/CDN/mirrors, external-script-only injection + CSP untouched, loopback/no TLS, ports free, no java/node leftovers, git untouched, S4 whitelist only",
+    "scope/security/cleanup: S5 values/manifest allowed but no S6+, no secrets/CDN/mirrors, external-script-only injection + CSP untouched, loopback/no TLS, ports free, no java/node leftovers, git untouched, S5 whitelist only",
     checks,
     repro,
   );
@@ -8857,6 +9075,1581 @@ async function checkS4() {
 }
 
 /* ------------------------------------------------------------------ */
+/* S5: builds, demo L1, agent L1, values UI, manifest, perf, freeze (parts 1-2) */
+/* ------------------------------------------------------------------ */
+
+function s5PreviewQuery(id = 1) {
+  return `/api/orders/${id}/preview-discount?requestedAmount=100&demoSecret=${S5_DEMO_SECRET}` +
+    `&note=${encodeURIComponent(S5_NOTE_3000)}`;
+}
+
+/** First orders row (id=1) of a demo `GET /api/orders` body. */
+function s5OrderRow(text) {
+  const parsed = parseJson(text);
+  const rows = parsed.ok && Array.isArray(parsed.value?.data) ? parsed.value.data : [];
+  return rows.find((row) => row && row.id === 1) ?? null;
+}
+
+function s5PortFree(port) {
+  const probe = listeningOn(port);
+  return { ok: probe.supported && probe.lines.length === 0, detail: probe.lines.join(" | ") || "no listener" };
+}
+
+/**
+ * S5-D: graph values fixture + workbench Values/Source UI. Ingests fixtures/s5-l1-values into a
+ * fresh collector and asserts the 15-field graph, 5 verbatim value items, null elsewhere, and
+ * unchanged requests/replay/meta; also ingests fixtures/s4-details to prove values:null there.
+ * Rebuilds the workbench and asserts the S5 selectors/texts plus the B3 reverse assertions.
+ */
+async function checkS5D() {
+  section("S5-D: values graph fixture (4 nodes/15 fields/5 values) + workbench dist");
+  const checks = [];
+  const eventsText = readFileSync(abs(S5_EVENTS_REL), "utf8");
+  const eventLines = eventsText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const events = [];
+  const parseProblems = [];
+  for (const [index, line] of eventLines.entries()) {
+    const parsed = parseJson(line);
+    if (!parsed.ok) parseProblems.push(`line ${index + 1}: invalid JSON`);
+    else events.push(parsed.value);
+  }
+  const factsParsed = parseJson(readFileSync(abs(S5_FACTS_REL), "utf8"));
+  const facts = factsParsed.ok ? factsParsed.value : {};
+  const s5Pre = [
+    { ok: existsSync(abs(S5_EVENTS_REL)) && existsSync(abs(S5_FACTS_REL)) && existsSync(abs(S5_README_REL)), label: "fixtures/s5-l1-values/{events.ndjson,expected-facts.json,README.md} exist", detail: S5_FIXTURE_DIR },
+    { ok: eventLines.length === 4 && events.length === 4 && parseProblems.length === 0, label: "S5 fixture has 4 parseable NDJSON events", detail: `lines=${eventLines.length} parsed=${events.length} ${parseProblems.join(",")}` },
+    { ok: factsParsed.ok && facts.eventCount === 4 && facts.workbenchExpectations?.panelSelector === S5_VALUES_SELECTOR, label: "expected-facts: 4 events + S5 workbench expectations", detail: `eventCount=${facts.eventCount}` },
+    { ok: existsSync(JDK21_JAVA), label: "JDK21 java.exe exists", detail: JDK21_JAVA },
+    { ok: existsSync(abs(COLLECTOR_JAR_REL)), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: listeningOn(8601).lines.length === 0, label: "port 8601 free before start", detail: listeningOn(8601).lines.join(" | ") || "no listener" },
+  ];
+  const repro = `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: application/x-ndjson; charset=utf-8" --data-binary @"${S5_EVENTS_REL}" && curl -s "http://127.0.0.1:8601/api/v1/sessions/${S5_FIXTURE_SESSION}/graph?traceId=${facts.globalAssertions?.chain?.traceId ?? ""}" && (cd "workbench" && npm run build)`;
+  if (!s5Pre.every((item) => item.ok)) {
+    return record("S5-D", "S5-D values/workbench (preconditions)", false,
+      s5Pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`), repro);
+  }
+
+  let collector = null;
+  try {
+    /* ---------------- fixture schema + deterministic ingest ---------------- */
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    const validate = ajv.compile(JSON.parse(readFileSync(abs(SCHEMA_REL), "utf8")));
+    const schemaProblems = events
+      .filter((event) => !validate(event))
+      .map((event, index) => `${event.spanId ?? `#${index}`}: ${(validate.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ")}`);
+    checks.push({
+      ok: schemaProblems.length === 0,
+      label: "4/4 S5 fixture events validate against the frozen Ajv 2020-12 schema (strict)",
+      detail: schemaProblems.slice(0, 3).join(" || ") || "4/4 valid",
+    });
+    const chain = facts.globalAssertions?.chain ?? {};
+    const serviceEvent = events.find((event) => event.kind === "service") ?? null;
+    const fixtureValueProblems = [];
+    if (!serviceEvent || !Array.isArray(serviceEvent.values) || serviceEvent.values.length !== 5) {
+      fixtureValueProblems.push(`service values=${show(serviceEvent?.values)}`);
+    } else {
+      const names = serviceEvent.values.map((item) => item?.name);
+      const kinds = serviceEvent.values.map((item) => item?.kind);
+      if (!deepEqual(names, S5_VALUE_NAMES)) fixtureValueProblems.push(`names=${names.join(",")}`);
+      if (!deepEqual(kinds, S5_VALUE_KINDS)) fixtureValueProblems.push(`kinds=${kinds.join(",")}`);
+      if (names.includes("id")) fixtureValueProblems.push("path id leaked");
+      if (serviceEvent.values.some((item) => item?.line !== null)) fixtureValueProblems.push("line != null");
+      const note = serviceEvent.values[2];
+      if (note?.to !== S5_NOTE_2048 || note?.truncated !== true) fixtureValueProblems.push(`note truncated=${note?.truncated} len=${note?.to?.length}`);
+      const secret = serviceEvent.values[1];
+      if (secret?.to !== "[REDACTED len=6]" || secret?.redacted !== true) fixtureValueProblems.push(`demoSecret=${show(secret)}`);
+      const field = serviceEvent.values.filter((item) => item?.kind === "field");
+      if (field.length !== 1 || field[0]?.name !== "amount" || field[0]?.from !== 100 || field[0]?.to !== 0) fixtureValueProblems.push("amount 100->0 not exactly once");
+      if (serviceEvent.values[4]?.kind !== "return" || serviceEvent.values[4]?.to !== 0) fixtureValueProblems.push("return item");
+      if (!(serviceEvent.flags ?? []).includes(S5_L1_FLAG)) fixtureValueProblems.push("L1 flag missing");
+      if (events.filter((event) => Object.prototype.hasOwnProperty.call(event, "values")).length !== 1) fixtureValueProblems.push("values on more than one span");
+    }
+    if (eventsText.includes(S5_DEMO_SECRET)) fixtureValueProblems.push("raw demoSecret in fixture");
+    checks.push({
+      ok: fixtureValueProblems.length === 0,
+      label: "fixture shape: exactly one service values[] (100 / [REDACTED len=6] / 2048 x truncated / 100->0 / return 0), no id, no raw secret, others omit values",
+      detail: fixtureValueProblems.slice(0, 6).join(" || ") || "fixture values match the contract",
+    });
+    const factProblems = s5FixtureFactProblems(events, facts);
+    checks.push({
+      ok: factProblems.length === 0,
+      label: "expected-facts F1–F10 locate the service values and #trace.* derived counts exactly",
+      detail: factProblems.slice(0, 6).join(" || ") || "10/10 facts match",
+    });
+
+    collector = startJavaServer("collector(8601) S5-D", JDK21_JAVA, ["-jar", abs(COLLECTOR_JAR_REL)], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(health), label: "collector 8601 /actuator/health 200", detail: health ? "UP" : "timeout" });
+    if (!health) return gate("S5-D", "S5-D values/workbench (collector unavailable)", checks, repro);
+
+    const ingest = await postNdjson("/ingest/v1/events", eventsText, `${NDJSON}; charset=utf-8`);
+    const ingestParsed = ingest.ok ? parseJson(ingest.text) : { ok: false };
+    const ingestBody = ingestParsed.ok && ingestParsed.value ? ingestParsed.value : {};
+    checks.push({
+      ok: ingest.ok && ingest.status === 202 && ingestBody.accepted === 4 && ingestBody.rejected === 0,
+      label: "ingest fixtures/s5-l1-values/events.ndjson -> 202 accepted=4 rejected=0",
+      detail: `status=${ingest.status} body=${show(ingest.text)}`,
+    });
+
+    /* ---------------- requests unchanged ---------------- */
+    const requestsRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S5_FIXTURE_SESSION}/requests`);
+    const requestsParsed = requestsRes.ok ? parseJson(requestsRes.text) : { ok: false };
+    const requestsBody = requestsParsed.ok && requestsParsed.value ? requestsParsed.value : {};
+    const requestRows = Array.isArray(requestsBody.requests) ? requestsBody.requests : [];
+    const expectedRow = facts.apiExpectations?.requests?.row ?? {};
+    checks.push({
+      ok: requestsRes.ok && requestsRes.status === 200 &&
+        deepEqual(Object.keys(requestsBody).sort(), ["requests", "sdkActive", "sessionId"]) &&
+        requestsBody.sessionId === S5_FIXTURE_SESSION && requestsBody.sdkActive === true &&
+        requestRows.length === 1 && deepEqual(requestRows[0], expectedRow) &&
+        !Object.prototype.hasOwnProperty.call(requestRows[0] ?? {}, "values"),
+      label: "requests unchanged: exactly {sessionId,sdkActive,requests}, 1 row deep-equals expected (EXACT/4 spans/1 fetch/2 backend), no values key",
+      detail: show(requestRows[0]),
+    });
+
+    /* ---------------- graph: 4 nodes / 3 edges / 15 ordered fields / service values ---------------- */
+    const graphExpected = facts.apiExpectations?.graph ?? {};
+    const graphUrl = `/api/v1/sessions/${S5_FIXTURE_SESSION}/graph?traceId=${graphExpected.traceId}`;
+    const graphRes = await requestBase(COLLECTOR_BASE, graphUrl);
+    const graphParsed = graphRes.ok ? parseJson(graphRes.text) : { ok: false };
+    const graph = graphParsed.ok && graphParsed.value ? graphParsed.value : {};
+    const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    const fixtureBySpanId = new Map(events.map((event) => [event.spanId, event]));
+    const nodeProblems = [];
+    nodes.forEach((node, index) => {
+      const keys = Object.keys(node ?? {});
+      if (keys.join(",") !== S5_GRAPH_NODE_KEYS_ORDERED.join(",")) nodeProblems.push(`node${index} keys=${keys.join(",")}`);
+      const event = fixtureBySpanId.get(node.spanId);
+      if (!event) {
+        nodeProblems.push(`node${index} unknown spanId=${node.spanId}`);
+        return;
+      }
+      if (node.parentSpanId !== event.parentSpanId || node.kind !== event.kind || node.nodeKey !== event.nodeKey ||
+          node.status !== event.status || node.startNs !== event.startNs || node.durNs !== event.durNs) {
+        nodeProblems.push(`node${index} scalars`);
+      }
+      if (!deepEqual(node.return, event.return ?? null)) nodeProblems.push(`node${index} return`);
+      if (!deepEqual(node.sideEffects, event.sideEffects ?? [])) nodeProblems.push(`node${index} sideEffects`);
+      if (!deepEqual(node.thread, event.thread ?? null)) nodeProblems.push(`node${index} thread`);
+      if (!deepEqual(node.flags, event.flags ?? [])) nodeProblems.push(`node${index} flags`);
+      if (!deepEqual(node.reason, event.reason ?? null)) nodeProblems.push(`node${index} reason`);
+      if (!deepEqual(node.source, event.source ?? null)) nodeProblems.push(`node${index} source`);
+      if (!deepEqual(node.confidence, event.confidence)) nodeProblems.push(`node${index} confidence`);
+      nodeProblems.push(...graphValuesProblems(node, event, `node${index}`));
+    });
+    const valueNode = nodes.find((node) => node.spanId === graphExpected.valuesSpanId) ?? null;
+    const nullNodes = nodes.filter((node) => graphExpected.valuesNullSpanIds?.includes(node.spanId));
+    checks.push({
+      ok: graphRes.ok && graphRes.status === 200 && graph.sessionId === S5_FIXTURE_SESSION &&
+        graph.traceId === graphExpected.traceId && graph.rootEventId === graphExpected.rootEventId &&
+        graph.confidence === graphExpected.confidence &&
+        nodes.length === 4 && deepEqual(nodes.map((node) => node.spanId), graphExpected.nodeOrder ?? []) &&
+        deepEqual(nodes.map((node) => node.kind), graphExpected.kindOrder ?? []) &&
+        edges.length === 3 && deepEqual(edges, graphExpected.edges ?? []) && edges.every((edge) => edge.count === 1) &&
+        nodeProblems.length === 0,
+      label: "graph: 4 nodes / 3 edges, every node exactly 15 ordered fields (values 15th), event facts echoed verbatim",
+      detail: nodeProblems.length ? nodeProblems.slice(0, 6).join(" || ") : `${nodes.length} nodes, ${edges.length} edges`,
+    });
+    checks.push({
+      ok: valueNode !== null && Array.isArray(valueNode.values) && valueNode.values.length === 5 &&
+        deepEqual(valueNode.values, serviceEvent.values) &&
+        nullNodes.length === 3 && nullNodes.every((node) => node.values === null) &&
+        nodes.filter((node) => Array.isArray(node.values)).length === 1,
+      label: "service node values = 5 items verbatim (100 / [REDACTED len=6] / 2048 truncated / 100 → 0 / return 0); the other 3 nodes are null (never [])",
+      detail: `values=${show(valueNode?.values?.map((item) => `${item.name}:${item.kind}`))} nulls=${nullNodes.length}`,
+    });
+    const graphRepeat = await requestBase(COLLECTOR_BASE, graphUrl);
+    checks.push({
+      ok: graphRepeat.ok && graphRepeat.status === 200 && graphRepeat.text === graphRes.text,
+      label: "repeated GET graph is byte-identical (values are read-only, no cache/no rewrite)",
+      detail: graphRepeat.text === graphRes.text ? "identical" : "DIFFERS",
+    });
+
+    /* ---------------- replay/meta unchanged ---------------- */
+    const replayRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S5_FIXTURE_SESSION}/replay`);
+    const replayParsed = replayRes.ok ? parseJson(replayRes.text) : { ok: false };
+    const replayBody = replayParsed.ok && replayParsed.value ? replayParsed.value : {};
+    const replayEntries = Array.isArray(replayBody.events) ? replayBody.events : [];
+    const seqBySpanId = new Map(events.map((event, index) => [event.spanId, index + 1]));
+    const windowProblems = [];
+    for (const win of Array.isArray(facts.replayWindows) ? facts.replayWindows : []) {
+      const window = s3ReplayWindow(events, win.fromNs, win.toNsIsDefault ? null : win.toNs);
+      if (window.toNs !== win.toNs) windowProblems.push(`${win.id} toNs`);
+      if (window.events.length !== win.count) windowProblems.push(`${win.id} count=${window.events.length}`);
+      if (!deepEqual(window.events.map((event) => event.spanId), win.spanIds)) windowProblems.push(`${win.id} spanIds`);
+      if (!deepEqual(window.events.map((event) => seqBySpanId.get(event.spanId)), win.seqs)) windowProblems.push(`${win.id} seqs`);
+    }
+    checks.push({
+      ok: replayRes.ok && replayRes.status === 200 && replayBody.mode === "replay" && replayBody.readOnly === true &&
+        replayEntries.length === 4 && replayEntries.every((entry, index) => entry.seq === index + 1 &&
+          deepEqual(entry.event, fixtureBySpanId.get(entry.event?.spanId))) &&
+        windowProblems.length === 0,
+      label: "replay unchanged: 4-window deep-compare green, default 4 events with seq 1..4, values echoed verbatim",
+      detail: windowProblems.length ? windowProblems.slice(0, 4).join(" || ") : `${replayEntries.length} events, 4 windows`,
+    });
+    const page = await getEventsPage(S5_FIXTURE_SESSION, "?afterSeq=0&limit=200");
+    checks.push({
+      ok: page.res.ok && page.res.status === 200 && page.value.nextSeq === 4 &&
+        (page.value.events ?? []).length === 4 &&
+        (page.value.events ?? []).map((entry) => entry.seq).join(",") === "1,2,3,4" &&
+        wrapperProblems(validate, page.value.events ?? [], "s5values").length === 0,
+      label: "events/seq untouched by requests/graph/replay: 4 wrapper events, seq 1..4, nextSeq=4",
+      detail: `nextSeq=${page.value.nextSeq}`,
+    });
+    const metaRes = await requestBase(COLLECTOR_BASE, "/api/v1/meta");
+    const metaParsed = metaRes.ok ? parseJson(metaRes.text) : { ok: false };
+    const metaBody = metaParsed.ok && metaParsed.value ? metaParsed.value : {};
+    const caps = metaBody.capabilities && typeof metaBody.capabilities === "object" ? metaBody.capabilities : {};
+    checks.push({
+      ok: metaRes.ok && metaRes.status === 200 && deepEqual(Object.keys(caps), S4_META_KEYS) &&
+        caps.health === true && caps.meta === true && caps.ingestEvents === true &&
+        caps.realtime === false && caps.replay === true &&
+        !Object.prototype.hasOwnProperty.call(metaBody, "values"),
+      label: "meta unchanged: capabilities still exactly 5 keys (realtime=false, replay=true), no values/L1 capability key",
+      detail: `keys=${Object.keys(caps).join(",")}`,
+    });
+
+    /* ---------------- S4 fixture still renders values:null ---------------- */
+    const s4Text = readFileSync(abs(S4_EVENTS_REL), "utf8");
+    const s4Lines = s4Text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const s4Events = s4Lines.map((line) => JSON.parse(line));
+    const s4Ingest = await postNdjson("/ingest/v1/events", s4Text, `${NDJSON}; charset=utf-8`);
+    const s4IngestBody = s4Ingest.ok ? parseJson(s4Ingest.text) : { ok: false };
+    const s4Facts = parseJson(readFileSync(abs(S4_FACTS_REL), "utf8"));
+    const s4TraceId = s4Facts.ok ? s4Facts.value?.apiExpectations?.graph?.traceId : null;
+    const s4GraphRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_DETAIL_SESSION}/graph?traceId=${s4TraceId}`);
+    const s4GraphParsed = s4GraphRes.ok ? parseJson(s4GraphRes.text) : { ok: false };
+    const s4Nodes = s4GraphParsed.ok ? s4GraphParsed.value?.nodes ?? [] : [];
+    const s4ValueProblems = s4Nodes.filter((node) => node?.values !== null).map((node) => node?.spanId);
+    checks.push({
+      ok: s4Lines.length === 9 && s4Events.every((event) => !Object.prototype.hasOwnProperty.call(event, "values")) &&
+        s4Ingest.ok && s4Ingest.status === 202 && s4IngestBody.value?.accepted === 9 &&
+        s4Nodes.length === 9 && s4Nodes.every((node) => Object.keys(node).length === 15) &&
+        s4ValueProblems.length === 0,
+      label: "S4 fixture (9 events, no values field) -> graph 9 nodes with values:null (15 keys), no [] and no regression",
+      detail: s4ValueProblems.length ? `non-null=${s4ValueProblems.join(",")}` : "9/9 null",
+    });
+
+    /* ---------------- workbench build + S5 UI / B3 reverse assertions ---------------- */
+    const wb = s5EnsureWorkbench();
+    checks.push({
+      ok: wb.build.code === 0 && !wb.build.error && distTextFiles(WORKBENCH_DIST_REL).length > 0,
+      label: "workbench npm run build exit 0 and dist is non-empty",
+      detail: `exit=${wb.build.code} ${distTextFiles(WORKBENCH_DIST_REL).length} dist files`,
+    });
+    const wbDist = distTextFiles(WORKBENCH_DIST_REL);
+    const wbText = wbDist.map((file) => file.text).join("\n");
+    const wbExpectations = facts.workbenchExpectations ?? {};
+    const s5WorkbenchTokens = [
+      "s5-values", "s5-l1-badge", "s5-values-note", "s5-values-empty", "s5-source",
+      "100 → 0", "已脱敏", "已截断", "（manifest 映射）", "行号未采集", "第 1/1 次",
+      "S5 L1：参数/字段写入/返回摘要；局部变量（L2）与行级属 S6，本阶段未采集",
+      "未采集（该节点无 values；S5 只采参数/字段写入/返回摘要）",
+      "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
+      "JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）",
+    ];
+    const missingS5 = s5WorkbenchTokens.filter((token) => !wbText.includes(token));
+    checks.push({
+      ok: wbDist.length > 0 && missingS5.length === 0,
+      label: "workbench dist has the S5 Values UI: #s5-values/#s5-l1-badge/#s5-values-note/#s5-values-empty/#s5-source, 100 → 0, 已脱敏/已截断, 行号未采集, 第 1/1 次, manifest suffix + static notes",
+      detail: missingS5.length ? `missing=${missingS5.join(",")}` : `${s5WorkbenchTokens.length}/${s5WorkbenchTokens.length} tokens`,
+    });
+    const wordBenchSelectors = [...S4_SELECTORS, ...S3_SELECTORS, "s5-values", "s5-l1-badge", "s5-source", "s5-values-empty", "s5-values-note"];
+    const missingSelectors = wordBenchSelectors.filter((id) => !wbText.includes(id));
+    const missingPanels = S4_RETAINED_PANELS.filter((id) => !wbText.includes(id));
+    checks.push({
+      ok: missingSelectors.length === 0 && missingPanels.length === 0 && wbText.includes("s2-panel") && wbText.includes("s2-chain"),
+      label: "workbench dist retains S0–S4 selectors/panels (11 S4 + 10 S3 selectors, s0..s3 panels) and adds the 5 S5 selectors",
+      detail: missingSelectors.length || missingPanels.length ? `selectors=${missingSelectors.join(",")} panels=${missingPanels.join(",")}` : `selectors=${wordBenchSelectors.length} panels=4`,
+    });
+    const staleHits = [];
+    for (const tree of [WORKBENCH_DIST_REL, "workbench/src", S5_DEMO_FRONTEND_REL ? `${S5_DEMO_FRONTEND_REL}/src` : "", DEMO_DIST_REL]) {
+      if (!tree || !existsSync(abs(tree))) continue;
+      const files = tree.endsWith("/src") || tree === "workbench/src" || tree.endsWith("frontend/src")
+        ? walk(abs(tree)).map((file) => ({ rel: relOf(file), text: readFileSync(file, "utf8") }))
+        : distTextFiles(tree);
+      for (const file of files) {
+        for (const token of [...S5_STALE_TEXTS, ...S5_FORBIDDEN_CLAIMS]) {
+          if (file.text.includes(token)) staleHits.push(`${file.rel} -> ${token}`);
+        }
+      }
+    }
+    checks.push({
+      ok: staleHits.length === 0,
+      label: "B3 reverse: workbench/demo src+dist contain no 无构建插件/sourcemap, S5 待做, 无 S5, S5/S6, 无 sourcemap/行号映射, kind=local or L2 已采集",
+      detail: staleHits.slice(0, 6).join(" || ") || "0 stale claims",
+    });
+    S5_EVIDENCE.fixture = { graph: { nodes: nodes.length, edges: edges.length, values: valueNode?.values?.length ?? 0 }, workbenchTokens: s5WorkbenchTokens.length };
+    S5_EVIDENCE.workbenchDist = { files: wbDist.length, tokens: s5WorkbenchTokens.length };
+  } catch (error) {
+    checks.push({ ok: false, label: "S5-D unexpected error", detail: String(error && error.message ? error.message : error) });
+  } finally {
+    await stopServer(collector);
+    const freed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
+    checks.push({
+      ok: Boolean(freed),
+      label: "S5-D cleanup: collector stopped, port 8601 released",
+      detail: `8601=${listeningOn(8601).lines.length}`,
+    });
+  }
+
+  return gate(
+    "S5-D",
+    "values/workbench: fixture graph 4/3/15 fields + 5 verbatim values (null elsewhere), S4 fixture values:null, requests/replay/meta unchanged, workbench S5 UI + S0–S4 selectors, no stale copy",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S5-E: shallow manifest/sourcemap. Plugin 6/6 zero-dependency tests, SDK 17/17 + 3 dist,
+ * demo build manifest/.js.map/inline/#btn-discount/S5 copy/no CDN, manifest file/line recomputed
+ * from source, and no maps/plugin output in the workbench/SDK dist.
+ */
+function checkS5E() {
+  section("S5-E: build-plugin 6/6 + SDK 17/17, demo manifest/.js.map/inline, manifest lines recomputed, no maps in workbench/SDK");
+  const checks = [];
+  const repro = `(cd "frontend/build-plugin" && npm test) && (cd "frontend/sdk" && npm ci && npm test) && (cd "${S5_DEMO_FRONTEND_REL}" && npm ci && npm run build) && (cd "workbench" && npm run build)`;
+
+  const pluginPkgAbs = abs(`${S5_BUILD_PLUGIN_REL}/package.json`);
+  const pluginPkg = existsSync(pluginPkgAbs) ? JSON.parse(readFileSync(pluginPkgAbs, "utf8")) : null;
+  checks.push({
+    ok: pluginPkg !== null && pluginPkg.name === "@traceboard/vite-plugin" && pluginPkg.type === "module" &&
+      typeof pluginPkg.scripts?.test === "string" && /node --test/.test(pluginPkg.scripts.test) &&
+      Object.keys(pluginPkg.dependencies ?? {}).length === 0 &&
+      Object.keys(pluginPkg.devDependencies ?? {}).length === 0,
+    label: "build-plugin package.json: @traceboard/vite-plugin, ESM, node --test, zero dependencies/devDependencies",
+    detail: pluginPkg ? `deps=${Object.keys(pluginPkg.dependencies ?? {}).length} devDeps=${Object.keys(pluginPkg.devDependencies ?? {}).length}` : "missing",
+  });
+  const plugin = s5EnsurePlugin();
+  checks.push({
+    ok: plugin.test.code === 0 && plugin.tests === "6" && plugin.pass === "6" && plugin.fail === "0",
+    label: "frontend/build-plugin npm test -> 6 tests / 6 pass / 0 fail (R1/R2, lines, sort, dedupe, empty dir, dev 200/405/500, build hooks)",
+    detail: `tests=${plugin.tests ?? "?"} pass=${plugin.pass ?? "?"} fail=${plugin.fail ?? "?"}`,
+  });
+
+  const sdk = s5EnsureSdk();
+  const sdkOut = `${sdk.test.stdout}\n${sdk.test.stderr}`;
+  checks.push({
+    ok: sdk.ci.code === 0 && sdk.build.code === 0 && sdk.test.code === 0 &&
+      sdk.tests === "17" && sdk.pass === "17" && sdk.fail === "0",
+    label: "frontend/sdk npm ci + build + test -> 17 tests / 17 pass / 0 fail (manifest inline/fallback/bad manifest included)",
+    detail: `tests=${sdk.tests ?? "?"} pass=${sdk.pass ?? "?"} fail=${sdk.fail ?? "?"}`,
+  });
+  const sdkDist = walk(abs(SDK_DIST_REL));
+  checks.push({
+    ok: deepEqual(sdkDist.map(relOf).sort(), [
+      `${SDK_DIST_REL}/index.d.ts`, `${SDK_DIST_REL}/index.js`, `${SDK_DIST_REL}/traceboard-sdk.iife.js`,
+    ]) && sdkDist.every((file) => !file.endsWith(".map")),
+    label: "SDK dist = exactly 3 files and no *.map / no manifest asset (only the demo build emits maps)",
+    detail: sdkDist.map(relOf).join(","),
+  });
+
+  const demo = s5EnsureDemoFrontend();
+  checks.push({
+    ok: demo.build.code === 0 && !demo.build.error,
+    label: "demo frontend npm run build (vue-tsc + vite + traceboardShallow + sourcemap) exit 0",
+    detail: `exit=${demo.build.code} ${lastLines(`${demo.build.stdout}\n${demo.build.stderr}`, 2).join(" | ").slice(0, 200)}`,
+  });
+  const demoDist = walk(abs(DEMO_DIST_REL));
+  const demoTextFiles = distTextFiles(DEMO_DIST_REL);
+  const demoText = demoTextFiles.map((file) => file.text).join("\n");
+  const manifestAbs = abs(`${DEMO_DIST_REL}/traceboard-manifest.json`);
+  const manifestParsed = existsSync(manifestAbs) ? parseJson(readFileSync(manifestAbs, "utf8")) : { ok: false };
+  const manifest = manifestParsed.ok ? manifestParsed.value : null;
+  const expectedManifest = s5RecomputeManifest(S5_DEMO_FRONTEND_REL);
+  const manifestByName = new Map((Array.isArray(manifest?.functions) ? manifest.functions : []).map((fn) => [fn?.name, fn]));
+  const expectedByName = new Map(expectedManifest.map((fn) => [fn.name, fn]));
+  const manifestProblems = [];
+  if (!manifest || !Array.isArray(manifest.functions)) manifestProblems.push("manifest missing/unparseable");
+  else {
+    if (!deepEqual(manifest.functions, expectedManifest)) {
+      manifestProblems.push(`functions differ (actual=${manifest.functions.length} expected=${expectedManifest.length})`);
+      for (const expected of expectedManifest) {
+        const actual = manifestByName.get(expected.name);
+        if (!actual || actual.file !== expected.file || actual.line !== expected.line) {
+          manifestProblems.push(`${expected.name}@${expected.file}:${expected.line} actual=${show(actual)}`);
+        }
+      }
+    }
+    for (const name of ["validateForm", "previewDiscount"]) {
+      const actual = manifestByName.get(name);
+      const expected = expectedByName.get(name);
+      if (!actual || !expected || actual.file !== expected.file || actual.line !== expected.line) {
+        manifestProblems.push(`${name} file/line not recomputed from source`);
+      }
+    }
+  }
+  checks.push({
+    ok: manifestProblems.length === 0,
+    label: "dist traceboard-manifest.json functions (incl. validateForm/previewDiscount) deep-equal a fresh R1/R2 scan of src (file/line recomputed, sorted, deduped)",
+    detail: manifestProblems.slice(0, 5).join(" || ") || `${expectedManifest.length}/${expectedManifest.length} functions`,
+  });
+  const inlineMatch = demoTextFiles
+    .map((file) => ({ rel: file.rel, match: file.text.match(/window\.__TRACEBOARD_MANIFEST__ = (\{[\s\S]*?\});<\/script>/) }))
+    .find((entry) => entry.match);
+  let inlineManifest = null;
+  try {
+    inlineManifest = inlineMatch ? JSON.parse(inlineMatch.match[1]) : null;
+  } catch {
+    inlineManifest = null;
+  }
+  checks.push({
+    ok: demoText.includes("__TRACEBOARD_MANIFEST__") && inlineManifest !== null && deepEqual(inlineManifest, manifest),
+    label: "dist index.html inlines window.__TRACEBOARD_MANIFEST__ with exactly the manifest asset content (build-only, JSON fallback documented)",
+    detail: inlineMatch ? `${inlineMatch.rel}` : "inline not found",
+  });
+  const jsMaps = demoDist.filter((file) => file.endsWith(".js.map"));
+  const otherMaps = demoDist.filter((file) => file.endsWith(".map"));
+  checks.push({
+    ok: jsMaps.length >= 1 && otherMaps.length >= jsMaps.length,
+    label: "demo build emits .js.map (build.sourcemap=true, dist only/gitignored; SDK never reads it)",
+    detail: `${otherMaps.length} maps (${jsMaps.length} .js.map)`,
+  });
+  const demoApp = readFileSync(abs(`${S5_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
+  checks.push({
+    ok: demoText.includes("#btn-discount") && demoText.includes("previewDiscount") &&
+      demoText.includes("S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）") &&
+      demoApp.includes('id="btn-discount"') && demoApp.includes('data-tb-fn="previewDiscount"') &&
+      demoApp.includes("requestedAmount=100") && demoApp.includes("demoSecret=s3cr3t") &&
+      demoApp.includes('"x".repeat(3000)'),
+    label: "demo dist/source: #btn-discount + previewDiscount + S5 canonical copy + fixed 100/s3cr3t/3000-x URL, no loadOrders refresh",
+    detail: `btn=${demoText.includes("#btn-discount")} copy=${demoText.includes("S5：已有函数级")}`,
+  });
+  const cdnHosts = ["unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com", "npmmirror.com", "mirrors.aliyun.com"];
+  const cdnHits = [];
+  for (const file of demoTextFiles.filter((file) => !file.rel.endsWith(".map"))) {
+    const lower = file.text.toLowerCase();
+    for (const host of cdnHosts) if (lower.includes(host)) cdnHits.push(`${file.rel} -> ${host}`);
+  }
+  const indexHtml = readFileSync(abs(`${DEMO_DIST_REL}/index.html`), "utf8");
+  const scriptSrcs = [...indexHtml.matchAll(/<script[^>]*\ssrc=["']([^"']+)["']/gi)].map((match) => match[1]);
+  checks.push({
+    ok: cdnHits.length === 0 && scriptSrcs.every((src) => !/^https?:/i.test(src)),
+    label: "demo dist has no external CDN host and all <script src> are local (no online fonts/mirrors)",
+    detail: `cdn=${cdnHits.slice(0, 3).join(",") || "none"} srcs=${scriptSrcs.join(",") || "none"}`,
+  });
+
+  /* ---------------- SDK manifest source shape (static tests + source) ---------------- */
+  const manifestTest = readFileSync(abs(`${SDK_DIR}/test/manifest.test.js`), "utf8");
+  const iifeTest = readFileSync(abs(`${SDK_DIR}/test/iife.test.js`), "utf8");
+  const sdkSource = readFileSync(abs(`${SDK_DIR}/src/index.ts`), "utf8");
+  checks.push({
+    ok: manifestTest.includes("__TRACEBOARD_MANIFEST__") && manifestTest.includes("SOURCE_MAPPED") &&
+      manifestTest.includes("data-tb-fn") && manifestTest.includes("exactly once") &&
+      manifestTest.includes("bad manifest") && manifestTest.includes('"source" in incomplete') &&
+      iifeTest.includes("IIFE inline manifest") && iifeTest.includes("must never fetch the manifest fallback"),
+    label: "SDK tests freeze the manifest contract: inline read, ESM fallback exactly once, bad manifest fail-open, IIFE never fetches",
+    detail: "test/manifest.test.js + test/iife.test.js",
+  });
+  checks.push({
+    ok: sdkSource.includes("SOURCE_MAPPED") && sdkSource.includes("data-tb-fn") &&
+      sdkSource.includes("/traceboard-manifest.json") && sdkSource.includes("event.source = ") &&
+      sdkSource.includes("lookupSource(") &&
+      !/SourceMapConsumer|sourceMappingURL|sourcesContent/.test(sdkSource),
+    label: "SDK source attaches source+SOURCE_MAPPED only from the manifest (never .map decoding, never fetch/render guessing)",
+    detail: "src/index.ts",
+  });
+
+  /* ---------------- no sourcemap/plugin in workbench/SDK dist ---------------- */
+  const workbenchDist = walk(abs(WORKBENCH_DIST_REL));
+  const workbenchMaps = workbenchDist.filter((file) => file.endsWith(".map"));
+  const workbenchManifest = workbenchDist.filter((file) => path.basename(file) === "traceboard-manifest.json");
+  const workbenchVite = readFileSync(abs("workbench/vite.config.ts"), "utf8");
+  checks.push({
+    ok: workbenchMaps.length === 0 && workbenchManifest.length === 0 &&
+      !/traceboardShallow|@traceboard\/vite-plugin|sourcemap:\s*true/.test(workbenchVite),
+    label: "workbench dist has no *.map and no manifest asset; workbench vite never imports the build plugin",
+    detail: `maps=${workbenchMaps.length} manifest=${workbenchManifest.length}`,
+  });
+  const sdkMaps = sdkDist.filter((file) => file.endsWith(".map"));
+  const sdkManifest = sdkDist.filter((file) => path.basename(file) === "traceboard-manifest.json");
+  const iifeText = existsSync(abs(S4_SDK_IIFE_REL)) ? readFileSync(abs(S4_SDK_IIFE_REL), "utf8") : "";
+  checks.push({
+    ok: sdkMaps.length === 0 && sdkManifest.length === 0 && !iifeText.includes("sourceMappingURL"),
+    label: "SDK dist (incl. IIFE) has no *.map / manifest asset / sourceMappingURL; the IIFE fallback is proven off by the SDK test",
+    detail: `maps=${sdkMaps.length} manifest=${sdkManifest.length}`,
+  });
+
+  S5_EVIDENCE.plugin = { tests: plugin.tests, pass: plugin.pass, fail: plugin.fail };
+  S5_EVIDENCE.sdk = { tests: sdk.tests, pass: sdk.pass, fail: sdk.fail, dist: sdkDist.length };
+  S5_EVIDENCE.demoFrontend = { functions: manifest?.functions?.length ?? 0, maps: otherMaps.length };
+  return gate(
+    "S5-E",
+    "manifest/sourcemap: plugin 6/6 zero-dep + SDK 17/17, demo manifest/.js.map/inline/#btn-discount/S5 copy/no CDN, manifest file/line recomputed from source, no maps in workbench/SDK",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S5-F: run the report-only overhead script and assert its JSON contract. The ratio is recorded
+ * as evidence only — no hard perf threshold is applied (a >1.25 ratio is a WARN label).
+ */
+async function checkS5F() {
+  section("S5-F: perf baseline tools/perf/l1-overhead.mjs (report-only, no hard threshold)");
+  const checks = [];
+  const repro = `node "${S5_PERF_REL}" --n 100 --warmup 20 --rounds 3 --port 8080`;
+  const pre = [
+    { ok: existsSync(abs(S5_PERF_REL)), label: "tools/perf/l1-overhead.mjs exists", detail: S5_PERF_REL },
+    { ok: existsSync(JDK21_JAVA) && existsSync(JDK8_JAVA), label: "JDK21 + JDK8 present", detail: `${JDK21_HOME} / ${JDK8_HOME}` },
+    { ok: existsSync(abs(COLLECTOR_JAR_REL)) && existsSync(abs(DEMO_JAR_REL)) && existsSync(abs(AGENT_JAR_REL)), label: "collector/demo/agent jars present", detail: "built by S5-BUILD" },
+    { ok: listeningOn(8601).lines.length === 0 && listeningOn(8080).lines.length === 0, label: "ports 8601/8080 free before the perf run", detail: `${listeningOn(8601).lines.length}/${listeningOn(8080).lines.length}` },
+  ];
+  if (!pre.every((item) => item.ok)) {
+    return record("S5-F", "S5-F perf (preconditions)", false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`), repro);
+  }
+
+  const started = Date.now();
+  const run = runShell(`node "${S5_PERF_REL}" --n 100 --warmup 20 --rounds 3 --port 8080`, {
+    cwd: REPO,
+    timeout: 600000,
+  });
+  const out = `${run.stdout}\n${run.stderr}`;
+  const perfLine = out.split(/\r?\n/).find((line) => line.startsWith("PERF_RESULT:")) ?? "";
+  let perf = null;
+  try {
+    perf = perfLine ? JSON.parse(perfLine.slice("PERF_RESULT:".length)) : null;
+  } catch {
+    perf = null;
+  }
+  const fieldsOk = perf !== null &&
+    perf.reportOnly === true && perf.n === 100 && perf.warmup === 20 && perf.rounds === 3 &&
+    Number.isFinite(perf.base?.p50Ms) && Number.isFinite(perf.base?.p95Ms) &&
+    Number.isFinite(perf.agent?.p50Ms) && Number.isFinite(perf.agent?.p95Ms) &&
+    Number.isFinite(perf.ratio) && perf.agent?.events > 0 &&
+    Array.isArray(perf.base?.rounds) && perf.base.rounds.length === 3 &&
+    Array.isArray(perf.agent?.rounds) && perf.agent.rounds.length === 3 &&
+    perf.threshold === "none; 1.25 is a WARN label only (report-only)";
+  checks.push({
+    ok: run.code === 0 && !run.error && fieldsOk,
+    label: "perf script exit 0 and PERF_RESULT JSON has n/warmup/rounds, base+agent p50/p95 (3 rounds), ratio, agent events>0, reportOnly",
+    detail: perfLine ? perfLine.slice(0, 480) : lastLines(out, 3).join(" | ").slice(0, 240),
+  });
+  checks.push({
+    ok: perf === null || (perf.warn === null || perf.warn === "l1_overhead_ratio>1.25"),
+    label: "ratio >1.25 only produces the WARN label; no FAIL threshold is asserted (report-only)",
+    detail: perf ? `ratio=${perf.ratio} warn=${perf.warn ?? "null"}` : "no result",
+  });
+  const freed = await pollUntil(() => listeningOn(8601).lines.length === 0 && listeningOn(8080).lines.length === 0, 30000, 400);
+  checks.push({
+    ok: Boolean(freed),
+    label: "perf script cleaned up: ports 8601/8080 free after the run (no leftover demo/collector)",
+    detail: `8601=${listeningOn(8601).lines.length} 8080=${listeningOn(8080).lines.length} ${((Date.now() - started) / 1000).toFixed(1)}s`,
+  });
+  S5_EVIDENCE.perf = perf;
+  return gate(
+    "S5-F",
+    "perf baseline: no-agent vs agent (100 x 3 after warm-up 20), p50/p95/ratio reported, agent events>0, >1.25 only WARN, no hard threshold",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S5-G: regression + S5 G1 freeze. In a full run this asserts every S0–S4 anchor and the S4
+ * gates PASS; in S5-only mode those gates are skipped by design and the detail says so (never
+ * a fake PASS). The freeze/fixture/schema bytes are always checked.
+ */
+function checkS5G() {
+  section("S5-G: regression anchors + S5 G1 freeze zero drift");
+  const checks = [];
+  const repro = `(cd "tools/verify" && node verify.mjs)`;
+  const reviewText = readFileSync(abs(S5_PLAN_REVIEW_REL), "utf8");
+  checks.push({
+    ok: reviewText.includes("G1: PASS"),
+    label: "S5 plan-review records G1: PASS (freeze is the authority)",
+    detail: "G1: PASS",
+  });
+  const freezeDrift = [];
+  for (const [rel, expected] of Object.entries(S5_G1_FREEZE)) {
+    const actual = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
+    if (actual !== expected) freezeDrift.push(`${rel} ${actual.slice(0, 12)}…!=${expected.slice(0, 12)}…`);
+  }
+  checks.push({
+    ok: Object.keys(S5_G1_FREEZE).length === 18 && freezeDrift.length === 0,
+    label: "S5 G1 freeze zero drift: schema/contracts/guides/S4+S5 fixtures/S4+S5 plan+dispatch (18 files, api+event-model at S5 hashes)",
+    detail: freezeDrift.length ? freezeDrift.slice(0, 4).join(" || ") : "18/18 hashes match",
+  });
+  const schemaHash = existsSync(abs(SCHEMA_REL)) ? sha256File(abs(SCHEMA_REL)) : "missing";
+  checks.push({
+    ok: schemaHash === S4_H_SCHEMA_HASH,
+    label: "schema/traceboard.event.v1.json byte-identical to the S0–S5 baseline (927937df…a489a)",
+    detail: schemaHash,
+  });
+  const s5Files = walk(abs(S5_FIXTURE_DIR)).map(relOf).sort();
+  checks.push({
+    ok: deepEqual(s5Files, [S5_EVENTS_REL, S5_FACTS_REL, S5_README_REL].sort()),
+    label: "fixtures/s5-l1-values contains exactly events.ndjson + expected-facts.json + README.md (no stray files)",
+    detail: s5Files.join(","),
+  });
+  const fixtureBaseline = new Map();
+  const fixtureConflicts = [];
+  const collectFixtures = (entries) => {
+    for (const entry of entries) {
+      if (!entry.rel.startsWith("fixtures/")) continue;
+      const expected = S5_G1_FREEZE[entry.rel] ?? entry.hash;
+      if (fixtureBaseline.has(entry.rel) && fixtureBaseline.get(entry.rel) !== expected) fixtureConflicts.push(entry.rel);
+      fixtureBaseline.set(entry.rel, expected);
+    }
+  };
+  collectFixtures(s3FreezeSections().all);
+  collectFixtures(s2FreezeSections().all);
+  collectFixtures(Object.entries(S5_G1_FREEZE).map(([rel, hash]) => ({ rel, hash })));
+  const fixtureDrift = [];
+  for (const [rel, expected] of fixtureBaseline) {
+    const now = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
+    if (now !== expected) fixtureDrift.push(rel);
+  }
+  checks.push({
+    ok: fixtureBaseline.size >= 13 && fixtureConflicts.length === 0 && fixtureDrift.length === 0,
+    label: "S0–S5 fixture bytes unchanged (case-A/S1/S2/S3/S4/S5 baselines; no rewrite hidden by a re-ingest)",
+    detail: fixtureDrift.length || fixtureConflicts.length
+      ? `drift=${fixtureDrift.join(",")} conflicts=${fixtureConflicts.join(",")}`
+      : `${fixtureBaseline.size}/${fixtureBaseline.size} match`,
+  });
+
+  if (S5_ONLY) {
+    checks.push({
+      ok: true,
+      label: "S0–S4 regression anchors are deferred: --s5 mode skips S0–S4 by design (full run asserts them; not a fake PASS)",
+      detail: "S5-only mode: run `node verify.mjs` for the full S0–S5 anchor set",
+    });
+  } else {
+    const missingAnchors = S4_H_ANCHORS.filter((id) => resultById(id)?.ok !== true);
+    const s4Gates = ["S4-BUILD", ...S4_IMPLEMENTED.map((letter) => `S4-${letter}`)];
+    const missingS4 = s4Gates.filter((id) => resultById(id)?.ok !== true);
+    const prior = RESULTS.filter((item) => !String(item.id).startsWith("S5-") && item.id !== "S5-BUILD");
+    const priorFailed = prior.filter((item) => !item.ok);
+    checks.push({
+      ok: prior.length >= 50 && priorFailed.length === 0 && missingAnchors.length === 0 && missingS4.length === 0,
+      label: "full-run regression: every S0–S4 gate PASS (≥50 prior RESULTS), 39 S4-H anchors + S4-BUILD/A–I present",
+      detail: `prior=${prior.length} priorFailed=${priorFailed.map((item) => item.id).join(",") || "none"} anchors=${missingAnchors.join(",") || "all"} s4=${missingS4.join(",") || "all"}`,
+    });
+    const s5Bad = RESULTS.filter((item) => String(item.id).startsWith("S5-") && item.id !== "S5-G" && !item.ok);
+    checks.push({
+      ok: s5Bad.length === 0,
+      label: "S5-A..F (and any earlier S5 gates) already PASS before S5-G closure",
+      detail: s5Bad.map((item) => item.id).join(",") || "no earlier S5 failure",
+    });
+  }
+  return gate(
+    "S5-G",
+    "regression/freeze: S0–S4 anchors PASS in a full run, schema/S0–S5 fixture bytes unchanged, S5 G1 freeze 18/18 (anchors explicitly deferred in S5-only mode)",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S5-H: scope/security/cleanup closure. No S6+ capability (L2/local, async continuation, runtime
+ * x3, SSE/WS, persistence, Tomcat/cloud), no .map decoding/upload, preview injection stays
+ * external-script only, no secrets/PII/CDN/mirrors, ports free, no java/node leftovers, git index
+ * untouched and the change set inside the S5 whitelist.
+ */
+function checkS5H() {
+  section("S5-H: scope/security/cleanup (S5 allowed, no S6+, no maps decoding, no secrets/CDN, ports, git)");
+  const checks = [];
+  const repro = `netstat -ano | grep -E ":(${S1_PORTS.join("|")})\\s" ; tasklist | grep -iE "java|node" ; git status --porcelain ; git diff --cached --name-only`;
+  const productTrees = ["agent/src", "server/collector/src", "server/launcher/src", "frontend/sdk/src", "frontend/build-plugin", "workbench/src", "demo/buggy-shop-boot-vue/frontend/src", "demo/buggy-shop-boot-vue/backend/src"];
+  const scopeFiles = productTrees.flatMap((rel) => dirTextFiles(rel)).map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
+  const forbiddenMarkers = [
+    { name: "L2/local", re: /kind\s*=\s*["']local|LocalVariableTable|visitLocalVariable|localVariables/ },
+    { name: "async-continuation", re: /AsyncContext|CompletableFuture|setTimeout\(\s*span|continuationSpan|async_hooks/ },
+    { name: "runtime-x3", re: /RUNTIME_REPLAY|runtimeReplay|replayTimes\s*=\s*3|三倍重放/ },
+    { name: "SSE/WS", re: /new\s+EventSource|SseEmitter|@ServerEndpoint|new\s+WebSocket/ },
+    { name: "persistence", re: /localStorage|sessionStorage|indexedDB/ },
+    { name: "pixel-replay", re: /rrweb|html2canvas|MediaRecorder|toDataURL/ },
+    { name: "map-decoding", re: /SourceMapConsumer|sourcesContent|sourceMappingURL|source-map/i },
+    { name: "WAR/Tomcat", re: /<packaging>\s*war|org\.apache\.catalina|\bwar\s*部署|Tomcat\s*(?:部署|容器)/i },
+    { name: "cloud", re: /\b(kubernetes|k8s|terraform|cloudformation|lambda@edge)\b/i },
+    { name: "react", re: /from\s+["']react["']|ReactDOM/ },
+  ];
+  const markerHits = [];
+  for (const file of scopeFiles) {
+    if (file.rel.includes("/test/")) continue;
+    for (const marker of forbiddenMarkers) {
+      if (marker.re.test(file.text)) markerHits.push(`${file.rel} [${marker.name}]`);
+    }
+  }
+  checks.push({
+    ok: markerHits.length === 0 && scopeFiles.length > 0,
+    label: "no S6+ capability in S5 product sources: no L2/local, async continuation, runtime ×3, SSE/WS, persistence, pixel replay, .map decoding, Tomcat/WAR, cloud, React",
+    detail: markerHits.slice(0, 6).join(",") || `${scopeFiles.length} files clean`,
+  });
+  const agentL1 = readFileSync(abs("agent/src/main/java/io/traceboard/agent/L1Values.java"), "utf8");
+  checks.push({
+    ok: /"param"/.test(agentL1) && /"field"/.test(agentL1) && /"return"/.test(agentL1) &&
+      !/["']local["']/.test(agentL1) && /\[REDACTED len=/.test(agentL1) &&
+      !/toLowerCase\(\).*password.*token|password.*toLowerCase/.test(agentL1),
+    label: "L1 values are param/field/return only, redaction placeholder has no raw value, no local kind (S6 boundary)",
+    detail: "agent/src/.../L1Values.java",
+  });
+
+  /* -------- only the demo build may emit maps; preview injection stays external-only -------- */
+  const distMaps = [WORKBENCH_DIST_REL, SDK_DIST_REL, DEMO_DIST_REL]
+    .flatMap((rel) => (existsSync(abs(rel)) ? walk(abs(rel)) : []))
+    .filter((file) => file.endsWith(".map"));
+  const nonDemoMaps = distMaps.filter((file) => !relOf(file).startsWith(`${DEMO_DIST_REL}/`));
+  checks.push({
+    ok: nonDemoMaps.length === 0,
+    label: "only the demo build may contain .map files; workbench/SDK dist remain map-free (no decoding/upload anywhere)",
+    detail: nonDemoMaps.map(relOf).join(",") || `${distMaps.length} demo map(s), 0 outside`,
+  });
+  const launcherCode = dirTextFiles("server/launcher/src").map((file) => file.text).join("\n");
+  const scriptTags = [...launcherCode.matchAll(/<script[^>]*>/gi)].map((match) => match[0]);
+  checks.push({
+    ok: scriptTags.length > 0 && scriptTags.every((tag) => /\ssrc=\\?"/.test(tag) && !/<script>\s*\S/i.test(tag)) &&
+      !/Content-Security-Policy/i.test(launcherCode),
+    label: "preview/diagnose inject only external <script src=...> tags (no inline manifest, CSP untouched)",
+    detail: `${scriptTags.length} tags`,
+  });
+
+  /* -------- collector routes unchanged (S5 only adds values to existing graph) -------- */
+  const routeFiles = dirTextFiles("server/collector/src").map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
+  const routes = [];
+  for (const file of routeFiles) {
+    if (!/\.java$/.test(file.rel)) continue;
+    for (const match of file.text.matchAll(/@(Get|Post|Put|Patch|Delete)Mapping\s*\(\s*(?:path\s*=\s*)?["']([^"']+)["']/g)) {
+      routes.push(`${match[1].toUpperCase()} ${match[2]}`);
+    }
+  }
+  const expectedRoutes = [
+    "GET /api/v1/meta", "GET /api/v1/sessions", "GET /api/v1/sessions/{sessionId}/events",
+    "GET /api/v1/sessions/{sessionId}/requests", "GET /api/v1/sessions/{sessionId}/graph",
+    "GET /api/v1/sessions/{sessionId}/replay", "GET /api/v1/sessions/{sessionId}/agent",
+    "POST /ingest/v1/events", "POST /ingest/v1/agent-hello",
+  ];
+  checks.push({
+    ok: routes.slice().sort().join("|") === expectedRoutes.slice().sort().join("|") &&
+      !routes.some((route) => route.includes("preview-discount")),
+    label: "S5 adds no collector route: still exactly 9 business routes; preview-discount exists only in the demo backend",
+    detail: routes.sort().join(", "),
+  });
+
+  /* -------- no secrets / CDN / mirrors / real PII -------- */
+  const s5FixtureText = readFileSync(abs(S5_EVENTS_REL), "utf8");
+  const secretPatterns = [
+    /(?:password|passwd|pwd)\s*[:=]\s*["'][^"'\n]{3,}["']/gi,
+    /(?:api[_-]?key|apikey|access[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token)\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{8,}/gi,
+    /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    /\bAKIA[0-9A-Z]{16}\b/g,
+    /\bghp_[A-Za-z0-9]{20,}/g,
+  ];
+  const placeholderAllow = /placeholder|changeme|change_me|example|sample|dummy|redacted|xxx|<[^>]+>|\$\{|your_|demo|test|s3cr3t/i;
+  const secretHits = [];
+  for (const file of scopeFiles) {
+    if (/package-lock\.json/.test(file.rel)) continue;
+    for (const pattern of secretPatterns) {
+      pattern.lastIndex = 0;
+      for (const match of file.text.matchAll(pattern)) {
+        if (!placeholderAllow.test(match[0])) secretHits.push(`${file.rel} ${match[0].slice(0, 48)}`);
+      }
+    }
+  }
+  const cdnHosts = ["unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "npmmirror.com", "mirrors.aliyun.com", "registry.npm.taobao.org"];
+  const cdnHits = [];
+  for (const file of [...scopeFiles, ...distTextFiles(WORKBENCH_DIST_REL), ...distTextFiles(DEMO_DIST_REL).filter((f) => !f.rel.endsWith(".map"))]) {
+    const lower = file.text.toLowerCase();
+    for (const host of cdnHosts) if (lower.includes(host)) cdnHits.push(`${file.rel} -> ${host}`);
+  }
+  const lockedFiles = ["frontend/sdk/package-lock.json", "workbench/package-lock.json", "demo/buggy-shop-boot-vue/frontend/package-lock.json"];
+  const mirrorUrls = [];
+  for (const rel of lockedFiles) {
+    if (!existsSync(abs(rel))) continue;
+    for (const match of readFileSync(abs(rel), "utf8").matchAll(/"resolved":\s*"([^"]+)"/g)) {
+      if (/^https?:/i.test(match[1]) && !match[1].startsWith("https://registry.npmjs.org/")) mirrorUrls.push(`${rel} -> ${match[1]}`);
+    }
+  }
+  checks.push({
+    ok: secretHits.length === 0 && cdnHits.length === 0 && mirrorUrls.length === 0 &&
+      !s5FixtureText.includes(S5_DEMO_SECRET) &&
+      !/[\w.+-]+@[\w-]+\.[\w.]+/.test(s5FixtureText) && !/\b1[3-9]\d{9}\b/.test(s5FixtureText),
+    label: "no real secrets/PII/CDN/mirrors: S5 fixture has no s3cr3t/email/phone, product sources avoid secret patterns, lockfiles resolve only from registry.npmjs.org",
+    detail: `secrets=${secretHits.slice(0, 2).join(",") || "none"} cdn=${cdnHits.slice(0, 2).join(",") || "none"} mirrors=${mirrorUrls.slice(0, 2).join(",") || "none"}`,
+  });
+
+  /* -------- cleanup: ports/processes/git/snapshot -------- */
+  const portProblems = [];
+  for (const port of S1_PORTS) {
+    const state = listeningOn(port);
+    if (!state.supported || state.lines.length > 0) portProblems.push(`${port}:${state.lines.join("|") || state.error}`);
+  }
+  checks.push({
+    ok: portProblems.length === 0,
+    label: `ports ${S1_PORTS.join("/")} not LISTENING after all S5 gates (demo/collector/Vite/preview/stub stopped)`,
+    detail: portProblems.join(" ; ") || "all free",
+  });
+  const nowJava = javaPids();
+  const javaLeft = nowJava.filter((pid) => !BASELINE.javaPids.includes(pid));
+  const nowNode = nodePids();
+  const nodeLeft = nowNode.filter((pid) => !BASELINE.nodePids.includes(pid) && pid !== process.pid);
+  const descendants = descendantSpawnedProcesses(process.pid);
+  const descendantHits = descendants.items.map((item) => `${item.name}:${item.pid}`);
+  checks.push({
+    ok: descendants.supported ? descendantHits.length === 0 : javaLeft.length === 0 && nodeLeft.length === 0,
+    label: "no java/node process spawned by this run is still alive (no orphan demo/collector/perf/build)",
+    detail: descendants.supported
+      ? `descendants=${descendantHits.join(",") || "none"} (pid diff java=${javaLeft.join(",") || "none"} node=${nodeLeft.join(",") || "none"})`
+      : `powershell unavailable (${descendants.error}); java=${javaLeft.join(",") || "none"} node=${nodeLeft.join(",") || "none"}`,
+  });
+  const status = gitStatusLines();
+  const staged = status.lines.filter((line) => (line[0] ?? " ") !== " " && (line[0] ?? " ") !== "?");
+  const statusNow = status.lines.slice().sort().join("\n");
+  const headNow = gitHeadHash();
+  checks.push({
+    ok: status.ok && staged.length === 0 && statusNow === BASELINE.gitStatus && headNow === BASELINE.gitHead,
+    label: "git index untouched (no staged entries), HEAD/status identical to the run baseline (tester ran no git write)",
+    detail: `staged=${staged.length} statusUnchanged=${statusNow === BASELINE.gitStatus} head=${headNow === BASELINE.gitHead ? "unchanged" : `${BASELINE.gitHead} -> ${headNow}`}`,
+  });
+  const snapshotNow = sourceSnapshot();
+  const touched = [];
+  for (const [rel, hash] of Object.entries(SNAPSHOT)) {
+    if (snapshotNow[rel] !== hash) touched.push(rel);
+  }
+  const added = Object.keys(snapshotNow).filter((rel) => !(rel in SNAPSHOT));
+  checks.push({
+    ok: touched.length === 0 && added.length === 0,
+    label: "no product file modified or added by this verify run (only build outputs/temp logs changed)",
+    detail: touched.length || added.length ? `modified=${touched.slice(0, 5).join(",")} added=${added.slice(0, 5).join(",")}` : `${Object.keys(SNAPSHOT).length} product files stable`,
+  });
+
+  const allowedExact = new Set(["pom.xml", "README.md", ".gitattributes", ...S5_DEMO_BACKEND_ALLOWED]);
+  const allowedPrefixes = [
+    "agent/", "server/collector/", "server/launcher/", "frontend/sdk/", "frontend/build-plugin/",
+    "demo/buggy-shop-boot-vue/frontend/", "workbench/", "docs/contracts/", "docs/guides/",
+    "docs/plans/stages/S5/", "fixtures/s5-l1-values/", "tools/verify/", "tools/perf/",
+  ];
+  const forbiddenPrefixes = ["schema/", "fixtures/case-a-zero-rows/", "fixtures/s1-walking-skeleton/", "fixtures/s2-zero-row-chain/", "fixtures/s3-frontend-facts/", "fixtures/s4-details/", "docs/plans/stages/S0/"];
+  const forbiddenExact = ["docs/contracts/transport.v1.md", "docs/contracts/status-semantics.md", "docs/plans/00-master-plan.md", "docs/plans/SOLO-PLAN.md"];
+  const backendAllowed = new Set(S5_DEMO_BACKEND_ALLOWED);
+  const unexpected = [];
+  const forbidden = [];
+  for (const line of status.lines) {
+    const rel = line.slice(3).trim().replace(/^"|"$/g, "").split("\\").join("/");
+    const allowed = allowedExact.has(rel) || allowedPrefixes.some((entry) => rel.startsWith(entry));
+    if (!allowed) unexpected.push(line);
+    if ((forbiddenPrefixes.some((entry) => rel.startsWith(entry)) && !backendAllowed.has(rel)) || forbiddenExact.includes(rel)) forbidden.push(line);
+  }
+  checks.push({
+    ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
+    label: "S5 change set within the whitelist (agent/collector/launcher/sdk+build-plugin/demo frontend+4 backend files/workbench/docs contracts+guides+S5/fixtures s5/tools/verify+perf/pom); schema/S0–S4 fixtures/transport/status untouched",
+    detail: unexpected.length || forbidden.length
+      ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
+      : `${status.lines.length} entries within scope`,
+  });
+  return gate(
+    "S5-H",
+    "scope/security/cleanup: S5 allowed but no S6+ (L2/async/×3/SSE-WS/persistence/Tomcat/cloud/React), no .map decoding/upload, external-script-only preview, no secrets/CDN/mirrors, ports free, no leftovers, git untouched, S5 whitelist",
+    checks,
+    repro,
+  );
+}
+
+/** S5-D helper: evaluate expected-facts F* (values paths + #trace.* derived counts). */
+function s5FixtureFactProblems(events, facts) {
+  const problems = [];
+  const service = events.find((event) => event.kind === "service") ?? null;
+  const traceCounts = {
+    valuesSpanCount: events.filter((event) => Array.isArray(event.values)).length,
+    sourceMappedSpanCount: events.filter((event) => (event.flags ?? []).includes("SOURCE_MAPPED")).length,
+    l1FlagSpanCount: events.filter((event) => (event.flags ?? []).includes(S5_L1_FLAG)).length,
+    localValueCount: events.flatMap((event) => Array.isArray(event.values) ? event.values : []).filter((item) => item?.kind === "local").length,
+    valueCount: events.flatMap((event) => Array.isArray(event.values) ? event.values : []).length,
+    fetchCount: events.filter((event) => event.kind === "fetch").length,
+    backendSpanCount: events.filter((event) => S3_BACKEND_KINDS.includes(event.kind)).length,
+    spanCount: events.length,
+  };
+  for (const fact of Array.isArray(facts.facts) ? facts.facts : []) {
+    const path = fact?.assert?.path ?? "";
+    const expected = fact?.assert?.value;
+    let actual;
+    if (path.startsWith("#trace.")) {
+      actual = traceCounts[path.slice("#trace.".length)];
+    } else {
+      const segments = path.split(".");
+      let cursor = service;
+      for (const segment of segments) {
+        if (cursor === null || cursor === undefined) break;
+        cursor = Array.isArray(cursor) ? cursor[Number(segment)] : cursor[segment];
+      }
+      actual = cursor;
+    }
+    if (!deepEqual(actual, expected)) problems.push(`${fact.id} ${path}=${show(actual)} expected=${show(expected)}`);
+  }
+  return problems;
+}
+
+/** S5-E helper: fresh shallow R1/R2 scan of the demo frontend (same rules as the build plugin). */
+function s5RecomputeManifest(frontendRel) {
+  const root = abs(frontendRel);
+  const files = walk(abs(`${frontendRel}/src`))
+    .filter((file) => /\.(vue|ts)$/i.test(file))
+    .map(relOf)
+    .map((rel) => rel.slice(frontendRel.length + 1))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const seen = new Set();
+  const entries = [];
+  for (const rel of files) {
+    const lines = readFileSync(abs(`${frontendRel}/${rel}`), "utf8").split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const match = /^[ \t]*(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]+([A-Za-z_$][\w$]*)[ \t]*\(/.exec(line) ||
+        /^[ \t]*(?:export[ \t]+)?const[ \t]+([A-Za-z_$][\w$]*)[ \t]*=[^;\n]*wrapFn\([ \t]*["']\1["']/.exec(line);
+      if (!match) continue;
+      const name = match[1];
+      if (seen.has(name)) continue;
+      seen.add(name);
+      entries.push({ name, file: rel, line: index + 1 });
+    }
+  }
+  entries.sort((a, b) => (a.file !== b.file ? (a.file < b.file ? -1 : 1) : a.line !== b.line ? a.line - b.line : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return entries;
+}
+
+/** S5 build/test memoization (S5-A/D/E share one run each). */
+function s5EnsureSdk() {
+  if (!S5_BUILD_CACHE.sdk) {
+    const ci = s5NpmCi(abs(SDK_DIR));
+    const build = runShell("npm run build", { cwd: abs(SDK_DIR), timeout: 600000 });
+    const test = runShell("npm test", { cwd: abs(SDK_DIR), timeout: 600000 });
+    const out = `${test.stdout}\n${test.stderr}`;
+    S5_BUILD_CACHE.sdk = {
+      ci, build, test,
+      tests: out.match(/# tests (\d+)/)?.[1],
+      pass: out.match(/# pass (\d+)/)?.[1],
+      fail: out.match(/# fail (\d+)/)?.[1],
+    };
+  }
+  return S5_BUILD_CACHE.sdk;
+}
+
+function s5EnsurePlugin() {
+  if (!S5_BUILD_CACHE.plugin) {
+    const test = runShell("npm test", { cwd: abs(S5_BUILD_PLUGIN_REL), timeout: 300000 });
+    const out = `${test.stdout}\n${test.stderr}`;
+    S5_BUILD_CACHE.plugin = {
+      test,
+      tests: out.match(/# tests (\d+)/)?.[1],
+      pass: out.match(/# pass (\d+)/)?.[1],
+      fail: out.match(/# fail (\d+)/)?.[1],
+    };
+  }
+  return S5_BUILD_CACHE.plugin;
+}
+
+function s5EnsureDemoFrontend() {
+  if (!S5_BUILD_CACHE.demo) {
+    const ci = s5NpmCi(abs(S5_DEMO_FRONTEND_REL));
+    const build = runShell("npm run build", { cwd: abs(S5_DEMO_FRONTEND_REL), timeout: 600000 });
+    S5_BUILD_CACHE.demo = { ci, build };
+  }
+  return S5_BUILD_CACHE.demo;
+}
+
+function s5EnsureWorkbench() {
+  if (!S5_BUILD_CACHE.workbench) {
+    const ci = s5NpmCi(abs("workbench"));
+    const build = runShell("npm run build", { cwd: abs("workbench"), timeout: 600000 });
+    S5_BUILD_CACHE.workbench = { ci, build };
+  }
+  return S5_BUILD_CACHE.workbench;
+}
+
+/**
+ * S5-BUILD: the Java side of S5-A. Root reactor with JDK21 (collector/launcher/agent), demo
+ * backend with JDK8, agent jar still Java 8 bytecode (major 52).
+ */
+function checkS5Builds() {
+  section("S5-BUILD: root reactor (JDK21) + demo backend (JDK8) + agent jar major 52");
+  const checks = [];
+  const rootStarted = Date.now();
+  const root = runShell("mvn -B -q -DskipTests package", {
+    cwd: REPO,
+    env: { ...process.env, JAVA_HOME: JDK21_HOME },
+  });
+  const rootOut = `${root.stdout}\n${root.stderr}`;
+  checks.push({
+    ok: root.code === 0 && !root.error && !root.signal && !/BUILD FAILURE/.test(rootOut),
+    label: "root reactor `mvn -B -q -DskipTests package` with JAVA_HOME=JDK21 exit 0",
+    detail: `exit=${root.code} ${((Date.now() - rootStarted) / 1000).toFixed(1)}s ${lastLines(rootOut, 2).join(" | ").slice(0, 240)}`,
+  });
+
+  const demoStarted = Date.now();
+  const demo = runShell("mvn -B -q -DskipTests package", {
+    cwd: abs(S5_DEMO_BACKEND_REL),
+    env: { ...process.env, JAVA_HOME: JDK8_HOME },
+  });
+  const demoOut = `${demo.stdout}\n${demo.stderr}`;
+  checks.push({
+    ok: demo.code === 0 && !demo.error && !demo.signal && !/BUILD FAILURE/.test(demoOut),
+    label: "demo backend `mvn -B -q -DskipTests package` with JAVA_HOME=JDK8 exit 0",
+    detail: `exit=${demo.code} ${((Date.now() - demoStarted) / 1000).toFixed(1)}s ${lastLines(demoOut, 2).join(" | ").slice(0, 240)}`,
+  });
+
+  for (const rel of [AGENT_JAR_REL, COLLECTOR_JAR_REL, DEMO_JAR_REL]) {
+    const jarAbs = abs(rel);
+    checks.push({
+      ok: existsSync(jarAbs) && statSync(jarAbs).size > 0,
+      label: `${path.basename(rel)} exists after the build`,
+      detail: existsSync(jarAbs) ? `${statSync(jarAbs).size} bytes` : "missing",
+    });
+  }
+  const javap = existsSync(JDK21_JAVAP)
+    ? runExe(JDK21_JAVAP, ["-verbose", "-classpath", abs(AGENT_JAR_REL), "io.traceboard.agent.TraceAgent"])
+    : { stdout: "" };
+  const major = Number((javap.stdout.match(/major version:\s*(\d+)/) ?? [])[1]);
+  checks.push({
+    ok: major === 52,
+    label: "agent jar compiled for Java 8 (major 52)",
+    detail: `major=${Number.isNaN(major) ? "?" : major}`,
+  });
+
+  const ok = gate(
+    "S5-BUILD",
+    "S5 builds: root reactor JDK21 (collector/launcher/agent) + demo backend JDK8 + agent major 52",
+    checks,
+    `JAVA_HOME="${JDK21_HOME}" mvn -B -q -DskipTests package && (cd "${S5_DEMO_BACKEND_REL}" && JAVA_HOME="${JDK8_HOME}" mvn -B -q -DskipTests package)`,
+  );
+  S5_EVIDENCE.javaBuild = { ok, checks };
+  return ok;
+}
+
+/**
+ * S5-A: front-end shallow builds. SDK (npm ci + build + 17 tests, 3 dist files), the new
+ * `frontend/build-plugin` (6 tests, zero dependencies), demo frontend build (manifest + .map +
+ * inline manifest) and the workbench build; the Java half is S5-BUILD.
+ */
+function checkS5A() {
+  section("S5-A: SDK (17 tests/3 dist), build-plugin (6 tests), demo manifest/.map, workbench build");
+  const checks = [];
+
+  const sdk = s5EnsureSdk();
+  const sdkCi = sdk.ci;
+  checks.push({
+    ok: sdkCi.code === 0 && !sdkCi.error,
+    label: "frontend/sdk npm ci exit 0",
+    detail: `exit=${sdkCi.code} ${lastLines(`${sdkCi.stdout}\n${sdkCi.stderr}`, 1).join(" ").slice(0, 200)}`,
+  });
+  const sdkBuild = sdk.build;
+  checks.push({
+    ok: sdkBuild.code === 0 && !sdkBuild.error,
+    label: "frontend/sdk npm run build (tsc ESM + .d.ts + esbuild IIFE) exit 0",
+    detail: `exit=${sdkBuild.code} ${lastLines(`${sdkBuild.stdout}\n${sdkBuild.stderr}`, 1).join(" ").slice(0, 200)}`,
+  });
+  const sdkTest = sdk.test;
+  checks.push({
+    ok: sdkTest.code === 0 && sdk.tests === "17" && sdk.pass === "17" && sdk.fail === "0",
+    label: "frontend/sdk npm test -> node --test: 17 tests / 17 pass / 0 fail",
+    detail: `tests=${sdk.tests ?? "?"} pass=${sdk.pass ?? "?"} fail=${sdk.fail ?? "?"}`,
+  });
+  const sdkDist = walk(abs(SDK_DIST_REL));
+  checks.push({
+    ok: deepEqual(sdkDist.map(relOf).sort(), [
+      `${SDK_DIST_REL}/index.d.ts`,
+      `${SDK_DIST_REL}/index.js`,
+      `${SDK_DIST_REL}/traceboard-sdk.iife.js`,
+    ]) && sdkDist.every((file) => !file.endsWith(".map")),
+    label: "SDK dist = exactly 3 files (index.js/index.d.ts/IIFE) and no *.map",
+    detail: sdkDist.map(relOf).join(","),
+  });
+
+  const pluginPkgAbs = abs(`${S5_BUILD_PLUGIN_REL}/package.json`);
+  const pluginPkg = existsSync(pluginPkgAbs) ? JSON.parse(readFileSync(pluginPkgAbs, "utf8")) : null;
+  checks.push({
+    ok: pluginPkg !== null && pluginPkg.name === "@traceboard/vite-plugin" && pluginPkg.type === "module" &&
+      typeof pluginPkg.scripts?.test === "string" && /node --test/.test(pluginPkg.scripts.test) &&
+      Object.keys(pluginPkg.dependencies ?? {}).length === 0 &&
+      Object.keys(pluginPkg.devDependencies ?? {}).length === 0 &&
+      existsSync(abs(`${S5_BUILD_PLUGIN_REL}/index.mjs`)) && existsSync(abs(`${S5_BUILD_PLUGIN_REL}/index.d.mts`)),
+    label: "build-plugin package.json: @traceboard/vite-plugin, ESM, node --test, zero dependencies",
+    detail: pluginPkg ? `deps=${Object.keys(pluginPkg.dependencies ?? {}).length} devDeps=${Object.keys(pluginPkg.devDependencies ?? {}).length}` : "missing",
+  });
+  const plugin = s5EnsurePlugin();
+  const pluginTest = plugin.test;
+  checks.push({
+    ok: pluginTest.code === 0 && plugin.tests === "6" && plugin.pass === "6" && plugin.fail === "0",
+    label: "frontend/build-plugin npm test -> node --test: 6 tests / 6 pass / 0 fail",
+    detail: `tests=${plugin.tests ?? "?"} pass=${plugin.pass ?? "?"} fail=${plugin.fail ?? "?"}`,
+  });
+
+  const demoFrontend = s5EnsureDemoFrontend();
+  const demoCi = demoFrontend.ci;
+  checks.push({
+    ok: demoCi.code === 0 && !demoCi.error,
+    label: "demo frontend npm ci exit 0",
+    detail: `exit=${demoCi.code} ${lastLines(`${demoCi.stdout}\n${demoCi.stderr}`, 1).join(" ").slice(0, 200)}`,
+  });
+  const demoBuild = demoFrontend.build;
+  checks.push({
+    ok: demoBuild.code === 0 && !demoBuild.error,
+    label: "demo frontend npm run build (vue-tsc + vite, plugin + sourcemap) exit 0",
+    detail: `exit=${demoBuild.code} ${lastLines(`${demoBuild.stdout}\n${demoBuild.stderr}`, 2).join(" | ").slice(0, 240)}`,
+  });
+  const demoDistAll = walk(abs(DEMO_DIST_REL));
+  const demoTokens = distTextFiles(DEMO_DIST_REL);
+  const demoDistText = demoTokens.map((file) => file.text).join("\n");
+  const demoManifestAbs = abs(`${DEMO_DIST_REL}/traceboard-manifest.json`);
+  let demoManifest = null;
+  try {
+    demoManifest = existsSync(demoManifestAbs) ? JSON.parse(readFileSync(demoManifestAbs, "utf8")) : null;
+  } catch {
+    demoManifest = null;
+  }
+  const manifestByName = new Map(
+    (Array.isArray(demoManifest?.functions) ? demoManifest.functions : []).map((fn) => [fn?.name, fn]),
+  );
+  const manifestMissing = ["previewDiscount", "validateForm", "cancelOrder"].filter((name) => {
+    const fn = manifestByName.get(name);
+    return !fn || fn.file !== "src/App.vue" || !Number.isInteger(fn.line) || fn.line < 1;
+  });
+  checks.push({
+    ok: demoManifest !== null && Array.isArray(demoManifest.functions) && manifestMissing.length === 0,
+    label: "demo build emits traceboard-manifest.json (previewDiscount/validateForm/cancelOrder @ src/App.vue:line)",
+    detail: demoManifest ? `${demoManifest.functions.length} functions; missing=${manifestMissing.join(",") || "none"}` : "manifest missing",
+  });
+  const demoMaps = demoDistAll.filter((file) => file.endsWith(".map"));
+  checks.push({
+    ok: demoMaps.length >= 1,
+    label: "demo build emits .map artifacts (build.sourcemap=true; dist is gitignored)",
+    detail: demoMaps.map(relOf).join(",") || "0 maps",
+  });
+  checks.push({
+    ok: demoDistText.includes("__TRACEBOARD_MANIFEST__") && demoDistText.includes("previewDiscount"),
+    label: "demo dist index.html inlines window.__TRACEBOARD_MANIFEST__ (build-only, not the preview injection)",
+    detail: demoTokens.filter((file) => file.text.includes("__TRACEBOARD_MANIFEST__")).map((file) => file.rel).join(",") || "not found",
+  });
+
+  const workbench = s5EnsureWorkbench();
+  const wbCi = workbench.ci;
+  checks.push({
+    ok: wbCi.code === 0 && !wbCi.error,
+    label: "workbench npm ci exit 0",
+    detail: `exit=${wbCi.code} ${lastLines(`${wbCi.stdout}\n${wbCi.stderr}`, 1).join(" ").slice(0, 200)}`,
+  });
+  const wbBuild = workbench.build;
+  const wbDist = distTextFiles(WORKBENCH_DIST_REL);
+  checks.push({
+    ok: wbBuild.code === 0 && !wbBuild.error && wbDist.length > 0,
+    label: "workbench npm run build exit 0 and dist is non-empty",
+    detail: `exit=${wbBuild.code} ${wbDist.length} dist files`,
+  });
+
+  checks.push({
+    ok: S5_EVIDENCE.javaBuild?.ok === true,
+    label: "Java half green (see S5-BUILD: root JDK21 + demo JDK8 + agent major 52)",
+    detail: S5_EVIDENCE.javaBuild?.ok === true ? "ok" : "S5-BUILD failed",
+  });
+
+  return gate(
+    "S5-A",
+    "S5 builds: SDK 17/17 + 3 dist, build-plugin 6/6 (zero deps), demo manifest/.map/inline, workbench, root JDK21 + demo JDK8 + agent 52 (S5-BUILD)",
+    checks,
+    `(cd "frontend/sdk" && npm ci && npm run build && npm test) && (cd "frontend/build-plugin" && npm test) && (cd "${S5_DEMO_FRONTEND_REL}" && npm ci && npm run build) && (cd "workbench" && npm ci && npm run build) && ${REPRO_S5}`,
+  );
+}
+
+/**
+ * S5-B: the demo L1 endpoint without an agent. `POST preview-discount` is 200 {"data":0} for a
+ * known id, the DB amount stays 100.00 (in-memory only), an unknown id is also 200 {"data":0}
+ * (no 404/NPE), and case A cancel keeps its 200 true / 0-row behaviour.
+ */
+async function checkS5B() {
+  section("S5-B: demo preview-discount (no agent) — 200/data 0, DB 100, unknown id, case A");
+  const checks = [];
+  const pre8080 = s5PortFree(8080);
+  const pre = [
+    { ok: pre8080.ok, label: "port 8080 free before start", detail: pre8080.detail },
+    { ok: existsSync(abs(DEMO_JAR_REL)), label: "demo jar exists", detail: DEMO_JAR_REL },
+    { ok: existsSync(JDK8_JAVA), label: "JDK8 java.exe exists", detail: JDK8_JAVA },
+  ];
+  if (!pre.every((item) => item.ok)) {
+    return record("S5-B", "S5-B demo L1 endpoint (preconditions)", false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      `"${JDK8_JAVA}" -jar "${DEMO_JAR_REL}"`);
+  }
+
+  let demo = null;
+  try {
+    demo = startJavaServer("demo(8080,no-agent)", JDK8_JAVA, ["-jar", abs(DEMO_JAR_REL)], abs(S5_DEMO_BACKEND_REL));
+    const ready = await pollUntil(async () => {
+      const res = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    if (!ready) {
+      return record("S5-B", "S5-B demo L1 endpoint (startup)", false,
+        [`demo /api/orders did not answer within ${START_TIMEOUT_MS}ms`, ...lastLines(demo.log.text, 5)],
+        `"${JDK8_JAVA}" -jar "${DEMO_JAR_REL}"`);
+    }
+    const seed = s5OrderRow(ready.text);
+    checks.push({
+      ok: seed !== null && seed.status === "CREATED" && Number(seed.amount) === 100,
+      label: "GET /api/orders seed: id=1 status=CREATED amount=100 before the L1 call",
+      detail: show(seed),
+    });
+
+    const previewStarted = Date.now();
+    const preview = await tryRequest(8080, s5PreviewQuery(1), { method: "POST" }, 30000);
+    const previewBody = preview.ok ? parseJson(preview.text) : { ok: false };
+    checks.push({
+      ok: preview.ok && preview.status === 200 && previewBody.ok && deepEqual(previewBody.value, { data: 0 }),
+      label: "POST /api/orders/1/preview-discount?requestedAmount=100&demoSecret=s3cr3t&note=<3000 x> -> 200 {\"data\":0}",
+      detail: `status=${preview.status} body=${show(preview.text)} ${Date.now() - previewStarted}ms`,
+    });
+    const afterPreview = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const afterRow = s5OrderRow(afterPreview.text);
+    checks.push({
+      ok: afterPreview.status === 200 && afterRow !== null && Number(afterRow.amount) === 100 && afterRow.status === "CREATED",
+      label: "GET /api/orders after preview: amount still 100 (in-memory only, no UPDATE / no DB write)",
+      detail: show(afterRow),
+    });
+
+    const unknown = await tryRequest(8080, s5PreviewQuery(999), { method: "POST" }, 30000);
+    const unknownBody = unknown.ok ? parseJson(unknown.text) : { ok: false };
+    checks.push({
+      ok: unknown.status === 200 && unknownBody.ok && deepEqual(unknownBody.value, { data: 0 }),
+      label: "unknown id 999 -> 200 {\"data\":0} (findById=null writes nothing, no 404 / -1 / null)",
+      detail: `status=${unknown.status} body=${show(unknown.text)}`,
+    });
+
+    const cancel = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" }, 30000);
+    const cancelBody = cancel.ok ? parseJson(cancel.text) : { ok: false };
+    const afterCancel = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const afterCancelRow = s5OrderRow(afterCancel.text);
+    checks.push({
+      ok: cancel.status === 200 && cancelBody.ok && deepEqual(cancelBody.value, { data: true }) &&
+        afterCancelRow !== null && Number(afterCancelRow.amount) === 100 && afterCancelRow.status === "CREATED",
+      label: "case A POST /api/orders/1/cancel -> 200 {\"data\":true}; orders stay CREATED / amount 100 (0-row UPDATE)",
+      detail: `status=${cancel.status} body=${show(cancel.text)} row=${show(afterCancelRow)}`,
+    });
+  } finally {
+    await stopServer(demo);
+    const freed = await pollUntil(() => s5PortFree(8080).ok, 30000, 400);
+    console.log(`        demo stopped; 8080 ${freed ? "free" : "STILL LISTENING"}`);
+  }
+
+  S5_EVIDENCE.demo = { checks };
+  return gate(
+    "S5-B",
+    "S5 demo L1 endpoint: 200 {\"data\":0}, DB amount 100 (no write), unknown id 200/0, case A unchanged",
+    checks,
+    `"${JDK8_JAVA}" -jar "${DEMO_JAR_REL}" & curl -s -X POST "http://127.0.0.1:8080/api/orders/1/preview-discount?requestedAmount=100&demoSecret=s3cr3t&note=<3000 x>"`,
+  );
+}
+
+/** Agent L1 values problems for one service span (exact order/names/redaction/truncation). */
+function s5ServiceValueProblems(service, view) {
+  const problems = [];
+  const values = service?.values;
+  if (!Array.isArray(values)) {
+    problems.push(`values=${show(values)}`);
+    return problems;
+  }
+  if (values.length !== 5) problems.push(`count=${values.length}`);
+  const names = values.map((item) => item?.name);
+  const kinds = values.map((item) => item?.kind);
+  if (!deepEqual(names, S5_VALUE_NAMES)) problems.push(`names=${names.join(",")}`);
+  if (!deepEqual(kinds, S5_VALUE_KINDS)) problems.push(`kinds=${kinds.join(",")}`);
+  if (names.includes("id")) problems.push("path id leaked into values");
+  if (values.some((item) => item?.line !== null)) problems.push("line must stay null (no L2/line-level in S5)");
+  const [amountItem, secretItem, noteItem, fieldItem, returnItem] = values;
+  if (amountItem?.kind !== "param" || amountItem.from !== null || amountItem.to !== 100 ||
+      amountItem.truncated !== false || amountItem.redacted !== false) {
+    problems.push(`requestedAmount=${show(amountItem)}`);
+  }
+  if (secretItem?.kind !== "param" || secretItem.from !== null || secretItem.to !== "[REDACTED len=6]" ||
+      secretItem.redacted !== true || secretItem.truncated !== false) {
+    problems.push(`demoSecret=${show(secretItem)}`);
+  }
+  if (noteItem?.kind !== "param" || noteItem.from !== null || noteItem.to !== S5_NOTE_2048 ||
+      noteItem.truncated !== true || noteItem.redacted !== false) {
+    problems.push(`note(truncated=${noteItem?.truncated}, len=${typeof noteItem?.to === "string" ? noteItem.to.length : "?"})`);
+  }
+  const fields = values.filter((item) => item?.kind === "field");
+  if (fields.length !== 1 || fields[0]?.name !== "amount" || fields[0]?.from !== 100 || fields[0]?.to !== 0 ||
+      fields[0]?.truncated !== false || fields[0]?.redacted !== false) {
+    problems.push(`field items=${show(fields)}`);
+  }
+  if (fieldItem?.kind !== "field") problems.push(`values[3].kind=${fieldItem?.kind}`);
+  if (returnItem?.kind !== "return" || returnItem.name !== "return" || returnItem.to !== 0 || returnItem.from !== null) {
+    problems.push(`return=${show(returnItem)}`);
+  }
+  const localKinds = values.filter((item) => item?.kind === "local");
+  if (localKinds.length > 0) problems.push(`kind=local items=${localKinds.length}`);
+  const raw = JSON.stringify(view ?? values);
+  if (raw.includes(S5_DEMO_SECRET)) problems.push("raw demoSecret leaked into the event");
+  return problems;
+}
+
+/**
+ * S5-C: runtime L1 with collector(8601) + demo(8080) + agent (session s_s5agent). One joined
+ * preview-discount request must produce exactly controller+service (no mapper/sql), the service
+ * carries the exact five value items, case A cancel still yields the 4-span 0-row chain without
+ * values/L1, and the agent stays fail-open when the collector is down.
+ */
+async function checkS5C(validate) {
+  section("S5-C: agent L1 values (collector 8601 + demo 8080 + agent, session s_s5agent)");
+  const checks = [];
+  const repro = `"${JDK8_JAVA}" -javaagent:"${AGENT_JAR_REL}" -Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events -Dtraceboard.sessionId=${S5_SESSION} -jar "${DEMO_JAR_REL}"`;
+  const pre = [
+    { ok: s5PortFree(8601).ok, label: "port 8601 free before start", detail: s5PortFree(8601).detail },
+    { ok: s5PortFree(8080).ok, label: "port 8080 free before start", detail: s5PortFree(8080).detail },
+    { ok: existsSync(abs(COLLECTOR_JAR_REL)), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: existsSync(abs(DEMO_JAR_REL)), label: "demo jar exists", detail: DEMO_JAR_REL },
+    { ok: existsSync(abs(AGENT_JAR_REL)), label: "agent jar exists", detail: AGENT_JAR_REL },
+    { ok: existsSync(JDK21_JAVA) && existsSync(JDK8_JAVA), label: "JDK21 + JDK8 present", detail: `${JDK21_HOME} / ${JDK8_HOME}` },
+    { ok: typeof validate === "function", label: "frozen schema validator available", detail: SCHEMA_REL },
+  ];
+  if (!pre.every((item) => item.ok)) {
+    return record("S5-C", "S5-C agent L1 (preconditions)", false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      repro);
+  }
+
+  let collector = null;
+  let demo = null;
+  try {
+    collector = startJavaServer("collector(8601)", JDK21_JAVA, ["-jar", abs(COLLECTOR_JAR_REL)], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    if (!health) {
+      return record("S5-C", "S5-C agent L1 (collector health)", false,
+        [{ ok: false, label: "collector health", detail: "timeout" }], repro);
+    }
+
+    demo = startJavaServer("demo(8080)+agent", JDK8_JAVA, [
+      `-javaagent:${abs(AGENT_JAR_REL)}`,
+      "-Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events",
+      `-Dtraceboard.sessionId=${S5_SESSION}`,
+      "-jar",
+      abs(DEMO_JAR_REL),
+    ], abs(S5_DEMO_BACKEND_REL));
+    const ready = await pollUntil(async () => {
+      const res = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    if (!ready) {
+      return record("S5-C", "S5-C agent L1 (demo startup)", false,
+        [`demo /api/orders did not answer within ${START_TIMEOUT_MS}ms`, ...lastLines(demo.log.text, 5)], repro);
+    }
+
+    /* ---------------- preview-discount joined (EXACT) ---------------- */
+    const traceId = hexRandom(16);
+    const clientSpanId = hexRandom(8);
+    const clickId = `click_${hexRandom(8)}`;
+    const preview = await tryRequest(8080, s5PreviewQuery(1), {
+      method: "POST",
+      headers: { traceparent: `00-${traceId}-${clientSpanId}-01`, "X-TraceBoard-Click": clickId },
+    }, 30000);
+    const previewBody = preview.ok ? parseJson(preview.text) : { ok: false };
+    checks.push({
+      ok: preview.status === 200 && previewBody.ok && deepEqual(previewBody.value, { data: 0 }),
+      label: "L1 POST preview-discount (joined traceparent/click) -> 200 {\"data\":0}",
+      detail: `status=${preview.status} body=${show(preview.text)}`,
+    });
+
+    const polled = await pollUntil(async () => {
+      const page = await getEventsPage(S5_SESSION, "?afterSeq=0&limit=200");
+      const spans = Array.isArray(page.value.events) ? page.value.events.map((entry) => entry.event) : [];
+      return page.res.ok && page.res.status === 200 && spans.length >= 2 ? { page, spans } : null;
+    }, 20000, 400);
+    await sleep(600);
+    const page1 = await getEventsPage(S5_SESSION, "?afterSeq=0&limit=200");
+    const spans1 = Array.isArray(page1.value.events) ? page1.value.events.map((entry) => entry.event) : [];
+    const schemaProblems1 = (typeof validate === "function" ? spans1 : []).filter((span) => !validate(span)).map((span) => span.spanId);
+    checks.push({
+      ok: Boolean(polled) && schemaProblems1.length === 0,
+      label: "collector received the 2 preview spans within 20s and both validate against schema v1",
+      detail: `spans=${spans1.length} schemaProblems=${schemaProblems1.join(",") || "none"}`,
+    });
+
+    const controller = spans1.find((span) => span.nodeKey === S5_PREVIEW_CONTROLLER_NODE_KEY) ?? null;
+    const service = spans1.find((span) => span.nodeKey === S5_PREVIEW_SERVICE_NODE_KEY) ?? null;
+    const kinds1 = sortedByStart(spans1).map((span) => span.kind);
+    checks.push({
+      ok: spans1.length === 2 && controller !== null && service !== null &&
+        deepEqual(kinds1, ["controller", "service"]) &&
+        !spans1.some((span) => span.kind === "mapper" || span.kind === "sql"),
+      label: "exactly 2 spans: controller + service (findById is NOT instrumented -> no mapper/sql)",
+      detail: `kinds=${kinds1.join(",")}`,
+    });
+    checks.push({
+      ok: controller !== null && service !== null &&
+        controller.traceId === traceId && service.traceId === traceId &&
+        controller.parentSpanId === clientSpanId && service.parentSpanId === controller.spanId &&
+        service.rootEventId === clickId &&
+        controller.confidence === "EXACT" && service.confidence === "EXACT",
+      label: "EXACT join: traceId/parent/rootEventId from traceparent+click; server span is the only child",
+      detail: `controller.parent=${controller?.parentSpanId} service.parent=${service?.parentSpanId} root=${service?.rootEventId}`,
+    });
+    checks.push({
+      ok: controller !== null && !Object.prototype.hasOwnProperty.call(controller, "values"),
+      label: "controller span carries NO values (L1 facts live on the service span only)",
+      detail: controller && Object.prototype.hasOwnProperty.call(controller, "values") ? "values present" : "values omitted",
+    });
+
+    const valueProblems = service !== null ? s5ServiceValueProblems(service, service) : ["service span missing"];
+    checks.push({
+      ok: valueProblems.length === 0,
+      label: "service values exactly 5 (requestedAmount 100 / demoSecret [REDACTED len=6] / note 2048+truncated / amount 100->0 once / return 0)",
+      detail: valueProblems.slice(0, 8).join(" || ") || "5 items in order",
+    });
+    const flagsService = Array.isArray(service?.flags) ? service.flags : [];
+    const flagsController = Array.isArray(controller?.flags) ? controller.flags : [];
+    checks.push({
+      ok: flagsService.includes(S5_L1_FLAG) && flagsService.includes(S2_FLAG_CHAIN) &&
+        !flagsService.some((flag) => /^(VALUES_CAPPED|L1_SKIPPED)=/.test(flag) || flag === "L2") &&
+        !flagsController.includes(S5_L1_FLAG) && !spans1.some((span) => span.kind === "local"),
+      label: "service flags include L1 (+S2_ZERO_ROW_CHAIN), no VALUES_CAPPED/L1_SKIPPED/L2, no kind=local",
+      detail: `service=${show(flagsService)} controller=${show(flagsController)}`,
+    });
+    checks.push({
+      ok: service !== null && service.status === "OK" && deepEqual(service.return, { type: "double", value: 0 }) &&
+        controller !== null && deepEqual(controller.return, { type: S2_RESPONSE_ENTITY_TYPE, value: 200 }) &&
+        service.source?.file === "OrderService.java",
+      label: "service return {type:double,value:0} + status OK (0 is a value, not RETURNED_FALSE); controller ResponseEntity/200",
+      detail: `service=${show(service?.return)} controller=${show(controller?.return)} source=${show(service?.source)}`,
+    });
+    const rawLeak = JSON.stringify(spans1).includes(S5_DEMO_SECRET);
+    checks.push({
+      ok: !rawLeak,
+      label: "raw demoSecret s3cr3t appears nowhere in the collected events (placeholder only)",
+      detail: rawLeak ? "LEAK" : "absent",
+    });
+    const logHasOrder = /transformed com\.example\.shop\.model\.Order/.test(demo.log.text);
+    checks.push({
+      ok: logHasOrder,
+      label: "agent transformed com.example.shop.model.Order (field advice installed; no span of its own)",
+      detail: logHasOrder ? "transformed" : lastLines(demo.log.text, 2).join(" | ").slice(0, 200),
+    });
+
+    const afterPreview = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const afterPreviewRow = s5OrderRow(afterPreview.text);
+    checks.push({
+      ok: afterPreviewRow !== null && Number(afterPreviewRow.amount) === 100 && afterPreviewRow.status === "CREATED",
+      label: "DB untouched by L1: GET /api/orders amount still 100 / status CREATED",
+      detail: show(afterPreviewRow),
+    });
+
+    /* ---------------- case A in the same demo (no values, no L1) ---------------- */
+    const cancel = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" }, 30000);
+    const cancelBody = cancel.ok ? parseJson(cancel.text) : { ok: false };
+    const polled2 = await pollUntil(async () => {
+      const page = await getEventsPage(S5_SESSION, "?afterSeq=0&limit=400");
+      const spans = Array.isArray(page.value.events) ? page.value.events.map((entry) => entry.event) : [];
+      return page.res.ok && page.res.status === 200 && spans.length >= 6 ? { spans } : null;
+    }, 20000, 400);
+    await sleep(600);
+    const page2 = await getEventsPage(S5_SESSION, "?afterSeq=0&limit=400");
+    const spans2 = Array.isArray(page2.value.events) ? page2.value.events.map((entry) => entry.event) : [];
+    const byTrace = new Map();
+    for (const span of spans2) {
+      if (!byTrace.has(span.traceId)) byTrace.set(span.traceId, []);
+      byTrace.get(span.traceId).push(span);
+    }
+    const cancelSpans = [...byTrace.entries()].filter(([id]) => id !== traceId).map(([, group]) => group)[0] ?? [];
+    const cancelSorted = sortedByStart(cancelSpans);
+    const cancelKinds = cancelSorted.map((span) => span.kind);
+    const cancelHasValues = cancelSpans.filter((span) => Object.prototype.hasOwnProperty.call(span, "values")).map((span) => span.spanId);
+    const cancelHasL1 = cancelSpans.filter((span) => (Array.isArray(span.flags) ? span.flags : []).includes(S5_L1_FLAG));
+    const cancelSql = cancelSorted.find((span) => span.kind === "sql") ?? null;
+    const afterCancel = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const afterCancelRow = s5OrderRow(afterCancel.text);
+    checks.push({
+      ok: cancel.status === 200 && cancelBody.ok && deepEqual(cancelBody.value, { data: true }),
+      label: "case A POST /api/orders/1/cancel (same demo) -> 200 {\"data\":true}",
+      detail: `status=${cancel.status} body=${show(cancel.text)}`,
+    });
+    checks.push({
+      ok: Boolean(polled2) && cancelSpans.length === 4 && deepEqual(cancelKinds, ["controller", "service", "mapper", "sql"]) &&
+        cancelSorted.every((span) => span.confidence === "LOST") &&
+        cancelSql !== null && Array.isArray(cancelSql.sideEffects) && cancelSql.sideEffects[0]?.rowsAffected === 0,
+      label: "case A trace: 4 spans controller->service->mapper->sql (LOST), SQL rowsAffected=0; preview trace stays 2",
+      detail: `cancelKinds=${cancelKinds.join(",")} rows=${show(cancelSql?.sideEffects)}`,
+    });
+    checks.push({
+      ok: cancelHasValues.length === 0 && cancelHasL1.length === 0 && spans1.length === 2,
+      label: "case A chain carries no values and no L1 flag (field advice never fires outside previewDiscount)",
+      detail: `valuesOnCancel=${cancelHasValues.join(",") || "none"} l1OnCancel=${cancelHasL1.length}`,
+    });
+    checks.push({
+      ok: afterCancelRow !== null && Number(afterCancelRow.amount) === 100 && afterCancelRow.status === "CREATED",
+      label: "after case A: orders still CREATED / amount 100 (0-row UPDATE unchanged)",
+      detail: show(afterCancelRow),
+    });
+
+    /* ---------------- collector down -> fail-open 200 ---------------- */
+    await stopServer(collector);
+    collector = null;
+    const collectorFreed = await pollUntil(() => s5PortFree(8601).ok, 30000, 400);
+    const failStarted = Date.now();
+    const failOpen = await tryRequest(8080, s5PreviewQuery(1), { method: "POST" }, 30000);
+    const failOpenBody = failOpen.ok ? parseJson(failOpen.text) : { ok: false };
+    checks.push({
+      ok: Boolean(collectorFreed) && failOpen.status === 200 && failOpenBody.ok && deepEqual(failOpenBody.value, { data: 0 }),
+      label: "collector stopped (:8601 free) -> preview-discount still 200 {\"data\":0} (agent fail-open)",
+      detail: `status=${failOpen.status} body=${show(failOpen.text)} ${Date.now() - failStarted}ms`,
+    });
+  } finally {
+    await stopServer(demo);
+    await stopServer(collector);
+    const freed8080 = await pollUntil(() => s5PortFree(8080).ok, 30000, 400);
+    console.log(`        demo stopped; 8080 ${freed8080 ? "free" : "STILL LISTENING"}; 8601 ${s5PortFree(8601).ok ? "free" : "STILL LISTENING"}`);
+  }
+
+  S5_EVIDENCE.agent = { checks };
+  return gate(
+    "S5-C",
+    "S5 agent L1: controller+service only, 5 exact values (100 / [REDACTED len=6] / 2048 trunc / 100->0 / 0), L1 flag, no local, DB 100, case A unchanged, fail-open",
+    checks,
+    repro,
+  );
+}
+
+async function checkS5() {
+  const selected = S5_SELECTED ?? new Set(S5_IMPLEMENTED);
+  const unimplemented = [...selected].filter((letter) => !S5_IMPLEMENTED.includes(letter));
+  for (const letter of unimplemented) {
+    record(
+      `S5-${letter}`,
+      `S5-${letter} is not implemented (implemented: ${S5_IMPLEMENTED.join(",")})`,
+      false,
+      [`requested --s5=${[...selected].join(",")}; implemented=${S5_IMPLEMENTED.join(",")}`],
+      REPRO_S5,
+    );
+  }
+
+  checkS5Builds();
+  if (selected.has("A")) checkS5A();
+  if (selected.has("B")) await checkS5B();
+  if (selected.has("C")) await checkS5C(s5CompileValidator());
+  if (selected.has("D")) await checkS5D();
+  if (selected.has("E")) checkS5E();
+  if (selected.has("F")) await checkS5F();
+  if (selected.has("G")) checkS5G();
+  if (selected.has("H")) checkS5H();
+}
+
+/** Compile the frozen schema independently so an S5-only run validates without the S0 gates. */
+function s5CompileValidator() {
+  try {
+    const schema = JSON.parse(readFileSync(abs(SCHEMA_REL), "utf8"));
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    return ajv.compile(schema);
+  } catch (error) {
+    console.log(`        schema validator unavailable: ${error.message}`);
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* source snapshot (product files only)                                */
 /* ------------------------------------------------------------------ */
 
@@ -8879,10 +10672,10 @@ function sourceSnapshot() {
     "frontend/sdk/package.json", "frontend/sdk/package-lock.json", "frontend/sdk/tsconfig.json", "frontend/sdk/README.md",
   ].forEach(add);
   ["schema", "fixtures", "docs/contracts", "docs/guides", "agent/src", "server/collector/src", "server/launcher/src", "demo/buggy-shop-boot-vue/backend/src",
-    "demo/buggy-shop-boot-vue/frontend/src", "workbench/src", "workbench/scripts", "frontend/sdk/src", "frontend/sdk/test",
+    "demo/buggy-shop-boot-vue/frontend/src", "workbench/src", "workbench/scripts", "frontend/sdk/src", "frontend/sdk/test", "frontend/build-plugin",
   ].forEach(addTree);
-  // S0–S4 stage docs are owned by other agents; test-report.md files are tester outputs.
-  for (const stage of ["S0", "S1", "S2", "S3", "S4"]) {
+  // S0–S5 stage docs are owned by other agents; test-report.md files are tester outputs.
+  for (const stage of ["S0", "S1", "S2", "S3", "S4", "S5"]) {
     for (const file of walk(abs(`docs/plans/stages/${stage}`))) {
       if (path.basename(file) === "test-report.md") continue;
       files.push(file);
@@ -8903,10 +10696,12 @@ function sourceSnapshot() {
 async function main() {
   const startedAt = new Date();
   console.log("==============================================");
-  if (S4_ONLY) {
+  if (S5_ONLY) {
+    console.log(`TraceBoard S5 verifier (S5-only: ${[...S5_SELECTED].join(",") || "none"})`);
+  } else if (S4_ONLY) {
     console.log(`TraceBoard S4 verifier (S4-only: ${[...S4_SELECTED].join(",") || "none"})`);
   } else {
-    console.log("TraceBoard S0 + S1 + S2 (re-migrated) + S3 + S4 (part 1) verifier");
+    console.log("TraceBoard S0 + S1 + S2 (re-migrated) + S3 + S4 + S5 (part 2) verifier");
   }
   console.log(`repo: ${REPO}`);
   console.log(`started: ${startedAt.toISOString()}`);
@@ -8939,7 +10734,11 @@ async function main() {
     null,
   );
 
-  if (S4_ONLY) {
+  if (S5_ONLY) {
+    console.log("");
+    console.log(`mode: S5-only (--s5=${[...S5_SELECTED].join(",") || "none"}); S0–S4 gates are skipped by design.`);
+    await checkS5();
+  } else if (S4_ONLY) {
     console.log("");
     console.log(`mode: S4-only (--s4=${[...S4_SELECTED].join(",") || "none"}); S0–S3 gates are skipped by design.`);
     await checkS4();
@@ -8978,6 +10777,9 @@ async function main() {
 
     // S4-BUILD + S4-A..I run here; S4-H reads the S0–S3 RESULTS, S4-I asserts the final cleanup.
     await checkS4();
+
+    // S5-BUILD + S5-A..H (tester part 2) run after S4 so S5-G/H can read the earlier RESULTS.
+    await checkS5();
   }
 
   section("SUMMARY");
@@ -8989,14 +10791,15 @@ async function main() {
     for (const item of failed) console.log(`  - ${item.id}: ${item.title}`);
   }
   const verdict = failed.length === 0 ? "PASS" : "FAIL";
-  console.log(`${S4_ONLY ? "S4 TEST" : "S4 TEST (full S0–S4)"}: ${verdict}`);
+  console.log(`${S5_ONLY ? "S5 TEST" : S4_ONLY ? "S4 TEST" : "S5 TEST (full S0–S5)"}: ${verdict}`);
 
   if (process.argv.includes("--json")) {
     console.log(
       `VERIFY_JSON:${JSON.stringify({
         repo: REPO,
-        mode: S4_ONLY ? "s4-only" : "full",
+        mode: S5_ONLY ? "s5-only" : S4_ONLY ? "s4-only" : "full",
         s4Selected: S4_ONLY ? [...S4_SELECTED] : S4_IMPLEMENTED.slice(),
+        s5Selected: S5_ONLY ? [...S5_SELECTED] : S5_IMPLEMENTED.slice(),
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
         env,

@@ -70,7 +70,7 @@ export function reasonText(node: GraphNode): string {
   return isNotCollected(node.status) ? NOT_COLLECTED_NO_REASON : "—";
 }
 
-/** `file:line` only when both parts are complete; otherwise 未采集 (no S5 mapping). */
+/** `file:line` only when both parts are complete; otherwise 未采集 (no manifest source). */
 export function sourceText(node: GraphNode): string {
   const source = node.source;
   if (

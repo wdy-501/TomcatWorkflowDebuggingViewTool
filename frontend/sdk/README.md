@@ -1,7 +1,16 @@
 # @traceboard/sdk
 
-TraceBoard 运行时 SDK（S3 facts + S4 预览注入 IIFE）。只采集 click / fetch / XHR / `wrapFn` / `uiEffect` 事实；
-无构建插件、无 sourcemap、无 CDN、无遥测、无第三方 runtime 依赖。
+TraceBoard 运行时 SDK（S3 facts + S4 预览注入 IIFE + S5 前端浅层 `source`）。只采集 click / fetch / XHR / `wrapFn` / `uiEffect` 事实；
+无 CDN、无遥测、无第三方 runtime 依赖；**无 `.map` 解码、无局部变量/L2**。
+
+## S5：构建 manifest 与 `source`（`SOURCE_MAPPED`）
+
+- 启动时同步读 `window.__TRACEBOARD_MANIFEST__`（由 `frontend/build-plugin` 的 `transformIndexHtml` 内联）。
+- 缺失时仅 **ESM** 构建发起**一次** `fetch("/traceboard-manifest.json")` 兜底（相对路径、fail-open、无重试、无缓存、不产生事件）；
+  **IIFE/preview 构建不兜底**（预览注入页没有 manifest，前端事件如常显示 `未采集`）。
+- `wrapFn(name)` 的 `js_method` 事件与带 `data-tb-fn="<name>"` 的 click 根命中 manifest 时写 `source={file,line}` 并追加 flag `SOURCE_MAPPED`；
+  `fetch`/`render`/未命中/坏 manifest **不附加**（事件字节与 S3 完全一致）。
+- 只到**函数/文件/1-based 原始行号**：不是 `.map` 解码，不采集局部变量、行级变量或 `values[]`（S6）。
 
 ## 产物（`npm ci && npm run build`）
 
@@ -50,6 +59,7 @@ launcher 只注入**同源外部脚本**，不改写页面 CSP、不加 nonce、
 npm ci && npm run build && npm test
 ```
 
-- `test/sdk.test.js`：既有 8 项 ESM/行为测试（S3 语义不变）。
-- `test/iife.test.js`：IIFE 产物存在/全局名/无 sourcemap/无外部 URL、vm 中自动 init 恰一次、
-  二次加载被 guard 阻止、无 config 不 init、坏 config fail-open、`version` 与 package.json 一致。
+- `test/sdk.test.js`：8 项 ESM/行为测试（S3 语义不变）。
+- `test/manifest.test.js`：3 项 S5 manifest 测试（内联同步命中、ESM 一次性 JSON 兜底、坏 manifest fail-open 且事件字节不变）。
+- `test/iife.test.js`：6 项 IIFE 测试（产物/全局名/无 sourcemap/无外部 URL、自动 init 恰一次、二次加载 guard、
+  无 config 不 init、坏 config fail-open、内联 manifest 命中且**不**发起 JSON 兜底、`version` 与 package.json 一致）。

@@ -789,7 +789,7 @@ function notCollectedReason(status: string): string {
     return "事件丢失（未到达 collector；检查 SDK/agent 与网络）";
   }
   if (status === "NOT_COLLECTED_NO_DEBUG_INFO") {
-    return "缺少调试信息（需构建插件/sourcemap，S5 待做）";
+    return "缺少调试信息（后端 NOT_COLLECTED_NO_DEBUG_INFO；S5 manifest 只覆盖前端函数/文件/行号，局部变量属 L2/S6）";
   }
   return "该事实未采集（原因未提供；检查采集开关与连接）";
 }
@@ -894,7 +894,7 @@ const STATUS_LEGEND = [
     status: "NOT_COLLECTED_*",
     tone: "notcollected",
     hint: "灰虚线 + reason（为什么没采到/怎么开启）",
-    reason: "如 NOT_COLLECTED_NO_DEBUG_INFO → 需构建插件/sourcemap（S5 待做）",
+    reason: "如 NOT_COLLECTED_NO_DEBUG_INFO → 后端缺少调试信息（S5 manifest 只覆盖前端函数/文件/行号，局部变量属 L2/S6）",
   },
   { status: "TRUNCATED", tone: "truncated", hint: "条纹 · 已截断/已折叠", reason: null },
   { status: "REDACTED", tone: "redacted", hint: "锁形 · 值级已脱敏", reason: null },
@@ -1005,7 +1005,7 @@ const linkedFetchIds = computed<Set<string>>(() => {
 function nodeNotes(node: GraphNode): string[] {
   const notes: string[] = [];
   if (node.kind === "js_method") {
-    notes.push("JS 内部变量本次未采集（无构建插件/sourcemap）");
+    notes.push("JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）");
   }
   if (node.kind === "fetch") {
     if (!(selectedRequest.value?.hasBackend ?? false)) {
@@ -1035,7 +1035,7 @@ function rawTimeTitle(node: GraphNode): string {
         <p class="s3-panel__note">
           点击/控件/请求/DOM 事实来自 collector 的 requests / graph 只读查询；状态语义区分
           OK / RETURNED_FALSE / THREW / NOT_COLLECTED_* / TRUNCATED / REDACTED。
-          无构建插件/sourcemap、无局部变量、非实时（无 SSE/WS）。
+          S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）· 非实时（无 SSE/WS）。
         </p>
       </div>
       <span class="s3-panel__badge">S3 · GET requests / graph / replay</span>
@@ -1462,7 +1462,7 @@ function rawTimeTitle(node: GraphNode): string {
       本板只读：GET requests / graph / replay。回放不会重发请求、不写数据库、不调用 demo、不执行程序；
       时间轴按所选 trace 的 min(startNs) 归一化显示，API 参数仍是原始 epoch-ns。
       S4 节点详情 / ×N 分组 / 缺口清单均为已采集 graph 的只读前端派生（运行时 ×3 属 S6）；
-      无 S5/S6（无 sourcemap/局部变量/行号映射/图库/SSE/WS）。S0/S1/S2 面板保留在下方折叠区。
+      S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）、无异步/×3/图库/SSE/WS。S0/S1/S2 面板保留在下方折叠区。
     </p>
   </section>
 </template>
