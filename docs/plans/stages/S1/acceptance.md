@@ -67,7 +67,8 @@ G2 本轮一次全链路执行（`npm ci` + `node verify.mjs`，含四次构建�
 > “expected S1 product/test paths” 报 `?? docs/plans/archive/stage-S1-2026-11-23/`——tester 的允许清单
 > （`tools/verify/verify.mjs` S1-I `allowed` 数组）只含 `docs/plans/stages/S1/`，不含 acceptance 按分发书 §5.6
 > 必须产出的 `docs/plans/archive/**`；属**验收产物与 tester 路径清单的预期差异**，不是产品/契约失败。
-> 该目录与 S1 文档已随基线提交入库，提交后工作区干净时复跑为 **35 PASS / 0 FAIL**（记录见 §13）。
+> 该目录与 S1 文档已随基线提交入库；**提交后工作区干净（`git status --short` 为空）时复跑为 35 PASS / 0 FAIL、`S1 TEST: PASS`、exit 0**
+> （`S1-I`：`git status only shows expected S1 product/test paths :: 0 expected entries`），证明上述失败仅由“未跟踪的验收归档路径”引起。
 > G2 未改 `tools/verify`（禁止项）。
 
 ### 2.3 各检查组（G2 实际输出摘要）
@@ -248,7 +249,7 @@ verify 结束：6 端口无 LISTENING；无 java.exe；git 索引未动（S1-I�
 | 项 | 值 |
 |---|---|
 | 基线 commit | `feat(S1): walking skeleton — ingest, query, one-method agent span, workbench roundtrip` |
-| 基线 commit 哈希 | `（首轮提交后由 G2 追加）` |
+| 基线 commit 哈希 | `fb10e822be4c671381ec610d79ad7050c2bb4f84`（`s1-baseline` 指向同一 commit） |
 | tag | `s1-baseline`（lightweight，指向基线 commit） |
 | 后续 commit | `docs(S1): record baseline commit`（仅 `acceptance.md`、`progress.md`；不改历史、不 amend） |
 | push / config | 未 push（无 remote）；未 force/rebase；git 身份仅本次 `-c user.name/user.email`，未改 config |

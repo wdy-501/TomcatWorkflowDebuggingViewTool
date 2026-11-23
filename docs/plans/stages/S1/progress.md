@@ -58,5 +58,5 @@ NEXT: S2（需新的分发书授权；本进度包与 tag 不构成 S2 开工许
 
 ## 基线记录
 
-- 基线 commit：`（首轮提交后由 G2 追加）`（`feat(S1): walking skeleton — ingest, query, one-method agent span, workbench roundtrip`），tag `s1-baseline` 指向同一 commit。
+- 基线 commit：`fb10e822be4c671381ec610d79ad7050c2bb4f84`（`feat(S1): walking skeleton — ingest, query, one-method agent span, workbench roundtrip`），tag `s1-baseline` 指向同一 commit；提交后干净树复跑 verify = 35/35 PASS、exit 0。
 - 归档：`docs/plans/archive/stage-S1-2026-11-23/`（MANIFEST.md + SUMMARY.md；归档为提交前快照，不含上述哈希行）。
