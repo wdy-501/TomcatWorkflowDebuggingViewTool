@@ -37,7 +37,7 @@ NEXT: S6（L2 行级局部变量、字段写入、异步上下文、运行时 ×
 
 ## 基线记录
 
-- 提交：`feat(S5): L1 values and frontend shallow source — 100→0, redaction/truncation, manifest, perf baseline`
+- 提交：`7b09c7b` `feat(S5): L1 values and frontend shallow source — 100→0, redaction/truncation, manifest, perf baseline`
 - tag：`s5-baseline`
 - 备份：`docs/plans/archive/stage-S5-2026-11-23/`（MANIFEST + SUMMARY）
 - 完整哈希：见 `docs(S5): record baseline commit` 与 `git log`。

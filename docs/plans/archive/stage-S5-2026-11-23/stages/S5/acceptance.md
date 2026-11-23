@@ -47,6 +47,6 @@ S5 在 S0–S4 之上交付了 **L1 参数/字段/返回**与**前端浅层 sour
 
 ## 5. 基线记录
 
-- 提交：`feat(S5): L1 values and frontend shallow source — 100→0, redaction/truncation, manifest, perf baseline`（哈希见 `progress.md`/git log）。
+- 提交：`7b09c7b` `feat(S5): L1 values and frontend shallow source — 100→0, redaction/truncation, manifest, perf baseline`。
 - tag：`s5-baseline`｜阶段备份：`docs/plans/archive/stage-S5-2026-11-23/`（MANIFEST + SUMMARY）。
 - 下一步：S6（L2/异步/×3、预算；需新分发书）。
