@@ -1,6 +1,6 @@
 # 传输契约 v1（transport.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24；S4 增补：2026-11-24；S4-AMD-01：2026-11-26，日期笔误按 2026-11-23 生效）
 > 变更记录：**2026-11-23 S1 增补**——通路 A（ingest）与通路 C 的**只读会话查询**转为已实现；
 >   实时推送（通路 B：SSE/WebSocket）与回放仍为预留，S1 代码中不存在。S0 的“501 骨架”行为按原样保留为 `S0` 历史注记。
 >   **2026-11-23 G1 第 1 轮**：§4.5 增第 8 条，记录 S1 agent 事件的“游离后端根”语义（`event-model.v1.md` §5 第 2 条例外；仅文档，schema/fixture 未变）。
@@ -9,6 +9,12 @@
 >   **2026-11-24 S3 增补**：通路 C 的 **`GET .../replay` 转为已实现（只读窗口，0 写）**（§6.4，形状见 `api.v1.md` §9.1）；
 >   demo 前端新增 runtime SDK 与 `/ingest` 代理（只上报事件，不新增 collector 写通路）；通路 B（SSE/WebSocket）**仍不实现**，
 >   `capabilities.realtime=false`、`replay=true`。ingest 线上格式零改动；无 CORS、无持久化、无新端口。
+>   **2026-11-24 S4 增补（最小）**：新增**通路 D：agent 诊断握手**（`POST /ingest/v1/agent-hello`，`application/json`，**非 NDJSON**、非事件）（§6.5）；
+>   新增本地预览代理 `127.0.0.1:8602`（只在本机、只做 `/ingest/v1/events` 转发与外部脚本注入，**不改** collector 的 CORS/端口/线上格式）。
+>   通路 A（ingest）与通路 B（实时）**零改动**；事件 schema 与 S0–S3 fixture 字节不变。
+>   **2026-11-26 S4-AMD-01 增补（binding，日期笔误按 2026-11-23 生效）**：预览代理的响应体改写/头规则按 §6.6 重写
+>   （不再“所有头无条件透传”：注入时重算 `Content-Length`、移除压缩/校验头、不转发 hop-by-hop；HEAD/204/304 与 3xx/4xx/5xx 不注入）；
+>   `not-injected` 新码与优先级见 §6.6；§6.3 仅加 14 字段指针（graph 节点 S4 加性 `reason/source/confidence`，线上格式其余不变）。
 > 范围：collector 与 agent/SDK/工作台之间的数据通路。**S0 只实现骨架**：ingest 返回 501，实时与回放全部预留。
 > 关联契约：`event-model.v1.md`（事件语义）、`api.v1.md`（HTTP 端点清单、S1 实现矩阵 §2.1 与 S1 定义 §7）。
 
@@ -21,6 +27,7 @@
 | workbench（Vite dev） | `http://localhost:5173` | 仅外壳 + fixture 摘要 | 增加 S1 假点击面板；经 `/ingest`、`/api` 代理访问 collector |
 | demo 前端（Vite dev） | `http://localhost:5174` | 单页；`/api` 代理到 8080 | 不变 |
 | workbench preview / demo preview | 默认 4173 / 4174 | 仅本地验证，不承诺 | 不变 |
+| **本地预览代理（launcher `preview`）** | `http://127.0.0.1:8602` | — | **S4 新增**：仅绑 `127.0.0.1`、无 TLS；仅 `/ingest/v1/events` 反代到 collector（其余 `/ingest/*` 返回 404），`/traceboard/config.js` 与 `/traceboard/sdk.js` 由代理本地提供，其余路径透传到 `--target`；仅 200 `text/html` 注入外部脚本（§6.6） |
 
 - collector 只绑定本机回环地址（`127.0.0.1`），不对局域网暴露；S0/S1 不做鉴权（本地单用户），token 预留。
 - demo 前端固定 5174 的原因：workbench 已占 5173（分发书 §8 只固定 8601/8080/5173），两个 Vite 工程必须错开端口。
@@ -41,6 +48,7 @@
 | A. 批量 ingest | agent/SDK → collector | `POST /ingest/v1/events`，NDJSON | **S1 已实现**（S0 曾返回 501） |
 | B. 实时推送 | collector → workbench | SSE 或 WebSocket（二选一或并存） | **预留，S1 未实现**（代码中不存在） |
 | C. 只读查询 / 回放 | workbench → collector | HTTP GET | **S1：只读会话/事件查询已实现**；**S2：新增 requests/graph 只读派生查询**；**S3：replay 只读窗口已实现（0 写）** |
+| D. 诊断握手 | agent → collector | `POST /ingest/v1/agent-hello`，**JSON（非 NDJSON）** | **S4 已实现**（控制通路，不写事件，§6.5） |
 
 - 唯一事实源是 append-only 事件流；B/C 都是派生读取，不得改写事件。
 - S0 的 demo 应用、demo 前端、workbench 与 collector **彼此不通信**（分发书 §2.2）；S1 只放开
@@ -195,10 +203,12 @@ GET /api/v1/sessions/{sessionId}/requests
 → 200 {"sessionId":"s_...","requests":[{"traceId","rootSpanId","rootKind","nodeKey","status","confidence","spanCount","startedAtNs","durNs","hasError"}]}
 
 GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex>
-→ 200 {"sessionId","traceId","rootEventId","confidence","nodes":[11 个固定字段],"edges":[{"from","to","count":1}]}
+→ 200 {"sessionId","traceId","rootEventId","confidence","nodes":[S2–S3 11 个固定字段；S4 起 14 个（+reason/source/confidence）],"edges":[{"from","to","count":1}]}
 ```
 
 - 形状、字段语义、排序、聚合优先级与 `400/404/405` 的权威定义在 `api.v1.md` §8.1/§8.2；本节只记录传输层事实：
+  - **S4 起 graph 节点加性 14 字段**（`reason/source/confidence` 来自事件原值，只读；见 `api.v1.md` §10.8）：不是 schema 变更，
+    `events`/`seq`/`requests`/`replay`、`edges`、排序与节点数全部不变；S2–S3 的 11 字段形状保留为历史。
   - **读时派生**：每次请求从内存事件快照现算，无缓存、无持久化、无后台任务；两次相同 GET 结果一致，事件数/`seq`/存储不变。
   - `graph` 的 `traceId` 是**必填**查询参数（`^[0-9a-f]{32}$`），缺失/非法 → `400`；未知 session 或 session 内无该 trace → `404`。
   - 只有 `GET`；写动词 → `405`；无 CORS、无分页、无 `429`；错误用统一信封（§4.3）。
@@ -230,6 +240,54 @@ GET /api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>
 - **不是 S4/S5**：无像素回放、无截图/录像、无详情抽屉/×N、无 sourcemap/局部变量。
 - meta：`capabilities.replay=true`、`realtime=false`、`ingestEvents=true`（键仍 5 个）；`stream`/`ws`/`links` 仍 404。
 
+### 6.5 S4 诊断握手（通路 D：JSON，不是 NDJSON；不是事件）
+
+```http
+POST /ingest/v1/agent-hello HTTP/1.1
+Host: 127.0.0.1:8601
+Content-Type: application/json; charset=utf-8
+
+{"schema":"traceboard.agent.v1","sessionId":"s_s4demo","version":"0.1.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000}
+→ 200 {"schema":"traceboard.agent.v1","sessionId":"s_s4demo","accepted":true}
+
+GET /api/v1/sessions/s_s4demo/agent
+→ 200 {"sessionId":"s_s4demo","connected":true,"version":"0.1.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000,"lastSeenMs":1763900000456}
+```
+
+- **格式**：单个 JSON 对象（**不是** NDJSON、不能用 JSON 数组包裹）；`Content-Type` 必须 `application/json`（`415`），body > **4096 字节** → `413`，
+  非法 JSON/字段不合法 → `400` 错误信封（§4.3），非 `POST` → `405`。权威字段表与判定顺序见 `api.v1.md` §10.2/§10.3。
+- **控制通路，不是事件**：握手**不进入**通路 A 的存储/幂等/`seq`；不创建会话、不改 `sessions`/`events`/`requests`/`graph`/`replay` 的输出；
+  只有握手没有事件的 session 不出现在 `GET /api/v1/sessions`（`GET .../agent` 独立返回连接事实）。
+- **last-wins + 仅内存**：每 session 只保留最近一次成功握手，无 TTL/持久化/历史；collector 重启即丢；agent 仅在 premain 发送、不自动重发。
+- **fail-open**：agent 侧守护线程异步发送（≤3 次、1s 超时、退避），失败只计数（`hello_failed=n`），不阻塞应用、不重试风暴、不影响通路 A。
+- **无 CORS/鉴权/SSE/WS**：与 §1/§7 的本地边界一致；预览代理与握手都不改变 collector 的响应头策略。
+
+### 6.6 S4 本地预览代理（仅本机；不改 collector）
+
+- `preview` 只绑 `127.0.0.1:8602`（默认，可 `--port`），**无 TLS**；`--target` 必须是 `http://`（否则 `TARGET_TLS_UNSUPPORTED`）；
+  目标应是**静态 HTML origin**（示例 `127.0.0.1:18080` 的 Node stub；demo 后端 8080 无 HTML 页、Vite 5174 已内置 SDK，均不得作目标）。
+- 回环边界：`--target` 默认只接受回环主机（`127.0.0.1`/`localhost`/`::1`），非回环 → exit 2 + `NON_LOOPBACK_TARGET`；
+  唯一例外是显式 `--allow-non-loopback`（先打印 `WARN non-loopback target=<host>` 再继续，仍无 TLS/外部网络）。
+- 路由：`/traceboard/config.js`、`/traceboard/sdk.js` 由 launcher 本地提供（`--sdk` → 系统属性 → 环境变量 → 仓库根 `frontend/sdk/dist/traceboard-sdk.iife.js`；
+  禁止“launcher jar 上两级”启发式）；`/ingest/v1/events` 反代到 `<base>/ingest/v1/events`
+  （`--collector <base>` 是 collector origin；方法/体/`Content-Type` 原样；collector 不可达返回 `502` 并说明，**不伪造 202**）；其他 `/ingest/*` → 404，不做开放写代理。
+- **请求侧**：转发到 `--target` 的请求**移除 `Accept-Encoding`**（不添加 `identity`），不主动协商压缩。
+- **注入条件**：仅上游 `200` + `Content-Type: text/html`（参数允许）+ charset 缺失或 `utf-8`；在**最后一个**大小写不敏感 `</body>` 前插入
+  且仅插入 `<script src="/traceboard/config.js"></script><script src="/traceboard/sdk.js"></script>`（两个**外部**脚本；无内联脚本、
+  不改写 CSP、不改写业务 HTML/JS、不改写绝对 URL/`Location`）。
+- **注入成功时的响应**：保留状态码与端到端头；按改写后的 **UTF-8 字节重算 `Content-Length`**；移除 `Content-Encoding`、`Transfer-Encoding`、
+  `ETag`、`Last-Modified`（若有 `Content-MD5` 也移除）；不转发 hop-by-hop 头（`Connection`/`Keep-Alive`/`TE`/`Trailer`/`Upgrade`/`Proxy-*`）；
+  设置 `X-TraceBoard-Preview: injected`。
+- **未注入时**：状态/头/体**逐字节透传**，保留上游 `Content-Length`/`Content-Encoding`；不得先解码再声称透传。
+- **无 body / 非 2xx**：`HEAD` 不注入、不产生 body，返回上游头，标记 `not-injected:head`；`204`/`304` 不注入、无 body，标记
+  `not-injected:no_body`；其他 `3xx/4xx/5xx` 不注入（错误页也不注入），原样返回，标记 `not-injected:status`。
+- `not-injected` 码与判定优先级（先命中先返回）：① `HEAD` → `head`；② `204/304` → `no_body`；③ 非 `200` → `status`；
+  ④ `Content-Encoding` 存在且非 identity → `encoding`；⑤ 非 `text/html` → `not_html`；⑥ charset 非 utf-8 → `encoding`；
+  ⑦ `Content-Length`/实际体 > 2MB → `too_large`；⑧ 无 `</body>` 或 `Content-Length: 0` → `no_body`；⑨ 读取失败 → `read_error`。
+  `not-injected:not_html` 取代旧 `content_type`；`encoding`/`too_large`/`read_error` 保留。
+- `X-TraceBoard-Preview` 只出现在经 target 反代的响应上；`/traceboard/*` 与 `/ingest/v1/events` 不添加该头。
+- 这是**传输通道差异**（本地反代 vs 未来云端预览），不改通路 A 的线上格式；collector 不因预览新增 CORS 或端口。
+
 ## 7. 安全与合规
 
 - 只监听 `127.0.0.1`；无外网访问；无遥测；不上传工作区外数据。
@@ -239,12 +297,17 @@ GET /api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>
 - **S3 SDK**：只采集控件身份、URL pathname（去 query/hash）、HTTP 状态码与显式 `uiEffect` 文本；
   不采集请求/响应体、表单值、cookie、查询串、异常 message/栈；`traceparent`/`X-TraceBoard-Click` 只对同源且非 ingest 请求添加，
   不写日志原文；ingest 上报自身不携带这两个头。SDK 全部 fail-open，页面行为不因采集失败而改变。
+- **S4 握手/预览**：握手 body 只含 `schema/sessionId/version/pid/startedAtMs`，**无 token/secret**、无路径/用户名/主机名；
+  collector 错误响应不回显 body；`GET .../agent` 只回环可读。预览代理只绑 `127.0.0.1:8602`、无 TLS、无外部网络，
+  `--target`/`--app-url`/`--preview-url`/`--health` 默认只接受回环主机（非回环 → exit 2 `NON_LOOPBACK_TARGET`；
+  仅 preview `--target` 的 `--allow-non-loopback` 例外，且先打印 WARN），注入内容仅两个同源外部 `<script src>`
+  （无内联脚本、无 CSP 改写、不读页面数据）；launcher 日志可能含被调试应用 stdout/stderr，需自行确认后再分享（指南如实说明）。
 
 ## 8. 版本化
 
 - 路径带主版本（`/ingest/v1/`、`/api/v1/`）；事件带 `schema=traceboard.event.v1`。
 - 兼容性原则：新增可选字段需契约变更；语义变更必须升主版本并保留旧路径一个检查点。
-- S0/S1/S2/S3 的所有“预留”端点不得以“已实现”名义写进 README/报告；状态以 `api.v1.md` §2.3（S3 当前）、§2.2（S2 历史）、
+- S0/S1/S2/S3 的所有“预留”端点不得以“已实现”名义写进 README/报告；状态以 `api.v1.md` §2.4（S4 当前）、§2.3（S3 历史）、§2.2（S2 历史）、
   §2.1（S1 历史）与 §2（S0 历史）为准。
 - “会话查询 / 请求摘要 / 派生图”**≠ 回放**：README/报告/UI 不得把 `GET /api/v1/sessions*` 描述为回放。
   **S3 起** `GET .../replay` 才是回放，但它仍是**只读窗口**，不是实时、不是重跑、不是写；`capabilities.realtime` 必须保持 `false`。

@@ -1,0 +1,440 @@
+{
+  "schema": "traceboard.expected-facts.v1",
+  "caseId": "s4-details",
+  "stage": "S4",
+  "pathSyntax": "dot-separated segments; a numeric segment indexes an array; the leaf value is compared with deep JSON equality",
+  "note": "S4 node-details/×N/gap fixture ONLY. This file is deterministic UI/test data, NOT runtime evidence. Runtime ×3 is S6: S4 workbench only aggregates ALREADY-COLLECTED spans by nodeKey in the browser. Never cite this directory as proof that the runtime supports ×3, that an app was launched, or that a preview was injected.",
+  "sources": {
+    "chain": {
+      "file": "fixtures/s4-details/events.ndjson",
+      "format": "ndjson",
+      "lineCount": 9,
+      "eventCount": 9
+    }
+  },
+  "eventCount": 9,
+  "globalAssertions": {
+    "chain": {
+      "sessionId": "s_s4detail",
+      "eventCount": 9,
+      "traceId": "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90",
+      "singleRoot": true,
+      "rootSpanId": "c0a1b2c3d4e5f601",
+      "rootKind": "controller",
+      "rootParentSpanId": null,
+      "rootConfidence": "LOST",
+      "rootEventId": "click_lost_c0a1b2c3d4e5f601",
+      "rootEventIdIsClickLost": true,
+      "rootHasLostBackendFlag": true,
+      "lostBackendFlagOnlyOnRoot": true,
+      "confidenceAllLost": true,
+      "noFrontendKind": true,
+      "noThrewStatus": true,
+      "noValues": true,
+      "statuses": [
+        "OK",
+        "OK",
+        "OK",
+        "OK",
+        "OK",
+        "OK",
+        "OK",
+        "RETURNED_FALSE",
+        "NOT_COLLECTED_POLICY"
+      ],
+      "notCollectedCount": 1,
+      "notCollectedSpanId": "2708070605040308",
+      "notCollectedStatus": "NOT_COLLECTED_POLICY",
+      "notCollectedReason": "policy:third_party_package",
+      "sqlEventCount": 2,
+      "sqlRowsAffectedAllZero": true,
+      "sqlTransaction": "UNKNOWN",
+      "parentBySpanId": {
+        "c0a1b2c3d4e5f601": null,
+        "a1b2c3d4e5f60101": "c0a1b2c3d4e5f601",
+        "b2c3d4e5f6010102": "a1b2c3d4e5f60101",
+        "c3d4e5f601020103": "b2c3d4e5f6010102",
+        "d4e5f60103020104": "c0a1b2c3d4e5f601",
+        "e5f6010403020105": "d4e5f60103020104",
+        "f601050403020106": "e5f6010403020105",
+        "1607060504030207": "c0a1b2c3d4e5f601",
+        "2708070605040308": "1607060504030207"
+      },
+      "kindOrder": [
+        "controller",
+        "service",
+        "mapper",
+        "sql",
+        "service",
+        "mapper",
+        "sql",
+        "service",
+        "mapper"
+      ],
+      "startNsNonDecreasing": true,
+      "intervalContainment": true,
+      "intervalNested": true,
+      "rootIntervalContainsAll": true,
+      "threadAllEqual": {
+        "id": 44,
+        "name": "http-nio-8080-exec-1"
+      },
+      "childFlags": [
+        "S2_ZERO_ROW_CHAIN"
+      ]
+    }
+  },
+  "groups": [
+    {
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.OrderService#cancel",
+      "count": 3,
+      "groupBadge": "×3",
+      "spanIds": [
+        "a1b2c3d4e5f60101",
+        "d4e5f60103020104",
+        "1607060504030207"
+      ],
+      "order": "startNs ascending; ties by spanId lexicographic",
+      "invocations": [
+        {
+          "index": 1,
+          "spanId": "a1b2c3d4e5f60101",
+          "startNs": 5005000000,
+          "status": "OK",
+          "return": true,
+          "rows": [
+            0
+          ],
+          "sqlSpanIds": [
+            "c3d4e5f601020103"
+          ]
+        },
+        {
+          "index": 2,
+          "spanId": "d4e5f60103020104",
+          "startNs": 5040000000,
+          "status": "OK",
+          "return": true,
+          "rows": [
+            0
+          ],
+          "sqlSpanIds": [
+            "f601050403020106"
+          ]
+        },
+        {
+          "index": 3,
+          "spanId": "1607060504030207",
+          "startNs": 5080000000,
+          "status": "RETURNED_FALSE",
+          "return": false,
+          "rows": null,
+          "rowsUiText": "未采集",
+          "rowsNote": "第 3 次调用没有 sql 子节点（mapper 按策略未采集）；rows 必须显示“未采集”，绝不为 0",
+          "sqlSpanIds": []
+        }
+      ]
+    },
+    {
+      "kind": "mapper",
+      "nodeKey": "com.example.shop.mapper.OrderMapper#cancelById",
+      "count": 3,
+      "groupBadge": "×3",
+      "spanIds": [
+        "b2c3d4e5f6010102",
+        "e5f6010403020105",
+        "2708070605040308"
+      ],
+      "invocations": [
+        {
+          "index": 1,
+          "spanId": "b2c3d4e5f6010102",
+          "startNs": 5006000000,
+          "status": "OK",
+          "return": 0,
+          "sideEffectsPresent": false
+        },
+        {
+          "index": 2,
+          "spanId": "e5f6010403020105",
+          "startNs": 5041000000,
+          "status": "OK",
+          "return": 0,
+          "sideEffectsPresent": false
+        },
+        {
+          "index": 3,
+          "spanId": "2708070605040308",
+          "startNs": 5081000000,
+          "status": "NOT_COLLECTED_POLICY",
+          "reason": "policy:third_party_package",
+          "return": null,
+          "sideEffectsPresent": false
+        }
+      ]
+    },
+    {
+      "kind": "sql",
+      "nodeKey": "OrderMapper.cancelById",
+      "count": 2,
+      "groupBadge": "×2",
+      "spanIds": [
+        "c3d4e5f601020103",
+        "f601050403020106"
+      ],
+      "invocations": [
+        {
+          "index": 1,
+          "spanId": "c3d4e5f601020103",
+          "startNs": 5007000000,
+          "status": "OK",
+          "rows": 0,
+          "transaction": "UNKNOWN"
+        },
+        {
+          "index": 2,
+          "spanId": "f601050403020106",
+          "startNs": 5042000000,
+          "status": "OK",
+          "rows": 0,
+          "transaction": "UNKNOWN"
+        }
+      ]
+    }
+  ],
+  "gaps": {
+    "ruleSource": "S4-AMD-01 §7.2 / s4-plan §7 (workbench derives them read-only from collected events)",
+    "dedupe": "one gap per span max; priority F > N > R; N beats R inside a span; key = nodeKey + internal reason; no cross-span merge; order = span order (startNs ascending; ties by spanId)",
+    "order": "span order (startNs ascending; ties by spanId)",
+    "items": [
+      {
+        "rule": "ROWS_NOT_COLLECTED",
+        "spanId": "b2c3d4e5f6010102",
+        "kind": "mapper",
+        "nodeKey": "com.example.shop.mapper.OrderMapper#cancelById",
+        "uiText": "未采集",
+        "why": "mapper span 没有 sideEffects；rows 事实在 sql 子节点上，绝不为 0"
+      },
+      {
+        "rule": "ROWS_NOT_COLLECTED",
+        "spanId": "e5f6010403020105",
+        "kind": "mapper",
+        "nodeKey": "com.example.shop.mapper.OrderMapper#cancelById",
+        "uiText": "未采集",
+        "why": "同上（第 2 次调用）"
+      },
+      {
+        "rule": "NOT_COLLECTED_REASON",
+        "spanId": "2708070605040308",
+        "kind": "mapper",
+        "nodeKey": "com.example.shop.mapper.OrderMapper#cancelById",
+        "status": "NOT_COLLECTED_POLICY",
+        "reason": "policy:third_party_package",
+        "uiText": "未采集 · policy:third_party_package",
+        "rowsUiText": "未采集",
+        "why": "第三方 mapper 按采集策略未采集；reason 必须原样展示"
+      }
+    ],
+    "count": 3,
+    "notCovered": [
+      {
+        "rule": "FETCH_WITHOUT_BACKEND",
+        "why": "本 trace 是游离后端根（event-model §5 第 2 条例外），同一 traceId 不得含任何前端事件（ui_event/fetch/render），因此 fixture 内没有“未关联 fetch”。该缺口规则由工作台实现，并由 S4-F 的测试内联前端批次断言，不得用本 fixture 冒充。"
+      }
+    ],
+    "emptyListText": "未发现缺口（仅基于已采集数据；未采集项不会显示为成功）"
+  },
+  "apiExpectations": {
+    "requests": {
+      "sdkActive": false,
+      "row": {
+        "traceId": "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90",
+        "rootSpanId": "c0a1b2c3d4e5f601",
+        "rootKind": "controller",
+        "nodeKey": "com.example.shop.controller.OrderController#cancel",
+        "status": "NOT_COLLECTED_POLICY",
+        "confidence": "LOST",
+        "spanCount": 9,
+        "startedAtNs": 5000000000,
+        "durNs": 120000000,
+        "hasError": false,
+        "fetchCount": 0,
+        "hasFrontend": false,
+        "hasBackend": true,
+        "backendSpanCount": 9
+      },
+      "statusRule": "aggregate priority THREW > UNKNOWN > NOT_COLLECTED_POLICY > NOT_COLLECTED_LOST > NOT_COLLECTED_NO_DEBUG_INFO > TRUNCATED > RETURNED_FALSE > OK; one NOT_COLLECTED_POLICY wins over RETURNED_FALSE",
+      "confidenceRule": "root is an isolated backend root (controller, parentSpanId=null) -> LOST"
+    },
+    "graph": {
+      "sessionId": "s_s4detail",
+      "traceId": "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90",
+      "rootEventId": "click_lost_c0a1b2c3d4e5f601",
+      "confidence": "LOST",
+      "nodeOrder": [
+        "c0a1b2c3d4e5f601",
+        "a1b2c3d4e5f60101",
+        "b2c3d4e5f6010102",
+        "c3d4e5f601020103",
+        "d4e5f60103020104",
+        "e5f6010403020105",
+        "f601050403020106",
+        "1607060504030207",
+        "2708070605040308"
+      ],
+      "edges": [
+        {
+          "from": "c0a1b2c3d4e5f601",
+          "to": "a1b2c3d4e5f60101",
+          "count": 1
+        },
+        {
+          "from": "c0a1b2c3d4e5f601",
+          "to": "d4e5f60103020104",
+          "count": 1
+        },
+        {
+          "from": "c0a1b2c3d4e5f601",
+          "to": "1607060504030207",
+          "count": 1
+        },
+        {
+          "from": "a1b2c3d4e5f60101",
+          "to": "b2c3d4e5f6010102",
+          "count": 1
+        },
+        {
+          "from": "b2c3d4e5f6010102",
+          "to": "c3d4e5f601020103",
+          "count": 1
+        },
+        {
+          "from": "d4e5f60103020104",
+          "to": "e5f6010403020105",
+          "count": 1
+        },
+        {
+          "from": "e5f6010403020105",
+          "to": "f601050403020106",
+          "count": 1
+        },
+        {
+          "from": "1607060504030207",
+          "to": "2708070605040308",
+          "count": 1
+        }
+      ],
+      "nodeCount": 9,
+      "edgeCount": 8,
+      "nodeFields": [
+        "spanId",
+        "parentSpanId",
+        "kind",
+        "nodeKey",
+        "status",
+        "return",
+        "sideEffects",
+        "startNs",
+        "durNs",
+        "thread",
+        "flags",
+        "reason",
+        "source",
+        "confidence"
+      ],
+      "notCollectedNode": {
+        "spanId": "2708070605040308",
+        "reason": "policy:third_party_package",
+        "source": {
+          "file": "OrderMapper.java",
+          "line": 15
+        },
+        "sourceUiText": "OrderMapper.java:15",
+        "confidence": "LOST",
+        "flags": [
+          "S2_ZERO_ROW_CHAIN"
+        ],
+        "sideEffects": []
+      },
+      "sourceRule": "source comes from the event; only incomplete file/line renders 未采集 (this fixture has complete source for all 9 events)",
+      "additiveRule": "S4 adds reason/source/confidence per node (14 fields total) from the same event; no aggregation, no schema change, events/seq untouched",
+      "noAggregation": "graph keeps one node per span (3 service nodes, 3 mapper nodes, 2 sql nodes); ×N is a client-side display grouping only"
+    },
+    "replay": {
+      "defaultFromNs": 0,
+      "defaultToNs": 5120000000,
+      "count": 9
+    }
+  },
+  "uiExpectations": {
+    "groupBadges": [
+      {
+        "nodeKey": "com.example.shop.service.OrderService#cancel",
+        "badge": "×3"
+      },
+      {
+        "nodeKey": "com.example.shop.mapper.OrderMapper#cancelById",
+        "badge": "×3"
+      }
+    ],
+    "groupBadgeContainer": "#s4-group-badge is a container; one child per group with data-node-key (two ×3 badges, no duplicate ids)",
+    "runtimeX3Note": "×N 为已采集 span 的前端聚合；运行时 ×3 属 S6",
+    "runtimeX3NotePlacement": "static text under #s4-invocations or #s4-gaps",
+    "selectionTitleExample": "service · com.example.shop.service.OrderService#cancel · 第 1/3 次",
+    "detailFields": [
+      "kind",
+      "nodeKey",
+      "status",
+      "reason",
+      "return",
+      "sideEffects",
+      "uiEffects",
+      "flags",
+      "thread",
+      "source",
+      "startNs",
+      "durNs",
+      "confidence"
+    ],
+    "tabs": [
+      "SQL/数据影响",
+      "UI 效果"
+    ],
+    "invocationSelectorCount": 3,
+    "invocationOrder": "startNs ascending; ties by spanId lexicographic",
+    "rowsNeverZeroWhenMissing": true,
+    "confidenceRenderedAsLost": true,
+    "newSelectors": [
+      "#s4-detail",
+      "#s4-detail-title",
+      "#s4-detail-status",
+      "#s4-detail-tabs",
+      "#s4-sideeffects",
+      "#s4-ui-effects",
+      "#s4-invocations",
+      "#s4-invocation-select",
+      "#s4-gaps",
+      "#s4-group-badge",
+      "#s4-detail-close"
+    ],
+    "retainedPanels": [
+      "#s3-panel",
+      "#s2-panel",
+      "#s1-panel",
+      "#fixture-panel"
+    ],
+    "distStrings": [
+      "后端未采集/未关联",
+      "未采集",
+      "未采集（无 reason）",
+      "未发现缺口（仅基于已采集数据；未采集项不会显示为成功）"
+    ],
+    "runtimeX3IsS6": true,
+    "noS5S6Ui": [
+      "无 sourcemap/行号/局部变量/values/字段 diff",
+      "无图库/SSE/WS/手工关联/时间窗 INFERRED"
+    ]
+  },
+  "runtimeNote": "运行时 ×3 是 S6；本目录是 UI/测试数据，不是运行时事实。S4 只做“对已采集 span 按 nodeKey 的前端聚合 + 逐次列表”，不产生新的采集能力。"
+}

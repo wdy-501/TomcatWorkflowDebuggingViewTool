@@ -70,6 +70,15 @@ public final class SpanEmitter {
      * interval containment hold. No NTP/offset correction; single machine only.</p>
      */
     static long epochNanos() {
+        return epochNanosFrom(System.nanoTime());
+    }
+
+    /**
+     * Converts an advice-captured {@link System#nanoTime()} reading to the shared epoch-ns clock.
+     * Span start and duration must use the same reading, otherwise cold-start delays inside
+     * {@code SpanContext.enter} can make a child appear to end after its parent.
+     */
+    static long epochNanosFrom(long nanoTime) {
         long baseMillis = clockBaseMillis;
         long baseNanos = clockBaseNanos;
         if (baseMillis == 0L || baseNanos == 0L) {
@@ -82,7 +91,7 @@ public final class SpanEmitter {
                 baseNanos = clockBaseNanos;
             }
         }
-        return baseMillis * 1_000_000L + (System.nanoTime() - baseNanos);
+        return baseMillis * 1_000_000L + (nanoTime - baseNanos);
     }
 
     static String fixedTraceId() {

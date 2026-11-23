@@ -23,6 +23,10 @@ import net.bytebuddy.utility.JavaModule;
  *
  * <p>Nothing else is instrumented. The agent is fail-open: every {@code Throwable} is swallowed and
  * the host application is never blocked or broken.</p>
+ *
+ * <p>S4 adds one diagnostic handshake (not an event, no extra instrumentation point): after the
+ * premain configuration completes, a daemon thread posts {@code /v1/agent-hello} (see
+ * {@link AgentHello}); it never blocks startup.</p>
  */
 public final class TraceAgent {
 
@@ -47,6 +51,8 @@ public final class TraceAgent {
             }
             SpanEmitter.init(config);
             install(inst);
+            // S4 handshake: daemon thread, <=3 attempts, 1s timeouts, fail-open (never blocks).
+            AgentHello.start(config);
             log("premain installed: targets=" + CONTROLLER_TYPE + "#cancel(long), "
                     + SERVICE_TYPE + "#cancel(long), " + MAPPER_PROXY_TYPE + "#invoke, "
                     + STATEMENT_HANDLER_TYPE + "#update; ingestUrl=" + config.ingestUrl()

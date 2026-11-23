@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * TraceBoard S0 + S1 + S2 (re-migrated) + S3 independent verifier (tester deliverable).
+ * TraceBoard S0 + S1 + S2 + S3 + S4 independent verifier (tester deliverable).
  *
  * One-shot, re-runnable gate. All S0 checks are kept; the S1/S2 gates that the S3 contract
  * supersedes are migrated (dispatch S3 §4.8) without relaxing the remaining S0–S2 coverage:
@@ -24,9 +24,9 @@
  *               workbench timeline/replay allowed; still no S4/S5, persistence, stream, CORS,
  *               secrets/telemetry/CDN/mirrors, embedded H2 only, one schema copy.
  *
- *   S3-1   builds: frontend/sdk npm ci + build + `node --test` (8 tests), demo frontend
- *          (SDK file: dep, /ingest proxy, case B strings, traceparent in dist), workbench,
- *          root JDK21, demo JDK8, agent major 52.
+ *   S3-1   builds: frontend/sdk npm ci + build + `node --test` (13 tests: 8 ESM + 5 IIFE),
+ *          demo frontend (SDK file: dep, /ingest proxy, case B strings, traceparent in dist),
+ *          workbench, root JDK21 (incl. server/launcher in the reactor), demo JDK8, agent 52.
  *   S3-2   fixtures: case A 7 / case B 3 schema-valid, parent chains, EXACT, SQL 0, zero
  *          fetch in B, expected-facts + replayWindows deep comparison; S0–S2 fixtures and
  *          schema bytes unchanged vs the G1 freeze.
@@ -47,26 +47,64 @@
  *   S3-7   case B evidence: fixture + collector requests prove sdkActive/fetchCount 0/
  *          hasBackend false/root EXACT; workbench verdict strings; SDK tests prove the
  *          RETURNED_FALSE wrapFn shape and the zero-fetch path.
- *   S3-8   scope/security: no S4/S5 (launcher/IDEA/JAR, sourcemap/build plugin/L2, pixel
- *          replay, SSE/WS, persistence), no secrets/telemetry/CDN/mirrors/PII in the SDK,
- *          loopback only, no external $ref.
+ *   S3-8   scope/security: no S5/S6 (sourcemap/build plugin/L2, pixel replay, SSE/WS,
+ *          persistence), no secrets/telemetry/CDN/mirrors/PII in the SDK, loopback only,
+ *          no external $ref. S4 launcher/IDEA/JAR is allowed (removed from the markers).
  *   S3-9   regression: S2 no-header 4-span LOST, DB 0 rows, demo unknown 404, S1 ingest/query,
  *          S0 fixture, S2 workbench panel.
- *   S3-10  cleanup: ports free, no java leftovers, git index untouched, git status within the
- *          S3 whitelist, no product file modified by the verify run.
+ *   S3-10  cleanup: ports free (S4 adds 8602/18080), no java leftovers, git index untouched,
+ *          git status within the S4 whitelist, no product file modified by the verify run.
+ *
+ *   S4-A   launcher `idea` (JDK21 jar built by the reactor): exact absolute -javaagent, derived
+ *          <collector>/ingest/v1/events, session, 5-step checklist, exit 0, no child process;
+ *          missing arg/failed jar/agent tokens; legacy --ingest/--ingest-url -> exit 2.
+ *   S4-B   launcher `jar --detach` (JDK8 absolute --java) + `stop`: collector on 8601, session
+ *          s_s4launcher, health, agent hello connected, POST cancel -> events, PID/log files,
+ *          stop releases 8080, repeat stop NOT_RUNNING, foreign pid file PID_MISMATCH, no orphan.
+ *   S4-C   handshake: exact 200 body, order 405->415->413->400, GET agent 200 shape/404/405,
+ *          last-wins, 4096B cap, no events/seq/session/meta change, business routes still 9.
+ *   S4-D   preview (127.0.0.1:18080 stub -> launcher preview 8602): injection before the last
+ *          </body> with two external scripts, recomputed Content-Length, stripped
+ *          Content-Encoding/Transfer-Encoding/ETag/Last-Modified, config.js/sdk.js, byte-exact
+ *          gzip, not-injected codes (head/no_body/status/encoding/not_html/too_large/read_error),
+ *          /ingest/v1/events proxy 202 + other /ingest/* 404 + target down 502, TLS/non-loopback/
+ *          SDK_IIFE_MISSING tokens, port cleanup.
+ *   S4-E   SDK IIFE: dist 3 files, no sourcemap/CDN, global version, vm auto-init exactly once,
+ *          double-load guard, no-config and bad-config fail-open, ESM tests still green (13/13).
+ *   S4-F   fixtures/s4-details: 9 schema-valid events -> requests (LOST/9 spans), graph 9/8 with
+ *          exactly the 14 ordered node fields (reason/source/confidence from the event), replay;
+ *          static ×N grouping/gaps (exactly 3, F>N>R, no browser) + workbench dist selectors and
+ *          strings; fixture F rule asserted with an inline ui_event+fetch batch (not the fixture).
+ *   S4-G   diagnose: 7 checks/SUMMARY both branches (no --preview-url -> skip=2 exit 0; full
+ *          preview -> fail=0 exit 0); missing session/app down/preview not injected -> FAIL exit 3;
+ *          counts sum 7, no fake PASS.
+ *   S4-H   regression: S0–S3 gates still PASS, agent hello is not an event (span counts unchanged),
+ *          schema/S0–S3 fixture bytes unchanged, S4 G1 freeze zero drift.
+ *   S4-I   scope/security/cleanup: no S5/S6/S7 capability, no secrets/CDN/mirrors, launcher/preview
+ *          loopback + no TLS/CSP rewrite/inline script, ports 8601/8080/5173/5174/4173/4174/8602/
+ *          18080 free, no java/node leftovers, git index untouched, product files stable.
  *
  * Exit code 0 only when every gate passes. Product files are never modified; the only
  * writes are build outputs (target/, dist/, workbench/public/fixtures/) produced by the
  * product's own build commands, plus OS temp files that are deleted afterwards.
  *
- * Usage (from tools/verify):  npm ci && node verify.mjs   [--json]
+ * Tester part 3 implements S4-F/S4-G (tester parts 1-2 built S4-BUILD + S4-A..E); tester part 4
+ * closes S4 with S4-H (S0–S3 regression + freeze) and S4-I (scope/security/cleanup). S4-H reads
+ * the earlier RESULTS, so it only passes in a full run. A normal run executes S0–S3 plus A..I.
+ *
+ * Usage (from tools/verify):  npm ci && node verify.mjs [--json]                  (full S0–S4)
+ *                             node verify.mjs --s4[=A,B,C,D,E,F,G,H,I] [--json]   (S4-only)
  */
 
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import http from "node:http";
+import vm from "node:vm";
+import { gzipSync } from "node:zlib";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -75,7 +113,8 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -97,7 +136,7 @@ const S1_AGENT_SPAN_REL = "fixtures/s1-walking-skeleton/agent-controller-span.js
 const S1_FACTS_REL = "fixtures/s1-walking-skeleton/expected-facts.json";
 const S1_AGENT_NODE_KEY = "com.example.shop.controller.OrderController#cancel";
 const S1_WORKBENCH_SESSION = "s_wb_demo";
-const S1_PORTS = [8601, 8080, 5173, 5174, 4173, 4174];
+const S1_PORTS = [8601, 8080, 5173, 5174, 4173, 4174, 8602, 18080];
 
 /* ---------------------------- S2 (0-row fact chain) ---------------------------- */
 
@@ -182,6 +221,114 @@ const S3_SEMANTIC_HINTS = [
 
 /* Shared evidence captured by earlier S3 gates and re-used by later ones (report-only). */
 const S3_EVIDENCE = { sdkTestStdout: "", sdkTestStderr: "", caseB: null, caseA: null };
+
+/* ---------------------------- S4 (local launcher + details) ---------------------------- */
+
+const S4_PLAN_REVIEW_REL = "docs/plans/stages/S4/plan-review.md";
+const S4_FIXTURE_DIR = "fixtures/s4-details";
+const S4_EVENTS_REL = "fixtures/s4-details/events.ndjson";
+const S4_FACTS_REL = "fixtures/s4-details/expected-facts.json";
+const S4_README_REL = "fixtures/s4-details/README.md";
+const S4_LAUNCHER_DIR = "server/launcher/src/main/java/io/traceboard/launcher";
+const S4_LAUNCHER_JAR_REL = "server/launcher/target/traceboard-launcher-0.1.0-SNAPSHOT.jar";
+const S4_SDK_IIFE_REL = "frontend/sdk/dist/traceboard-sdk.iife.js";
+const S4_PREVIEW_BASE = "http://127.0.0.1:8602";
+const S4_STUB_PORT = 18080;
+const S4_SESSION = "s_s4launcher";
+const S4_PREVIEW_SESSION = "s_s4preview";
+const S4_HELLO_SESSION = "s_s4hello";
+const S4_PROBE_SESSION = "s_s4probe";
+const S4_DETAIL_SESSION = "s_s4detail";
+const S4_GUIDE_REL = "docs/guides/local-launcher.md";
+const S4_META_KEYS = ["health", "meta", "ingestEvents", "realtime", "replay"];
+const S4_HELLO_ACCEPTED = '{"schema":"traceboard.agent.v1","sessionId":"s_s4hello","accepted":true}';
+const S4_GRAPH_NODE_KEYS_ORDERED = [
+  "spanId", "parentSpanId", "kind", "nodeKey", "status", "return", "sideEffects",
+  "startNs", "durNs", "thread", "flags", "reason", "source", "confidence",
+];
+const S4_SELECTORS = [
+  "s4-detail", "s4-detail-title", "s4-detail-status", "s4-detail-tabs", "s4-sideeffects",
+  "s4-ui-effects", "s4-invocations", "s4-invocation-select", "s4-gaps", "s4-group-badge",
+  "s4-detail-close",
+];
+const S4_GAP_EMPTY_TEXT = "未发现缺口（仅基于已采集数据；未采集项不会显示为成功）";
+const S4_FETCH_WITHOUT_BACKEND_TEXT = "后端未采集/未关联";
+const S4_RUNTIME_X3_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 属 S6";
+/** S4-G sessions/URLs (diagnose cases). */
+const S4_DIAG_SESSION = "s_s4diag";
+const S4_DIAG_MISSING_SESSION = "s_s4missing";
+const S4_DIAG_APP_URL = "http://localhost:8080/api/orders";
+const S4_DIAG_APP_DOWN_URL = "http://127.0.0.1:9/api/orders";
+/** Fixed diagnose order (S4-AMD-01 §3); each run prints exactly these seven rows. */
+const S4_DIAG_CHECKS = [
+  "collector_health", "collector_meta", "app_health", "agent_handshake",
+  "recent_events", "preview_injection", "sdk_script",
+];
+/** Static workbench tokens/panels asserted on workbench/dist after `npm run build`. */
+const S4_DIST_TOKENS = [
+  "节点详情", "×N", "未采集", "缺口", "rowsAffected", "reason", "逐次调用",
+  "SQL/数据影响", "UI 效果", S4_RUNTIME_X3_NOTE, S4_FETCH_WITHOUT_BACKEND_TEXT,
+  "未采集（无 reason）", S4_GAP_EMPTY_TEXT,
+];
+const S4_RETAINED_PANELS = ["s3-panel", "s2-panel", "s1-panel", "fixture-panel"];
+/** Final S4 G1 freeze (plan-review §8.1 + §9 transport re-hash); zero drift is asserted. */
+const S4_G1_FREEZE = {
+  "schema/traceboard.event.v1.json": "927937dfaa2d1f47883d3e412185c19be1770a85c9b19b6858b1e097b96a489a",
+  "docs/contracts/api.v1.md": "f701f424016156993e1c537aa12d370955cc023530ecfe9e72f580d83bcee4e5",
+  "docs/contracts/transport.v1.md": "44418a3a6985538e3af9d19e0303a57070b8fafa135f2e92b8a75b4309576dfe",
+  "docs/contracts/event-model.v1.md": "06ee878e9d3acc3d6a6ff66ee1e1d95c92ac5813913cc1ad84ae3977216025c0",
+  "docs/contracts/status-semantics.md": "9a8735a0fcf67c471c9f831651996c5f5027f53dd4762147bdedc1b143f4fb56",
+  "docs/guides/local-launcher.md": "34efa2f67dadb9ce0725b7c38f9434fc10653cd27a7128c62319b01aa253ade1",
+  "fixtures/s4-details/events.ndjson": "75274346ed7593f2aef304d2d7a0989d969e1fdcea4330169422a4cff89d853b",
+  "fixtures/s4-details/expected-facts.json": "61c2bfcc79a7a568b03cc759445495a0671ad517be2d2ea1db3a410649117980",
+  "fixtures/s4-details/README.md": "b4f838500bac3970581b133e47c3bf08b57e6f49220147f4418f70c2a51a8f8a",
+  "docs/plans/stages/S4/s4-plan.md": "9147ce254bd8bc6e861433e02226aac87e65a6fcd7a8df3e1ec7477ff11b2300",
+  "docs/plans/stages/S4/dispatch.md": "9dd9809f4c02bc10739e2eb9c6359fa95aef54872de3ddd87d7bb194312951eb",
+  "docs/plans/stages/S4/dispatch-amendment-01.md": "e6097f63c1c3b6e5160b077c570292bef243dd2283267a2ff7e883a65a6d59dc",
+};
+const S4_EVIDENCE = { launch: null, hello: null, preview: null, details: null, diagnose: [] };
+
+/**
+ * S4 checks implemented now (BUILD + A..I). The default selection only runs gates that actually
+ * exist (never fake PASS); S4-H reads the earlier RESULTS and therefore needs a full run.
+ */
+const S4_IMPLEMENTED = ["A", "B", "C", "D", "E", "F", "G", "H", "I"];
+
+/** S4-H anchors: the S0–S3 gates that must all PASS before S4 can be closed. */
+const S4_H_ANCHORS = [
+  "V0", "V1", "V1b", "V1c", "V4b", "V2a", "V2b", "V2c-1", "V2c-2", "V3",
+  "V6a", "V6b", "V6c", "V6d", "V8a", "V8b", "V8d",
+  "S1-A", "S1-B", "S1-C0", "S1-C1", "S1-C2", "S1-C3", "S1-D", "S1-F",
+  "S2-1", "S2-2", "S2-3", "S2-3b", "S2-4", "S2-4F", "S2-5", "S2-6", "S2-7", "S2-8", "S2-L",
+  "S3-1", "S3-2", "S3-3", "S3-4", "S3-5", "S3-6", "S3-7", "S3-8", "S3-9", "S3-10",
+];
+const S4_H_SCHEMA_HASH = "927937dfaa2d1f47883d3e412185c19be1770a85c9b19b6858b1e097b96a489a";
+
+/** S4-I: S4-owned source trees scanned for S5/S6/S7 capabilities. */
+const S4_SCOPE_TREES = [
+  "server/launcher/src", "server/collector/src", "agent/src",
+  "frontend/sdk/src", "workbench/src", "demo/buggy-shop-boot-vue/frontend/src",
+];
+const S4_LOCKFILES = [
+  "frontend/sdk/package-lock.json", "workbench/package-lock.json",
+  "demo/buggy-shop-boot-vue/frontend/package-lock.json",
+];
+
+/**
+ * Parse the S4-only CLI selector. `--s4` (no value) or a missing flag at the top level runs all
+ * implemented S4 gates; `--s4=A,B,C` restricts the selection. Returns null when `--s4` is absent
+ * (normal full S0–S4 run).
+ */
+function parseS4Request(argv) {
+  const arg = argv.find((item) => item === "--s4" || item.startsWith("--s4="));
+  if (arg === undefined) return null;
+  const raw = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1).trim() : "";
+  if (!raw) return new Set(S4_IMPLEMENTED);
+  return new Set(raw.split(",").map((part) => part.trim().toUpperCase()).filter(Boolean));
+}
+
+const S4_ONLY = process.argv.some((item) => item.startsWith("--s4"));
+const S4_SELECTED = S4_ONLY ? (parseS4Request(process.argv) ?? new Set(S4_IMPLEMENTED)) : null;
 
 const COLLECTOR_BASE = "http://127.0.0.1:8601";
 const DEMO_BASE = "http://localhost:8080";
@@ -345,9 +492,10 @@ function runShell(command, { cwd = REPO, env = process.env, timeout = BUILD_TIME
   };
 }
 
-function runExe(exe, args, { cwd = REPO, timeout = 120000 } = {}) {
+function runExe(exe, args, { cwd = REPO, timeout = 120000, env = process.env } = {}) {
   const result = spawnSync(exe, args, {
     cwd,
+    env,
     encoding: "utf8",
     timeout,
     maxBuffer: 16 * 1024 * 1024,
@@ -424,6 +572,270 @@ function postNdjson(pathname, body, contentType = NDJSON) {
     headers: contentType === null ? {} : { "Content-Type": contentType },
     body,
   }, 30000);
+}
+
+/* ------------------------------------------------------------------ */
+/* S4 raw HTTP / launcher / stub helpers                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Raw HTTP request (no undici content-decoding), so gzip pass-through and header rules can be
+ * asserted byte-for-byte. Returns lower-cased headers and the untouched response buffer.
+ */
+function httpRaw(url, { method = "GET", headers = {}, body = null, timeoutMs = 20000 } = {}) {
+  return new Promise((resolve) => {
+    let target;
+    try {
+      target = new URL(url);
+    } catch (error) {
+      resolve({ ok: false, error });
+      return;
+    }
+    const request = http.request({
+      hostname: target.hostname,
+      port: target.port || 80,
+      path: `${target.pathname}${target.search}`,
+      method,
+      headers,
+      timeout: timeoutMs,
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const buf = Buffer.concat(chunks);
+        const lowered = {};
+        for (const [name, value] of Object.entries(response.headers)) {
+          lowered[name.toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value ?? "");
+        }
+        resolve({ ok: true, status: response.statusCode ?? 0, headers: lowered, buf, text: buf.toString("utf8") });
+      });
+    });
+    request.on("timeout", () => {
+      request.destroy(new Error("timeout"));
+    });
+    request.on("error", (error) => resolve({ ok: false, error }));
+    if (body !== null && body !== undefined) request.write(body);
+    request.end();
+  });
+}
+
+function runLauncher(args, { cwd = REPO, timeout = 90000, env = process.env } = {}) {
+  return runExe(JDK21_JAVA, ["-jar", abs(S4_LAUNCHER_JAR_REL), ...args], { cwd, timeout, env });
+}
+
+/**
+ * Async launcher runner: keeps the verifier's event loop free while the child runs, so the
+ * in-process S4-G stubs (127.0.0.1:18080) can still answer the preview's proxied requests.
+ */
+function runExeAsync(exe, args, { cwd = REPO, timeout = 120000, env = process.env } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(exe, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    let error = null;
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* ignore */
+      }
+    }, timeout);
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    child.on("error", (spawnError) => { error = spawnError; });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal, error, stdout, stderr });
+    });
+  });
+}
+
+function runLauncherAsync(args, options = {}) {
+  return runExeAsync(JDK21_JAVA, ["-jar", abs(S4_LAUNCHER_JAR_REL), ...args], options);
+}
+
+function postJson(body, contentType = "application/json", pathname = "/ingest/v1/agent-hello") {
+  return requestBase(COLLECTOR_BASE, pathname, {
+    method: "POST",
+    headers: contentType === null ? {} : { "Content-Type": contentType },
+    body,
+  }, 20000);
+}
+
+function pidAlive(pid) {
+  const result = runExe("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { timeout: 30000 });
+  return new RegExp(`"${pid}"`).test(result.stdout || "");
+}
+
+/** Static HTML stub on 127.0.0.1:18080 used by S4-D/S4-G (closed before S4-I). */
+function startS4Stub() {
+  const html = "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>stub</title></head>"
+    + "<body><h1>stub</h1><p>traceboard preview target</p></body></html>\n";
+  const big = `${"a".repeat(2 * 1024 * 1024 + 16)}</body>`;
+  const gzipHtml = gzipSync(Buffer.from("<!doctype html><html><body><p>gzip</p></body></html>", "utf8"));
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    const pathname = (req.url || "/").split("?")[0];
+    const head = req.method === "HEAD";
+    requests.push({ method: req.method || "", pathname, headers: { ...req.headers } });
+    const send = (status, headers, bodyText, raw = null) => {
+      const payload = raw ?? Buffer.from(bodyText ?? "", "utf8");
+      res.writeHead(status, { ...headers, "Content-Length": String(payload.length) });
+      if (head) {
+        res.end();
+      } else {
+        res.end(payload);
+      }
+    };
+    switch (pathname) {
+      case "/":
+        send(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "ETag": "\"stub-etag-1\"",
+          "Last-Modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+        }, html);
+        return;
+      case "/plain":
+        send(200, { "Content-Type": "text/plain; charset=utf-8" }, "plain-body");
+        return;
+      case "/latin":
+        send(200, { "Content-Type": "text/html; charset=iso-8859-1" }, "<html><body>latin</body></html>");
+        return;
+      case "/fragment":
+        send(200, { "Content-Type": "text/html; charset=utf-8" }, "<div>fragment</div>");
+        return;
+      case "/gzip":
+        send(200, { "Content-Type": "text/html; charset=utf-8", "Content-Encoding": "gzip" }, null, gzipHtml);
+        return;
+      case "/big":
+        send(200, { "Content-Type": "text/html; charset=utf-8" }, big);
+        return;
+      case "/nobody":
+        res.writeHead(204, { "Content-Type": "text/html; charset=utf-8" });
+        res.end();
+        return;
+      default:
+        send(404, { "Content-Type": "text/html; charset=utf-8" }, "<html><body>missing</body></html>");
+    }
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(S4_STUB_PORT, "127.0.0.1", () => resolve({
+      server,
+      html,
+      big,
+      gzipHtml,
+      requests,
+      close: () => new Promise((done) => server.close(() => done())),
+    }));
+  });
+}
+
+/**
+ * Non-injectable stub on 127.0.0.1:18080 (text/plain for every path), used by S4-G to prove
+ * `diagnose` reports `preview_injection` FAIL (`not-injected:not_html`) instead of a fake PASS.
+ */
+function startS4PlainStub() {
+  const server = http.createServer((req, res) => {
+    const body = "plain-body";
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Length": String(Buffer.byteLength(body, "utf8")),
+    });
+    res.end(body);
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(S4_STUB_PORT, "127.0.0.1", () => resolve({
+      server,
+      close: () => new Promise((done) => server.close(() => done())),
+    }));
+  });
+}
+
+/** Parse S4 diagnose output: seven `LEVEL check: evidence` rows + one exact SUMMARY line. */
+function parseS4DiagnoseOutput(run) {
+  const text = `${run.stdout ?? ""}\n${run.stderr ?? ""}`.replace(/\r/g, "");
+  const lines = text.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const summaryIndex = lines.findIndex((line) => line.startsWith("SUMMARY: "));
+  const summary = summaryIndex >= 0 ? lines[summaryIndex] : "";
+  const match = summary.match(/^SUMMARY: (PASS|FAIL) pass=(\d+) warn=(\d+) fail=(\d+) skip=(\d+)$/);
+  const rows = summaryIndex >= 0 ? lines.slice(0, summaryIndex) : [];
+  const parsedRows = rows.map((line) => {
+    const row = line.match(/^(PASS|FAIL|WARN|SKIP) ([a-z_]+): (.+)$/);
+    return row ? { level: row[1], check: row[2], evidence: row[3], line } : { level: null, check: null, evidence: "", line };
+  });
+  return {
+    text,
+    lines,
+    rows: parsedRows,
+    summary,
+    summaryMatched: Boolean(match),
+    verdict: match ? match[1] : null,
+    counts: match ? { pass: Number(match[2]), warn: Number(match[3]), fail: Number(match[4]), skip: Number(match[5]) } : null,
+  };
+}
+
+/**
+ * Build one S4-G assertion for a diagnose invocation: exit code, exact SUMMARY counts (sum=7),
+ * fixed row order, evidence on every row, and the expected per-check levels.
+ */
+function s4DiagnoseCase(label, run, expected) {
+  const parsed = parseS4DiagnoseOutput(run);
+  const problems = [];
+  if (run.error) problems.push(`spawn error=${run.error.message}`);
+  if (run.code !== expected.exit) problems.push(`exit=${run.code} expected=${expected.exit}`);
+  if (!parsed.summaryMatched) problems.push(`no exact SUMMARY line: "${show(parsed.summary)}"`);
+  if (parsed.verdict !== expected.verdict) problems.push(`verdict=${parsed.verdict} expected=${expected.verdict}`);
+  if (parsed.counts === null || !deepEqual(parsed.counts, expected.counts)) {
+    problems.push(`counts=${show(parsed.counts)} expected=${show(expected.counts)}`);
+  }
+  if (parsed.counts !== null && parsed.counts.pass + parsed.counts.warn + parsed.counts.fail + parsed.counts.skip !== 7) {
+    problems.push(`counts do not sum to 7: ${show(parsed.counts)}`);
+  }
+  if (parsed.rows.length !== 7) problems.push(`rows=${parsed.rows.length} expected=7`);
+  const observedOrder = parsed.rows.map((row) => row.check).join(",");
+  if (observedOrder !== S4_DIAG_CHECKS.join(",")) {
+    problems.push(`row order=${observedOrder || "none"}`);
+  }
+  for (const row of parsed.rows) {
+    if (!row.level) problems.push(`malformed row: "${show(row.line)}"`);
+    else if (row.evidence.trim().length === 0) problems.push(`${row.check} has empty evidence`);
+    else if (row.level !== "SKIP" && !row.evidence.includes("GET http")) problems.push(`${row.check} evidence lacks GET URL`);
+  }
+  for (const [check, level] of Object.entries(expected.levels ?? {})) {
+    const row = parsed.rows.find((item) => item.check === check);
+    if (!row || row.level !== level) problems.push(`${check}=${row ? row.level : "missing"} expected=${level}`);
+  }
+  for (const text of expected.contains ?? []) {
+    if (!parsed.text.includes(text)) problems.push(`output lacks "${text}"`);
+  }
+  return {
+    ok: problems.length === 0,
+    label,
+    detail: problems.length
+      ? `${problems.slice(0, 6).join(" || ")} :: ${parsed.rows.map((row) => row.line).join(" | ").slice(0, 900)}`
+      : `exit=${run.code} ${parsed.summary} rows=${parsed.rows.map((row) => `${row.level}:${row.check}`).join(",")}`,
+  };
+}
+
+/** Bundle the workbench `s4/derive.ts` (pure read-only helpers) and import it as ESM. */
+async function loadS4DeriveModule() {
+  const workbenchRequire = createRequire(path.join(REPO, "workbench", "package.json"));
+  const esbuild = workbenchRequire("esbuild");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "tb-s4-derive-"));
+  tmpDirs.push(dir);
+  const outfile = path.join(dir, "derive.mjs");
+  esbuild.buildSync({
+    entryPoints: [abs("workbench/src/s4/derive.ts")],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    outfile,
+    logLevel: "silent",
+    sourcemap: false,
+  });
+  return import(pathToFileURL(outfile).href);
 }
 
 /** Parse an error envelope and return label/check tuples. */
@@ -506,6 +918,55 @@ function javaPids() {
     if (match) pids.push(Number(match[1]));
   }
   return pids;
+}
+
+/** Live node.exe pids (S4-I: no node leftovers from builds/preview after the run). */
+function nodePids() {
+  const result = runExe("tasklist", ["/FI", "IMAGENAME eq node.exe", "/FO", "CSV", "/NH"], { timeout: 30000 });
+  const pids = [];
+  for (const line of (result.stdout || "").split(/\r?\n/)) {
+    const match = line.match(/^"node\.exe","(\d+)"/i);
+    if (match) pids.push(Number(match[1]));
+  }
+  return pids;
+}
+
+/** Current HEAD commit (S4-I: no commit/reset happened during the verify run). */
+function gitHeadHash() {
+  const result = runExe("git", ["rev-parse", "HEAD"], { timeout: 60000 });
+  return result.code === 0 ? (result.stdout || "").trim() : "unknown";
+}
+
+/**
+ * Live java.exe/node.exe processes that descend from `rootPid` (true leftovers of the launcher,
+ * builds or preview). A plain pid diff is not usable: unrelated app processes spawn java/node
+ * while the verifier runs, so only our own process tree is asserted.
+ */
+function descendantSpawnedProcesses(rootPid) {
+  const script = "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'java.exe' -or $_.Name -eq 'node.exe' } | ForEach-Object { \"$($_.Name) $($_.ProcessId) $($_.ParentProcessId)\" }";
+  const result = runExe("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 60000 });
+  if (result.code !== 0) {
+    return { supported: false, items: [], error: lastLines(result.stderr || "", 2).join(" ") };
+  }
+  const children = new Map();
+  for (const line of (result.stdout || "").split(/\r?\n/)) {
+    const match = line.trim().match(/^(java|node)\.exe\s+(\d+)\s+(\d+)$/i);
+    if (!match) continue;
+    const parent = Number(match[3]);
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push({ name: match[1].toLowerCase(), pid: Number(match[2]) });
+  }
+  const items = [];
+  const seen = new Set();
+  const queue = [...(children.get(rootPid) ?? [])];
+  while (queue.length) {
+    const item = queue.shift();
+    if (seen.has(item.pid)) continue;
+    seen.add(item.pid);
+    items.push(item);
+    queue.push(...(children.get(item.pid) ?? []));
+  }
+  return { supported: true, items, error: null };
 }
 
 function gitStatusLines() {
@@ -2381,6 +2842,9 @@ async function checkS1CDF(validate) {
         if (!deepEqual(node.sideEffects, expectedEffects)) nodeMismatches.push(`node${index} sideEffects=${show(node.sideEffects)}`);
         if (!deepEqual(node.thread, event.thread)) nodeMismatches.push(`node${index} thread`);
         if (!deepEqual(node.flags, event.flags)) nodeMismatches.push(`node${index} flags=${show(node.flags)}`);
+        if (!deepEqual(node.reason, event.reason ?? null)) nodeMismatches.push(`node${index} reason=${show(node.reason)}`);
+        if (!deepEqual(node.source, event.source ?? null)) nodeMismatches.push(`node${index} source=${show(node.source)}`);
+        if (!deepEqual(node.confidence, event.confidence)) nodeMismatches.push(`node${index} confidence=${show(node.confidence)}`);
       });
     }
     const expectedEdges = orderedFixture.slice(1).map((event, index) => ({
@@ -2511,7 +2975,7 @@ async function checkS1CDF(validate) {
 
 const GRAPH_NODE_KEYS = [
   "spanId", "parentSpanId", "kind", "nodeKey", "status", "return", "sideEffects",
-  "startNs", "durNs", "thread", "flags",
+  "startNs", "durNs", "thread", "flags", "reason", "source", "confidence",
 ].sort();
 
 /**
@@ -2596,6 +3060,9 @@ async function checkS3CollectorReplay(validate) {
       if (!deepEqual(node.sideEffects, event.sideEffects ?? [])) graphNodeProblemsA.push(`node${index} sideEffects=${show(node.sideEffects)}`);
       if (!deepEqual(node.thread, event.thread)) graphNodeProblemsA.push(`node${index} thread`);
       if (!deepEqual(node.flags, event.flags)) graphNodeProblemsA.push(`node${index} flags=${show(node.flags)}`);
+      if (!deepEqual(node.reason, event.reason ?? null)) graphNodeProblemsA.push(`node${index} reason=${show(node.reason)}`);
+      if (!deepEqual(node.source, event.source ?? null)) graphNodeProblemsA.push(`node${index} source=${show(node.source)}`);
+      if (!deepEqual(node.confidence, event.confidence)) graphNodeProblemsA.push(`node${index} confidence=${show(node.confidence)}`);
     });
   }
   const graphEdgesExpectedA = graphExpectedA.edges ?? [];
@@ -2607,7 +3074,7 @@ async function checkS3CollectorReplay(validate) {
       graphA.nodes.map((node) => node.kind).join(",") === graphExpectedA.kindOrder.join(",") &&
       graphA.edges.length === 6 && deepEqual(graphA.edges, graphEdgesExpectedA) &&
       graphA.edges.every((edge) => edge.count === 1) && graphNodeProblemsA.length === 0,
-    label: "graph A: 7 nodes / 6 edges match expected order+edges; 11 node fields verbatim; click->fetch->controller->service->mapper->sql",
+    label: "graph A: 7 nodes / 6 edges match expected order+edges; 14 node fields verbatim (S4 additive reason/source/confidence); click->fetch->controller->service->mapper->sql",
     detail: graphNodeProblemsA.length ? graphNodeProblemsA.slice(0, 5).join(" || ") : `${graphA.nodes.length} nodes, ${graphA.edges.length} edges`,
   });
   S3_EVIDENCE.caseA.graph = { nodes: graphA.nodes.length, edges: graphA.edges.length, confidence: graphA.body.confidence };
@@ -2785,6 +3252,17 @@ function graphProblems(graph, traceId) {
   if (nodes.map((node) => node.kind).join(",") !== "controller,service,mapper,sql") {
     problems.push(`kindOrder=${nodes.map((node) => node.kind).join(",")}`);
   }
+  nodes.forEach((node, index) => {
+    const keys = Object.keys(node ?? {}).sort();
+    if (!deepEqual(keys, GRAPH_NODE_KEYS)) problems.push(`node${index} fields=${keys.join(",")}`);
+    if (node.reason !== null && typeof node.reason !== "string") problems.push(`node${index} reason=${show(node.reason)}`);
+    if (node.source !== null && (typeof node.source !== "object" || Array.isArray(node.source))) {
+      problems.push(`node${index} source=${show(node.source)}`);
+    }
+    if (typeof node.confidence !== "string" || node.confidence.length === 0) {
+      problems.push(`node${index} confidence=${show(node.confidence)}`);
+    }
+  });
   S2_CHAIN_SLOTS.forEach((slot, index) => {
     if (nodes[index].kind !== slot.kind) problems.push(`node${index} kind`);
     if (nodes[index].nodeKey !== slot.nodeKey) problems.push(`node${index} nodeKey`);
@@ -4089,6 +4567,8 @@ function checkS2Drift() {
   const s2Map = new Map(freeze.s2.map((entry) => [entry.rel, entry.hash]));
   const s3Freeze = s3FreezeSections();
   const s3Map = new Map(s3Freeze.s3.map((entry) => [entry.rel, entry.hash]));
+  // S4 re-hashed api/transport (and re-used the unchanged event-model); the latest freeze wins.
+  const latestMap = new Map([...s3Map, ...Object.entries(S4_G1_FREEZE)]);
   const contractRels = new Set([
     "docs/contracts/api.v1.md",
     "docs/contracts/transport.v1.md",
@@ -4098,12 +4578,12 @@ function checkS2Drift() {
   for (const entry of freeze.s2) {
     const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
     if (contractRels.has(entry.rel) && entry.rel !== "docs/contracts/status-semantics.md") {
-      const expected = s3Map.get(entry.rel);
+      const expected = latestMap.get(entry.rel);
       const ok = Boolean(expected) && actual === expected;
       checks.push({
         ok,
-        label: `S3 migration: contract updated only through the S3 G1 freeze (${entry.rel})`,
-        detail: ok ? "hash matches S3 G1" : `actual=${actual} s3=${expected ?? "missing"}`,
+        label: `S3/S4 migration: contract updated only through the latest G1 freeze (${entry.rel})`,
+        detail: ok ? "hash matches S4 G1" : `actual=${actual} latest=${expected ?? "missing"}`,
       });
     } else {
       checks.push({
@@ -4135,12 +4615,12 @@ function checkS2Drift() {
   for (const entry of s0Baseline) {
     const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
     if (contractSet.has(entry.rel)) {
-      const expected = s3Map.get(entry.rel);
+      const expected = latestMap.get(entry.rel);
       const ok = Boolean(expected) && actual === expected;
       checks.push({
         ok,
-        label: `S0 contract updated only through the S3 G1 freeze (${entry.rel})`,
-        detail: `s0=${entry.hash.slice(0, 12)} s3=${String(actual).slice(0, 12)}`,
+        label: `S0 contract updated only through the latest G1 freeze (${entry.rel})`,
+        detail: `s0=${entry.hash.slice(0, 12)} latest=${String(actual).slice(0, 12)}`,
       });
       if (!ok) drifted.push(entry.rel);
     } else {
@@ -4201,11 +4681,13 @@ function checkS2Scope() {
     "GET /api/v1/sessions/{sessionId}/requests",
     "GET /api/v1/sessions/{sessionId}/graph",
     "GET /api/v1/sessions/{sessionId}/replay",
+    "GET /api/v1/sessions/{sessionId}/agent",
     "POST /ingest/v1/events",
+    "POST /ingest/v1/agent-hello",
   ];
   checks.push({
     ok: routes.slice().sort().join("|") === expectedRoutes.slice().sort().join("|"),
-    label: "S3 migration: collector registers exactly the 7 routes (S1/S2 six + read-only replay; no stream/ws/links)",
+    label: "S4 migration: collector registers exactly the 9 business routes (S1/S2/S3 seven + agent-hello + agent; no stream/ws/links)",
     detail: routes.sort().join(", "),
   });
   const reservedRouteLeak = collectorCode.filter((file) => /["']\/[^"']*(links|\/stream|\/ws\/)[^"']*["']/.test(file.text));
@@ -4319,11 +4801,17 @@ function checkS2Scope() {
   });
 
   const failOpen = (agentSources.match(/catch\s*\(\s*Throwable/g) ?? []).length;
+  // S4: AgentHello retries the handshake (<=3 attempts); the event sender itself stays one-shot.
+  const eventSender = agentCode.find((f) => f.rel.endsWith("EventSender.java"))?.text ?? "";
+  const agentHello = agentCode.find((f) => f.rel.endsWith("AgentHello.java"))?.text ?? "";
   checks.push({
-    ok: failOpen >= 4 && !/\bretry\b|for\s*\(\s*int\s+attempt/i.test(agentSources) &&
+    ok: failOpen >= 4 && !/\bretry\b|for\s*\(\s*int\s+attempt/i.test(eventSender) &&
+      !/\bretry\b/i.test(eventSender) &&
+      /MAX_ATTEMPTS\s*=\s*3/.test(agentHello) && /for\s*\(\s*int\s+attempt/i.test(agentHello) &&
+      /daemon/i.test(agentHello) && /setDaemon\(true\)/.test(agentHello) &&
       /ArrayBlockingQueue/.test(agentSources) && /CAPACITY\s*=\s*16/.test(agentSources) &&
       /CONNECT_TIMEOUT_MS\s*=\s*300/.test(agentSources) && /READ_TIMEOUT_MS\s*=\s*700/.test(agentSources),
-    label: "agent fail-open: Throwable guards, bounded queue 16, 300/700ms, no retries",
+    label: "agent fail-open: Throwable guards, bounded queue 16, 300/700ms, EventSender one-shot; handshake is a <=3-attempt daemon (S4)",
     detail: `catch(Throwable)=${failOpen}`,
   });
   checks.push({
@@ -4496,7 +4984,7 @@ function checkS2Scope() {
 
   gate(
     "S2-8",
-    "S3 migration: 7 routes + 4 agent points exactly (header reading allowed), no S4/S5/persistence/stream, H2 embedded only, no secrets/mirrors",
+    "S4 migration: 9 business routes + 4 agent ASM points exactly (handshake is handwritten HttpURLConnection), no S5/S6/persistence/stream, H2 embedded only, no secrets/mirrors",
     checks,
     `grep -rnE "EventSource|WebSocket|JdbcTemplate|SseEmitter" agent/src server/collector/src workbench/src demo/buggy-shop-boot-vue/backend/src`,
   );
@@ -4527,9 +5015,9 @@ function checkS3Cleanup() {
   });
 
   const status = gitStatusLines();
-  // S3 whitelist (dispatch S3 §4.8 / s3-plan §12.1): product dirs changed in S3, the 9 expected
-  // demo-frontend files, contracts/S3 fixtures/docs, and the tester paths. Anything else is a
-  // failure; schema/S0–S2 fixtures/demo backend/status-semantics/S0 docs stay forbidden.
+  // S4 whitelist (dispatch-amendment §8 / s4-plan §12.1): product dirs changed in S3/S4, the 9
+  // expected demo-frontend files, contracts/S3/S4 fixtures+guides+docs, and the tester paths.
+  // schema/S0–S2 fixtures/demo backend/status-semantics/S0 docs stay forbidden.
   const allowedExact = new Set([
     ...S3_DEMO_EXPECTED_FILES,
     "pom.xml",
@@ -4544,12 +5032,15 @@ function checkS3Cleanup() {
     "server/",
     "workbench/",
     "frontend/",
+    "docs/guides/",
     "docs/plans/stages/S1/",
     "docs/plans/stages/S2/",
     "docs/plans/stages/S3/",
+    "docs/plans/stages/S4/",
     "fixtures/s1-walking-skeleton/",
     "fixtures/s2-zero-row-chain/",
     "fixtures/s3-frontend-facts/",
+    "fixtures/s4-details/",
     "tools/verify/",
   ];
   const forbiddenPrefixes = [
@@ -4586,7 +5077,7 @@ function checkS3Cleanup() {
   });
   checks.push({
     ok: status.ok && unexpected.length === 0,
-    label: "git status only shows the S3 whitelist (product dirs, 9 demo-frontend files, S3 fixtures/contracts/docs, tools/verify)",
+    label: "git status only shows the S4 whitelist (product dirs incl. server/launcher, 9 demo-frontend files, S3/S4 fixtures/guides/contracts/docs, tools/verify)",
     detail: unexpected.slice(0, 4).join(" | ") || `${status.lines.length} expected entries`,
   });
   checks.push({
@@ -4647,7 +5138,7 @@ function checkS3Cleanup() {
 
   gate(
     "S3-10",
-    "cleanup: ports free, no java leftovers, git index untouched, git status within the S3 whitelist, product files stable",
+    "cleanup: ports free (incl. 8602/18080), no java leftovers, git index untouched, git status within the S4 whitelist, product files stable",
     checks,
     `netstat -ano | grep -E ":(${S1_PORTS.join("|")})\\s" ; tasklist | grep -i java ; git status --porcelain`,
   );
@@ -4681,15 +5172,19 @@ function checkS3Builds(validate) {
     detail: `exit=${sdkBuild.code} ${lastLines(`${sdkBuild.stdout}\n${sdkBuild.stderr}`, 1).join(" ")}`,
   });
   checks.push({
-    ok: sdkTest.code === 0 && testsMatch?.[1] === "8" && passMatch?.[1] === "8" && failMatch?.[1] === "0",
-    label: "frontend/sdk npm test -> node --test: 8 tests / 8 pass / 0 fail",
+    ok: sdkTest.code === 0 && testsMatch?.[1] === "13" && passMatch?.[1] === "13" && failMatch?.[1] === "0",
+    label: "frontend/sdk npm test -> node --test: 13 tests / 13 pass / 0 fail (8 ESM + 5 IIFE)",
     detail: `tests=${testsMatch?.[1] ?? "?"} pass=${passMatch?.[1] ?? "?"} fail=${failMatch?.[1] ?? "?"}`,
   });
 
   const sdkDist = walk(abs(SDK_DIST_REL));
   checks.push({
-    ok: deepEqual(sdkDist.map(relOf).sort(), [`${SDK_DIST_REL}/index.d.ts`, `${SDK_DIST_REL}/index.js`]),
-    label: "SDK dist contains exactly index.js + index.d.ts (no sourcemap, no build plugin output)",
+    ok: deepEqual(sdkDist.map(relOf).sort(), [
+      `${SDK_DIST_REL}/index.d.ts`,
+      `${SDK_DIST_REL}/index.js`,
+      `${SDK_DIST_REL}/traceboard-sdk.iife.js`,
+    ]),
+    label: "SDK dist contains exactly index.js + index.d.ts + traceboard-sdk.iife.js (no sourcemap, no build plugin output)",
     detail: sdkDist.map(relOf).join(","),
   });
   checks.push({
@@ -4700,10 +5195,21 @@ function checkS3Builds(validate) {
   const sdkPkg = JSON.parse(readFileSync(abs(`${SDK_DIR}/package.json`), "utf8"));
   checks.push({
     ok: SDK_REQUIRED_SCRIPTS.every((name) => typeof sdkPkg.scripts?.[name] === "string") &&
-      deepEqual(Object.keys(sdkPkg.devDependencies ?? {}), ["typescript"]) &&
-      Object.keys(sdkPkg.dependencies ?? {}).length === 0,
-    label: "SDK package.json: build+test scripts, devDependency typescript only, no runtime deps/CDN",
+      deepEqual(Object.keys(sdkPkg.devDependencies ?? {}).sort(), ["esbuild", "typescript"]) &&
+      Object.keys(sdkPkg.dependencies ?? {}).length === 0 &&
+      /build:iife/.test(String(sdkPkg.scripts?.build)) && /--global-name=TraceBoardSDK/.test(String(sdkPkg.scripts?.["build:iife"])) &&
+      /iife\.test\.js/.test(String(sdkPkg.scripts?.test)) && /sdk\.test\.js/.test(String(sdkPkg.scripts?.test)),
+    label: "SDK package.json: build (tsc + esbuild IIFE) + test scripts, devDependencies esbuild+typescript only, no runtime deps/CDN",
     detail: `dev=${Object.keys(sdkPkg.devDependencies ?? {}).join(",")} scripts=${Object.keys(sdkPkg.scripts ?? {}).join(",")}`,
+  });
+  const sdkIife = readFileSync(abs(S4_SDK_IIFE_REL), "utf8");
+  checks.push({
+    ok: sdkIife.includes("var TraceBoardSDK") && sdkIife.includes("version = \"0.1.0\"") &&
+      sdkIife.includes("__TRACEBOARD_CONFIG__") && sdkIife.includes("__TRACEBOARD_AUTO_INIT__") &&
+      sdkIife.includes("__TRACEBOARD_SDK_ACTIVE__") && !sdkIife.includes("sourceMappingURL") &&
+      !/https:\/\//.test(sdkIife) && !/jsdelivr|unpkg|cdnjs/.test(sdkIife),
+    label: "SDK IIFE bundle: TraceBoardSDK global + version, config/guard hooks, no sourceMappingURL/CDN/https",
+    detail: `${Buffer.byteLength(sdkIife, "utf8")} bytes`,
   });
   const sdkTsconfig = JSON.parse(readFileSync(abs(`${SDK_DIR}/tsconfig.json`), "utf8"));
   checks.push({
@@ -4806,7 +5312,7 @@ function checkS3Builds(validate) {
 
   gate(
     "S3-1",
-    "builds: SDK 8/8 tests, demo frontend (file dep,/ingest proxy,case B,traceparent), workbench, root JDK21, demo JDK8, agent 52",
+    "builds: SDK 13/13 tests + 3 dist files, demo frontend (file dep,/ingest proxy,case B,traceparent), workbench, root JDK21 (launcher), demo JDK8, agent 52",
     checks,
     `(cd "frontend/sdk" && npm ci && npm run build && npm test) && (cd "${S3_DEMO_FRONTEND_REL}" && npm ci && npm run build) && (cd "workbench" && npm ci && npm run build)`,
   );
@@ -4931,12 +5437,13 @@ function checkS3Fixtures(validate) {
   });
   const hashProblems = [];
   for (const entry of [...freeze.s3, ...freeze.legacy]) {
+    const expected = S4_G1_FREEZE[entry.rel] ?? entry.hash;
     const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
-    if (actual !== entry.hash) hashProblems.push(`${entry.rel} actual=${actual}`);
+    if (actual !== expected) hashProblems.push(`${entry.rel} actual=${actual} expected=${expected}`);
   }
   checks.push({
     ok: hashProblems.length === 0,
-    label: "schema, contracts, S3 fixtures/plan/dispatch, S0–S2 fixtures: every G1 hash still matches (bytes unchanged)",
+    label: "schema, contracts (latest = S4 G1 freeze), S3 fixtures/plan/dispatch, S0–S2 fixtures: every hash matches (bytes unchanged)",
     detail: hashProblems.length ? hashProblems.slice(0, 4).join(" || ") : `${freeze.s3.length + freeze.legacy.length} hashes match`,
   });
   const s2Freeze = s2FreezeSections();
@@ -5478,8 +5985,8 @@ function checkS3CaseB() {
   const testSource = readFileSync(abs(`${SDK_DIR}/test/sdk.test.js`), "utf8");
   const testOut = S3_EVIDENCE.sdkTestStdout ?? "";
   checks.push({
-    ok: S3_EVIDENCE.sdkTestStderr !== undefined && /# pass 8/.test(testOut) && /# fail 0/.test(testOut) && /1\.\.8/.test(testOut),
-    label: "SDK `npm test` run recorded in S3-1: 8/8 tests pass",
+    ok: S3_EVIDENCE.sdkTestStderr !== undefined && /# pass 13/.test(testOut) && /# fail 0/.test(testOut) && /1\.\.13/.test(testOut),
+    label: "SDK `npm test` run recorded in S3-1: 13/13 tests pass (8 ESM + 5 IIFE)",
     detail: (testOut.match(/# pass \d+/) ?? ["missing"])[0],
   });
   checks.push({
@@ -5524,17 +6031,18 @@ function checkS3Scope() {
     { name: "pixel replay", re: /rrweb|html2canvas|MediaRecorder|toDataURL|screenshot/i },
     { name: "realtime", re: /new\s+EventSource|new\s+WebSocket|SseEmitter|@ServerEndpoint/ },
     { name: "persistence", re: /localStorage|sessionStorage|indexedDB/ },
-    { name: "launcher/idea", re: /launcher|intellij|idea-plugin|LaunchConfig|VirtualMachine\.attach|tools\.jar/i },
+    { name: "sourcemap/build-plugin", re: /sourceMappingURL|sourcesContent|unplugin|webpack|rollup-plugin|vite-plugin-/i },
+    { name: "cdn/telemetry", re: /cdn\.jsdelivr|unpkg\.com|cdnjs\.cloudflare|google-analytics|segment\.io/i },
   ];
   const markerHits = [];
-  for (const file of productCode) {
+  for (const file of productCode.filter((entry) => !entry.rel.includes("/test/"))) {
     for (const marker of forbiddenMarkers) {
       if (marker.re.test(file.text)) markerHits.push(`${file.rel} [${marker.name}]`);
     }
   }
   checks.push({
     ok: markerHits.length === 0,
-    label: "no S4/S5 capability: no launcher/IDEA/JAR attach, no pixel replay, no SSE/WS, no client persistence",
+    label: "no S5/S6 capability: no pixel replay, no SSE/WS, no client persistence, no sourcemap/build plugin, no CDN/telemetry",
     detail: markerHits.slice(0, 5).join(",") || "none",
   });
 
@@ -5556,7 +6064,9 @@ function checkS3Scope() {
   });
 
   const valuesHits = productCode.filter((file) =>
-    /["']values["']\s*:|\bvalues\s*:/.test(file.text)).map((file) => file.rel);
+    // S5 values[] field diff is a JSON/event payload key; a TS local `values: number[]`
+    // (workbench per-invocation rows) is S4 UI state, not a values[] payload.
+    /["']values["']\s*:/.test(file.text)).map((file) => file.rel);
   checks.push({
     ok: valuesHits.length === 0,
     label: "no values[] field diff / L2 payload in SDK, agent or collector",
@@ -5652,9 +6162,9 @@ function checkS3Scope() {
 
   gate(
     "S3-8",
-    "scope/security: no S4/S5 (launcher/IDEA/JAR, sourcemap/build plugin/L2, pixel replay, SSE/WS, persistence), SDK no secrets/CDN/PII, loopback, no external $ref",
+    "scope/security: no S5/S6 (sourcemap/build plugin/L2, pixel replay, SSE/WS, persistence), SDK no secrets/CDN/PII, loopback, no external $ref; S4 launcher is allowed",
     checks,
-    `grep -rnE "launcher|rrweb|EventSource|WebSocket|localStorage|sourcemap" frontend/sdk workbench/src demo/buggy-shop-boot-vue/frontend/src server/collector/src agent/src`,
+    `grep -rnE "rrweb|EventSource|WebSocket|localStorage|sourceMappingURL" frontend/sdk/src workbench/src demo/buggy-shop-boot-vue/frontend/src server/collector/src agent/src`,
   );
 }
 
@@ -6046,11 +6556,2312 @@ function checkV8() {
 }
 
 /* ------------------------------------------------------------------ */
+/* S4 tester part 1: BUILD + A (idea) + B (jar/stop) + C (handshake)   */
+/* ------------------------------------------------------------------ */
+
+/** Unique per-run suffix for test pid/log files (never reuse another tester's names). */
+function s4Unique(label) {
+  return `s4-${label}-${process.pid}-${Date.now().toString(36)}`;
+}
+
+/** Read META-INF/MANIFEST.MF from a jar via the JDK21 `jar` tool (tar fallback). */
+function s4Manifest(jarAbs) {
+  const dir = path.join(os.tmpdir(), `traceboard-s4-manifest-${process.pid}-${Date.now().toString(36)}`);
+  mkdirSync(dir, { recursive: true });
+  tmpDirs.push(dir);
+  const jarExe = `${JDK21_HOME}/bin/jar.exe`;
+  const result = existsSync(jarExe)
+    ? runExe(jarExe, ["xf", jarAbs, "META-INF/MANIFEST.MF"], { cwd: dir, timeout: 60000 })
+    : runExe("tar", ["-xf", jarAbs, "META-INF/MANIFEST.MF"], { cwd: dir, timeout: 60000 });
+  const file = path.join(dir, "META-INF", "MANIFEST.MF");
+  return {
+    ok: existsSync(file),
+    text: existsSync(file) ? readFileSync(file, "utf8") : "",
+    detail: result.code === 0 ? "extracted" : `exit=${result.code} ${(result.stderr || "").slice(0, 160)}`,
+  };
+}
+
+/**
+ * S4-BUILD: the root JDK21 reactor (agent + collector + launcher) builds, the launcher jar
+ * carries Main-Class/Implementation-Version and runs with JDK21, and the demo/agent/collector
+ * jars used by S4-A/B/C exist (the demo is built with JDK8 on demand).
+ */
+function checkS4Builds() {
+  section("S4-BUILD: root reactor (JDK21) incl. launcher + demo/agent jars");
+  const checks = [];
+  const started = Date.now();
+  const build = runShell("mvn -q -DskipTests package", {
+    cwd: REPO,
+    env: { ...process.env, JAVA_HOME: JDK21_HOME },
+  });
+  const buildOut = `${build.stdout}\n${build.stderr}`;
+  checks.push({
+    ok: build.code === 0 && !build.error && !build.signal && !/BUILD FAILURE/.test(buildOut),
+    label: "root reactor `mvn -q -DskipTests package` with JAVA_HOME=JDK21 exit 0",
+    detail: `exit=${build.code} ${((Date.now() - started) / 1000).toFixed(1)}s ${lastLines(buildOut, 2).join(" | ").slice(0, 300)}`,
+  });
+
+  const rootPom = readFileSync(abs("pom.xml"), "utf8");
+  checks.push({
+    ok: /<module>server\/launcher<\/module>/.test(rootPom),
+    label: "root pom reactor modules include server/launcher (launcher built by the reactor)",
+    detail: "pom.xml",
+  });
+
+  const launcherJar = abs(S4_LAUNCHER_JAR_REL);
+  const launcherExists = existsSync(launcherJar) && statSync(launcherJar).size > 0;
+  checks.push({
+    ok: launcherExists,
+    label: "launcher jar exists (server/launcher/target/traceboard-launcher-0.1.0-SNAPSHOT.jar)",
+    detail: launcherExists ? `${statSync(launcherJar).size} bytes` : "missing",
+  });
+  const manifest = launcherExists ? s4Manifest(launcherJar) : { ok: false, text: "", detail: "jar missing" };
+  checks.push({
+    ok: manifest.ok && /Main-Class:\s*io\.traceboard\.launcher\.Launcher\b/.test(manifest.text),
+    label: "launcher MANIFEST has Main-Class: io.traceboard.launcher.Launcher",
+    detail: manifest.detail,
+  });
+  checks.push({
+    ok: manifest.ok && /Implementation-Version:\s*0\.1\.0-SNAPSHOT/.test(manifest.text),
+    label: "launcher MANIFEST has Implementation-Version: 0.1.0-SNAPSHOT",
+    detail: manifest.ok ? "ok" : "manifest unreadable",
+  });
+  const help = launcherExists ? runLauncher(["--help"], { timeout: 60000 }) : { code: null, stdout: "", stderr: "jar missing" };
+  checks.push({
+    ok: help.code === 0 && /用法|usage/i.test(help.stdout),
+    label: "launcher runs with JDK21 and `--help` exits 0",
+    detail: `exit=${help.code}`,
+  });
+
+  const demoJar = abs(DEMO_JAR_REL);
+  if (!existsSync(demoJar)) {
+    const demoBuild = runShell("mvn -q -DskipTests package", {
+      cwd: abs("demo/buggy-shop-boot-vue/backend"),
+      env: { ...process.env, JAVA_HOME: JDK8_HOME },
+    });
+    checks.push({
+      ok: demoBuild.code === 0 && !demoBuild.error && existsSync(demoJar),
+      label: "demo jar missing -> rebuilt with JDK8 `mvn -q -DskipTests package`",
+      detail: `exit=${demoBuild.code} ${lastLines(`${demoBuild.stdout}\n${demoBuild.stderr}`, 2).join(" | ").slice(0, 240)}`,
+    });
+  } else {
+    checks.push({ ok: true, label: "demo jar exists (JDK8 build output)", detail: DEMO_JAR_REL });
+  }
+  checks.push({ ok: existsSync(abs(AGENT_JAR_REL)), label: "agent jar exists", detail: AGENT_JAR_REL });
+  checks.push({ ok: existsSync(abs(COLLECTOR_JAR_REL)), label: "collector jar exists", detail: COLLECTOR_JAR_REL });
+
+  return gate(
+    "S4-BUILD",
+    "S4 builds: reactor incl. launcher, launcher Main-Class/version/runnable, demo+agent+collector jars",
+    checks,
+    `JAVA_HOME="${JDK21_HOME}" mvn -q -DskipTests package`,
+  );
+}
+
+/**
+ * S4-A: `idea` is print-only. Exact VM options (absolute -javaagent, derived
+ * <collector>/ingest/v1/events, session), 5-step checklist, exit 0, no spawned java, and the
+ * usage contract (legacy --ingest -> exit 2; missing/failed jar/agent -> tokens).
+ */
+async function checkS4A() {
+  section("S4-A: launcher `idea` (print-only, exact VM options, no child process)");
+  const checks = [];
+  const demoJar = abs(DEMO_JAR_REL);
+  const agentJar = abs(AGENT_JAR_REL);
+  const agentFwd = agentJar.split(path.sep).join("/");
+  const expectedVm = `-javaagent:"${agentFwd}" -Dtraceboard.ingestUrl="http://127.0.0.1:8601/ingest/v1/events" -Dtraceboard.sessionId=s_s4idea`;
+  const portBefore = listeningOn(8080).lines.length;
+  const pidsBefore = javaPids();
+
+  const idea = runLauncher([
+    "idea", "--jar", demoJar, "--agent", agentJar,
+    "--collector", "http://127.0.0.1:8601", "--session", "s_s4idea",
+  ], { timeout: 60000 });
+  const pidsAfter = javaPids();
+  const newPids = pidsAfter.filter((pid) => !pidsBefore.includes(pid));
+  const portAfter = listeningOn(8080).lines.length;
+  const out = `${idea.stdout}\n${idea.stderr}`;
+  const vmLine = idea.stdout.split(/\r?\n/).find((line) => line.includes("-javaagent:")) ?? "";
+
+  checks.push({
+    ok: idea.code === 0 && !idea.error,
+    label: "idea exits 0",
+    detail: `exit=${idea.code}${idea.error ? ` error=${idea.error.message}` : ""}`,
+  });
+  checks.push({
+    ok: idea.stdout.includes(expectedVm),
+    label: "exact VM options: absolute quoted -javaagent + derived /ingest/v1/events + session",
+    detail: show(vmLine),
+  });
+  checks.push({
+    ok: /^1\) /m.test(out) && /^2\) /m.test(out) && /^3\) /m.test(out) && /^4\) /m.test(out) && /^5\) /m.test(out) && /步骤:/.test(out),
+    label: "5-step checklist (1..5) printed",
+    detail: lastLines(out, 12).join(" | ").slice(0, 300),
+  });
+  checks.push({
+    ok: newPids.length === 0,
+    label: "idea spawned no java child (java pid delta empty)",
+    detail: newPids.length ? `new=${newPids.join(",")}` : `pids=${pidsAfter.join(",") || "none"}`,
+  });
+  checks.push({
+    ok: portAfter === portBefore,
+    label: "idea did not start/stop anything on port 8080",
+    detail: `listeners before=${portBefore} after=${portAfter}`,
+  });
+
+  const legacy = runLauncher([
+    "idea", "--jar", demoJar, "--agent", agentJar,
+    "--ingest", "http://127.0.0.1:8601/ingest/v1/events", "--session", "s_s4idea",
+  ], { timeout: 60000 });
+  checks.push({
+    ok: legacy.code === 2 && /--collector/.test(legacy.stderr) && /--ingest/.test(legacy.stderr),
+    label: "legacy --ingest -> exit 2 + advice to use --collector",
+    detail: `exit=${legacy.code} ${lastLines(legacy.stderr, 2).join(" | ").slice(0, 240)}`,
+  });
+
+  const noSession = runLauncher(["idea", "--jar", demoJar, "--agent", agentJar], { timeout: 60000 });
+  checks.push({
+    ok: noSession.code === 2,
+    label: "missing --session -> exit 2 (usage)",
+    detail: `exit=${noSession.code} ${lastLines(noSession.stderr, 1).join("")}`,
+  });
+
+  const missingJar = abs(`work/${s4Unique("missing-jar")}.jar`);
+  const badJar = runLauncher(["idea", "--jar", missingJar, "--agent", agentJar, "--session", "s_s4idea"], { timeout: 60000 });
+  checks.push({
+    ok: badJar.code === 3 && /JAR_NOT_FOUND/.test(badJar.stderr),
+    label: "missing --jar -> exit 3 + JAR_NOT_FOUND",
+    detail: `exit=${badJar.code} ${lastLines(badJar.stderr, 1).join("").slice(0, 240)}`,
+  });
+
+  const missingAgent = abs(`work/${s4Unique("missing-agent")}.jar`);
+  const badAgent = runLauncher(["idea", "--jar", demoJar, "--agent", missingAgent, "--session", "s_s4idea"], { timeout: 60000 });
+  checks.push({
+    ok: badAgent.code === 3 && /AGENT_NOT_FOUND/.test(badAgent.stderr),
+    label: "missing --agent -> exit 3 + AGENT_NOT_FOUND",
+    detail: `exit=${badAgent.code} ${lastLines(badAgent.stderr, 1).join("").slice(0, 240)}`,
+  });
+
+  S4_EVIDENCE.launch = {
+    exit: idea.code,
+    vmLine,
+    steps: [1, 2, 3, 4, 5].filter((n) => new RegExp(`^${n}\\) `, "m").test(out)).length,
+    newPids,
+  };
+  return gate(
+    "S4-A",
+    "launcher `idea`: exact VM options/session, 5 steps, exit 0, no child java; legacy/usage exits",
+    checks,
+    `"${JDK21_JAVA}" -jar "${S4_LAUNCHER_JAR_REL}" idea --jar "${DEMO_JAR_REL}" --agent "${AGENT_JAR_REL}" --collector "http://127.0.0.1:8601" --session "s_s4idea"`,
+  );
+}
+
+/**
+ * S4-B: `jar --detach` with the JDK8 demo + agent against a live collector, then `stop`.
+ * Asserts PID/log files, health, handshake, a real cancel request producing agent events,
+ * port release, idempotent NOT_RUNNING, PID_MISMATCH refusal for a foreign pid file, and no
+ * orphan java processes. All pid/log files are unique and removed in `finally`.
+ */
+async function checkS4B() {
+  section("S4-B: launcher `jar --detach` + `stop` (collector 8601, JDK8 demo, handshake)");
+  const checks = [];
+  const demoJar = abs(DEMO_JAR_REL);
+  const agentJar = abs(AGENT_JAR_REL);
+  const collectorJar = abs(COLLECTOR_JAR_REL);
+  const suffix = `${process.pid}-${Date.now().toString(36)}`;
+  const pidFileRel = `work/s4-test-${suffix}.pid`;
+  const pidFileAbs = abs(pidFileRel);
+  const foreignRel = `work/s4-test-foreign-${suffix}.pid`;
+  const foreignAbs = abs(foreignRel);
+  const logsDirAbs = abs("work/logs");
+  const logsBefore = new Set(existsSync(logsDirAbs) ? readdirSync(logsDirAbs) : []);
+  const port8601 = listeningOn(8601);
+  const port8080 = listeningOn(8080);
+  const pre = [
+    { ok: existsSync(demoJar), label: "demo jar exists", detail: DEMO_JAR_REL },
+    { ok: existsSync(agentJar), label: "agent jar exists", detail: AGENT_JAR_REL },
+    { ok: existsSync(collectorJar), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: port8601.supported && port8601.lines.length === 0, label: "port 8601 free before start", detail: port8601.lines.join(" | ") || "no listener" },
+    { ok: port8080.supported && port8080.lines.length === 0, label: "port 8080 free before start", detail: port8080.lines.join(" | ") || "no listener" },
+  ];
+  const repro = `"${JDK21_JAVA}" -jar "${S4_LAUNCHER_JAR_REL}" jar --jar "${DEMO_JAR_REL}" --agent "${AGENT_JAR_REL}" --collector "http://127.0.0.1:8601" --session "${S4_SESSION}" --java "${JDK8_JAVA}" --port 8080 --detach --pid-file "${pidFileRel}" --log-dir "work/logs" && "${JDK21_JAVA}" -jar "${S4_LAUNCHER_JAR_REL}" stop --pid-file "${pidFileRel}"`;
+  if (!pre.every((item) => item.ok)) {
+    return record(
+      "S4-B",
+      "launcher `jar --detach` + `stop` (preconditions)",
+      false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      repro,
+    );
+  }
+
+  const baselinePids = javaPids();
+  let collector = null;
+  let demoPid = null;
+  try {
+    collector = startJavaServer("collector(8601) S4-B", JDK21_JAVA, ["-jar", collectorJar], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({
+      ok: Boolean(health),
+      label: "collector 8601 /actuator/health 200 before launching the demo",
+      detail: health ? `status=${health.status}` : "timeout",
+    });
+
+    if (health) {
+      const launch = runLauncher([
+        "jar", "--jar", demoJar, "--agent", agentJar,
+        "--collector", "http://127.0.0.1:8601", "--session", S4_SESSION,
+        "--java", JDK8_JAVA, "--port", "8080", "--detach",
+        "--pid-file", pidFileRel, "--log-dir", "work/logs",
+      ], { timeout: 150000 });
+      const launchOut = `${launch.stdout}\n${launch.stderr}`;
+      const pidMatch = launchOut.match(/^PID=(\d+)$/m);
+      demoPid = pidMatch ? Number(pidMatch[1]) : null;
+      if (demoPid === null) {
+        // APP_EXITED / HEALTH_TIMEOUT print pid=...; still clean it up in finally.
+        const anyPid = launchOut.match(/pid=(\d+)/i);
+        if (anyPid) demoPid = Number(anyPid[1]);
+      }
+      const pidFileLine = launchOut.match(/^PID_FILE=(.+)$/m);
+      const logDirLine = launchOut.match(/^LOG_DIR=(.+)$/m);
+      const logDir = logDirLine ? logDirLine[1].trim() : logsDirAbs;
+
+      checks.push({
+        ok: launch.code === 0 && !launch.error,
+        label: "jar --detach exits 0 after READY",
+        detail: `exit=${launch.code}${launch.error ? ` error=${launch.error.message}` : ""} ${lastLines(launchOut, 6).join(" | ").slice(0, 300)}`,
+      });
+      checks.push({
+        ok: /^READY pid=\d+/m.test(launchOut),
+        label: "stdout has READY pid=<n>",
+        detail: show(launchOut.split(/\r?\n/).find((line) => line.startsWith("READY ")) ?? ""),
+      });
+      checks.push({
+        ok: demoPid !== null && pidAlive(demoPid),
+        label: "detached demo java process is alive",
+        detail: demoPid === null ? "PID= not parsed" : `pid=${demoPid}`,
+      });
+      checks.push({
+        ok: pidFileLine !== null && path.resolve(REPO, pidFileLine[1].trim()) === pidFileAbs,
+        label: "PID_FILE printed and pid file path matches the requested unique file",
+        detail: pidFileLine ? pidFileLine[1] : "missing",
+      });
+      checks.push({
+        ok: logDirLine !== null && path.resolve(REPO, logDirLine[1].trim()) === logsDirAbs,
+        label: "LOG_DIR printed (work/logs)",
+        detail: logDirLine ? logDirLine[1] : "missing",
+      });
+
+      let pidJson = null;
+      if (existsSync(pidFileAbs)) {
+        const parsedPid = parseJson(readFileSync(pidFileAbs, "utf8"));
+        pidJson = parsedPid.ok ? parsedPid.value : null;
+      }
+      checks.push({
+        ok: pidJson !== null && pidJson.pid === demoPid && Number(pidJson.startedAtMs) > 0 &&
+          String(pidJson.jar).replace(/\\/g, "/").endsWith(DEMO_JAR_REL) &&
+          /jdk1\.8\.0_221\/bin\/java\.exe$/.test(String(pidJson.java).replace(/\\/g, "/")),
+        label: "PID JSON {pid,startedAtMs,java(JDK8),jar(demo)} matches the detached process",
+        detail: pidJson ? show(pidJson) : "missing/unparsable",
+      });
+
+      const logNames = existsSync(logDir) ? readdirSync(logDir) : [];
+      const newLogs = logNames.filter((name) => !logsBefore.has(name) && name.startsWith(`${S4_SESSION}-`));
+      checks.push({
+        ok: newLogs.some((name) => name.endsWith(".out.log")) && newLogs.some((name) => name.endsWith(".err.log")),
+        label: "per-run out.log + err.log created in work/logs",
+        detail: newLogs.join(",") || "none",
+      });
+
+      const orders = await tryRequest(8080, "/api/orders", { method: "GET" }, 10000);
+      checks.push({
+        ok: orders.ok && orders.status === 200,
+        label: "health endpoint GET http://127.0.0.1:8080/api/orders -> 200",
+        detail: orders.ok ? `status=${orders.status}` : String(orders.error),
+      });
+
+      const handshake = await pollUntil(async () => {
+        const res = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_SESSION}/agent`, { method: "GET" }, 5000);
+        if (!res.ok || res.status !== 200) return null;
+        const parsed = parseJson(res.text);
+        return parsed.ok && parsed.value?.connected === true ? { res, value: parsed.value } : null;
+      }, 30000, 500);
+      const hs = handshake?.value ?? {};
+      checks.push({
+        ok: Boolean(handshake) && hs.sessionId === S4_SESSION && typeof hs.version === "string" &&
+          hs.version.length > 0 && hs.version.length <= 64 && hs.pid === demoPid &&
+          Number.isInteger(hs.startedAtMs) && hs.startedAtMs >= 0 && Number.isInteger(hs.lastSeenMs) && hs.lastSeenMs > 0,
+        label: "handshake GET /api/v1/sessions/s_s4launcher/agent -> 200 connected:true (agent pid matches)",
+        detail: handshake ? show(handshake.value) : "404/timeout (agent hello not recorded)",
+      });
+
+      const cancel = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" }, 15000);
+      checks.push({
+        ok: cancel.ok && cancel.status >= 200 && cancel.status < 300,
+        label: "POST /api/orders/1/cancel -> 2xx",
+        detail: cancel.ok ? `status=${cancel.status} body=${show(cancel.text)}` : String(cancel.error),
+      });
+
+      const events = await pollUntil(async () => {
+        const page = await getEventsPage(S4_SESSION, "?afterSeq=0&limit=200");
+        const list = Array.isArray(page.value.events) ? page.value.events : [];
+        return page.res.ok && page.res.status === 200 && list.length >= 4 ? list : null;
+      }, 25000, 500);
+      checks.push({
+        ok: Boolean(events) && events.every((entry) => entry?.event?.sessionId === S4_SESSION),
+        label: "collector recorded >=4 agent events for s_s4launcher",
+        detail: events ? `events=${events.length} kinds=${events.map((entry) => entry.event.kind).join(",")}` : "timeout",
+      });
+
+      const stop = runLauncher(["stop", "--pid-file", pidFileAbs], { timeout: 60000 });
+      checks.push({
+        ok: stop.code === 0 && demoPid !== null && new RegExp(`STOPPED pid=${demoPid}\\b`).test(stop.stdout),
+        label: "stop --pid-file -> exit 0 + STOPPED pid=<demo pid>",
+        detail: `exit=${stop.code} stdout=${show(stop.stdout)} stderr=${show(stop.stderr)}`,
+      });
+      const portReleased = demoPid !== null
+        ? await pollUntil(async () => listeningOn(8080).lines.length === 0 && !pidAlive(demoPid), 20000, 500)
+        : false;
+      checks.push({
+        ok: Boolean(portReleased),
+        label: "stop releases port 8080 and the demo pid is gone",
+        detail: `listeners=${listeningOn(8080).lines.join(" | ") || "none"} alive=${demoPid !== null && pidAlive(demoPid)}`,
+      });
+      checks.push({
+        ok: !existsSync(pidFileAbs),
+        label: "stop deletes the PID file",
+        detail: existsSync(pidFileAbs) ? "still present" : "deleted",
+      });
+
+      const stopAgain = runLauncher(["stop", "--pid-file", pidFileAbs], { timeout: 60000 });
+      checks.push({
+        ok: stopAgain.code === 0 && /NOT_RUNNING/.test(stopAgain.stdout),
+        label: "repeat stop -> exit 0 + NOT_RUNNING (idempotent)",
+        detail: `exit=${stopAgain.code} stdout=${show(stopAgain.stdout)}`,
+      });
+
+      writeFileSync(foreignAbs, `${JSON.stringify({
+        pid: process.pid,
+        startedAtMs: 0,
+        java: `${JDK8_HOME}/bin/java.exe`.replace(/\\/g, "/"),
+        jar: "C:/traceboard/fake-demo.jar",
+      })}\n`, "utf8");
+      const foreign = runLauncher(["stop", "--pid-file", foreignAbs], { timeout: 60000 });
+      checks.push({
+        ok: foreign.code === 3 && /PID_MISMATCH/.test(foreign.stderr) && !/STOPPED/.test(foreign.stdout) && pidAlive(process.pid),
+        label: "foreign pid file (current node pid) -> exit 3 PID_MISMATCH, process not killed",
+        detail: `exit=${foreign.code} stderr=${show(foreign.stderr)}`,
+      });
+
+      await stopServer(collector);
+      collector = null;
+      await sleep(1200);
+      const nowPids = javaPids();
+      const leaks = nowPids.filter((pid) => !baselinePids.includes(pid));
+      checks.push({
+        ok: leaks.length === 0 && (demoPid === null || !nowPids.includes(demoPid)),
+        label: "no orphan java processes after stop + collector shutdown",
+        detail: leaks.length ? `leaked=${leaks.join(",")}` : `java pids=${nowPids.join(",") || "none"}`,
+      });
+    }
+  } finally {
+    if (demoPid !== null && pidAlive(demoPid)) {
+      spawnSync("taskkill", ["/PID", String(demoPid), "/T", "/F"], { windowsHide: true });
+    }
+    if (collector) await stopServer(collector);
+    for (const file of [pidFileAbs, foreignAbs]) {
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+    try {
+      for (const name of readdirSync(logsDirAbs)) {
+        if (!logsBefore.has(name) && name.startsWith(`${S4_SESSION}-`)) {
+          rmSync(path.join(logsDirAbs, name), { force: true });
+        }
+      }
+    } catch {
+      /* best effort */
+    }
+  }
+
+  S4_EVIDENCE.launch = { ...(S4_EVIDENCE.launch ?? {}), detachedPid: demoPid };
+  return gate(
+    "S4-B",
+    "launcher `jar --detach`/`stop`: PID+logs, health, handshake, cancel events, port release, NOT_RUNNING, PID_MISMATCH, no orphans",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S4-C: the agent handshake is a control path, not an event. Exact 200 body, GET agent shape,
+ * fixed failure order (405 -> 415 -> 413 -> 400), last-wins, 404/405, and the invariants
+ * (no session, no event, no seq, meta stays 5 keys).
+ */
+async function checkS4C() {
+  section("S4-C: agent handshake (/ingest/v1/agent-hello + GET .../agent)");
+  const checks = [];
+  const collectorJar = abs(COLLECTOR_JAR_REL);
+  const port = listeningOn(8601);
+  const pre = [
+    { ok: existsSync(collectorJar), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: port.supported && port.lines.length === 0, label: "port 8601 free before start", detail: port.lines.join(" | ") || "no listener" },
+  ];
+  const repro = `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/agent-hello" -H "Content-Type: application/json; charset=utf-8" --data-binary '{"schema":"traceboard.agent.v1","sessionId":"s_s4hello","version":"0.1.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000}'`;
+  if (!pre.every((item) => item.ok)) {
+    return record(
+      "S4-C",
+      "agent handshake contract (preconditions)",
+      false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      repro,
+    );
+  }
+
+  const helloBody = `{"schema":"traceboard.agent.v1","sessionId":"${S4_HELLO_SESSION}","version":"0.1.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000}`;
+  const agentShape = /^\{"sessionId":"s_s4hello","connected":true,"version":"0\.1\.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000,"lastSeenMs":\d+\}$/;
+  let collector = null;
+  try {
+    collector = startJavaServer("collector(8601) S4-C", JDK21_JAVA, ["-jar", collectorJar], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(health), label: "collector health 200", detail: health ? "UP" : "timeout" });
+
+    if (health) {
+      const valid = await postJson(helloBody);
+      checks.push({
+        ok: valid.ok && valid.status === 200 && valid.text.trim() === S4_HELLO_ACCEPTED,
+        label: "valid hello -> 200 exact {schema,sessionId,accepted:true}",
+        detail: valid.ok ? `status=${valid.status} body=${show(valid.text)}` : String(valid.error),
+      });
+
+      const agent1 = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_HELLO_SESSION}/agent`, { method: "GET" }, 10000);
+      const agent1Parsed = agent1.ok ? parseJson(agent1.text.trim()) : { ok: false };
+      checks.push({
+        ok: agent1.ok && agent1.status === 200 && agentShape.test(agent1.text.trim()) &&
+          agent1Parsed.ok && Object.keys(agent1Parsed.value ?? {}).length === 6 &&
+          Number(agent1Parsed.value.lastSeenMs) > 0,
+        label: "GET agent -> 200 exact 6-field shape (connected:true, collector lastSeenMs)",
+        detail: agent1.ok ? `status=${agent1.status} body=${show(agent1.text)}` : String(agent1.error),
+      });
+      const agent2 = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_HELLO_SESSION}/agent`, { method: "GET" }, 10000);
+      checks.push({
+        ok: agent2.ok && agent2.status === 200 && agent2.text === agent1.text,
+        label: "repeated GET agent (no new hello) is byte-identical (read-only)",
+        detail: agent2.ok && agent2.text === agent1.text ? "identical" : `a=${show(agent1.text)} b=${show(agent2.text)}`,
+      });
+
+      const badJson = await postJson("{S4C-INVALID");
+      checks.push(...envelopeChecks(badJson, 400, "bad_request", "invalid JSON hello", ["S4C-INVALID"]));
+
+      const oversize = await postJson(JSON.stringify({
+        schema: "traceboard.agent.v1",
+        sessionId: S4_HELLO_SESSION,
+        version: "0.1.0-SNAPSHOT",
+        pid: 1,
+        startedAtMs: 0,
+        pad: `S4C-OVERSIZE-${"a".repeat(4200)}`,
+      }));
+      checks.push(...envelopeChecks(oversize, 413, "payload_too_large", ">4096B hello body", ["S4C-OVERSIZE"]));
+
+      const wrongType = await postJson(helloBody, "text/plain");
+      checks.push(...envelopeChecks(wrongType, 415, "unsupported_media_type", "text/plain hello", []));
+
+      const bigPlain = await postJson(JSON.stringify({ pad: "a".repeat(5000) }), "text/plain");
+      checks.push({
+        ok: bigPlain.ok && bigPlain.status === 415,
+        label: "oversized body + text/plain -> 415 (media type is decided before size)",
+        detail: bigPlain.ok ? `status=${bigPlain.status}` : String(bigPlain.error),
+      });
+
+      const getHello = await requestBase(COLLECTOR_BASE, "/ingest/v1/agent-hello", { method: "GET" }, 10000);
+      checks.push({
+        ok: getHello.ok && getHello.status === 405,
+        label: "GET /ingest/v1/agent-hello -> 405 (non-POST)",
+        detail: getHello.ok ? `status=${getHello.status}` : String(getHello.error),
+      });
+
+      const agentAfterFailures = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_HELLO_SESSION}/agent`, { method: "GET" }, 10000);
+      const afterParsed = agentAfterFailures.ok ? parseJson(agentAfterFailures.text.trim()) : { ok: false };
+      checks.push({
+        ok: agentAfterFailures.ok && agentAfterFailures.status === 200 && afterParsed.ok &&
+          afterParsed.value.pid === 12345 && afterParsed.value.version === "0.1.0-SNAPSHOT",
+        label: "failed hellos (400/413/415) do not overwrite the recorded handshake",
+        detail: agentAfterFailures.ok ? show(agentAfterFailures.text) : String(agentAfterFailures.error),
+      });
+
+      const postAgent = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_HELLO_SESSION}/agent`, { method: "POST" }, 10000);
+      checks.push({
+        ok: postAgent.ok && postAgent.status === 405,
+        label: "POST .../agent -> 405 (GET only)",
+        detail: postAgent.ok ? `status=${postAgent.status}` : String(postAgent.error),
+      });
+
+      const unknown = await requestBase(COLLECTOR_BASE, "/api/v1/sessions/s_none_s4/agent", { method: "GET" }, 10000);
+      checks.push(...envelopeChecks(unknown, 404, "not_found", "unknown session agent", []));
+
+      const invalidShape = await requestBase(COLLECTOR_BASE, "/api/v1/sessions/not_a_session/agent", { method: "GET" }, 10000);
+      checks.push({
+        ok: invalidShape.ok && invalidShape.status === 404,
+        label: "invalid sessionId shape on GET agent -> 404 (not 400)",
+        detail: invalidShape.ok ? `status=${invalidShape.status}` : String(invalidShape.error),
+      });
+
+      const winBody = `{"schema":"traceboard.agent.v1","sessionId":"${S4_HELLO_SESSION}","version":"9.9.9-wins","pid":222,"startedAtMs":42,"extra":"ignored"}`;
+      const win = await postJson(winBody);
+      const winAgent = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_HELLO_SESSION}/agent`, { method: "GET" }, 10000);
+      const winParsed = winAgent.ok ? parseJson(winAgent.text.trim()) : { ok: false };
+      checks.push({
+        ok: win.ok && win.status === 200 && win.text.trim() === S4_HELLO_ACCEPTED &&
+          winParsed.ok && winParsed.value.version === "9.9.9-wins" && winParsed.value.pid === 222 &&
+          winParsed.value.startedAtMs === 42 && Object.keys(winParsed.value).length === 6,
+        label: "last-wins: second hello replaces version/pid/startedAtMs, unknown field ignored",
+        detail: winAgent.ok ? show(winAgent.text) : String(winAgent.error),
+      });
+
+      const sessionsRes = await requestBase(COLLECTOR_BASE, "/api/v1/sessions", { method: "GET" }, 10000);
+      const sessionsParsed = sessionsRes.ok ? parseJson(sessionsRes.text) : { ok: false };
+      const sessions = Array.isArray(sessionsParsed.value?.sessions) ? sessionsParsed.value.sessions : [];
+      checks.push({
+        ok: sessionsRes.ok && sessionsRes.status === 200 && !sessions.some((item) => item?.sessionId === S4_HELLO_SESSION),
+        label: "hello-only session does not appear in GET /api/v1/sessions",
+        detail: `sessions=${sessions.map((item) => item?.sessionId).join(",") || "none"}`,
+      });
+      const helloEvents = await getEventsPage(S4_HELLO_SESSION);
+      checks.push(...envelopeChecks(helloEvents.res, 404, "not_found", "hello-only session events", []));
+
+      const firstEvent = readFileSync(abs(EVENTS_REL), "utf8").split(/\r?\n/).find((line) => line.trim() !== "");
+      const ingest = await postNdjson("/ingest/v1/events", `${firstEvent}\n`, `${NDJSON}; charset=utf-8`);
+      const ingestBody = ingest.ok ? parseJson(ingest.text) : { ok: false };
+      const fixtureSession = "s_demo_s0_case_a";
+      const page = await getEventsPage(fixtureSession, "?afterSeq=0&limit=10");
+      const pageEvents = Array.isArray(page.value.events) ? page.value.events : [];
+      checks.push({
+        ok: ingest.ok && ingest.status === 202 && ingestBody.ok && ingestBody.value?.accepted === 1 &&
+          page.res.ok && page.res.status === 200 && pageEvents.length === 1 &&
+          pageEvents[0].seq === 1 && page.value.nextSeq === 1,
+        label: "hellos consumed no seq: first real event after 4 hellos has seq=1/nextSeq=1",
+        detail: `ingest=${ingest.status} ${show(ingest.text)} page=${show(page.value)}`,
+      });
+
+      const meta = await requestBase(COLLECTOR_BASE, "/api/v1/meta", { method: "GET" }, 10000);
+      const metaBody = meta.ok ? parseJson(meta.text) : { ok: false };
+      const caps = metaBody.ok && metaBody.value && typeof metaBody.value.capabilities === "object" ? metaBody.value.capabilities : {};
+      checks.push({
+        ok: meta.ok && meta.status === 200 && deepEqual(Object.keys(caps), S4_META_KEYS) &&
+          caps.health === true && caps.meta === true && caps.ingestEvents === true &&
+          caps.realtime === false && caps.replay === true,
+        label: "meta capabilities still exactly 5 keys (realtime=false, replay=true; hello is not a capability)",
+        detail: `keys=${Object.keys(caps).join(",")}`,
+      });
+
+      S4_EVIDENCE.hello = {
+        accepted: valid.ok ? valid.text.trim() : null,
+        agent: agent1.ok ? agent1.text.trim() : null,
+        lastWins: winAgent.ok ? winAgent.text.trim() : null,
+      };
+    }
+  } finally {
+    await stopServer(collector);
+  }
+
+  return gate(
+    "S4-C",
+    "agent handshake: exact 200 body, GET agent shape/404/405, 415->413->400, last-wins, no session/event/seq, meta 5 keys",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S4-D: preview reverse proxy (static stub 18080 -> launcher preview 8602 -> collector 8601).
+ * Asserts injection right before the last </body> with two external scripts, recomputed UTF-8
+ * Content-Length, stripped Content-Encoding/Transfer-Encoding/ETag/Last-Modified, local
+ * config.js/sdk.js, byte-exact pass-through for head/no_body/status/encoding/not_html/too_large,
+ * the /ingest/v1/events proxy (202) vs other /ingest/* (404), collector-down 502, target-down
+ * 502 not-injected:read_error and SDK_IIFE_MISSING. Preview/stub/collector are always stopped.
+ */
+async function checkS4D() {
+  section("S4-D: preview injection + reverse proxy (stub 18080, collector 8601, preview 8602)");
+  const checks = [];
+  const collectorJar = abs(COLLECTOR_JAR_REL);
+  const launcherJar = abs(S4_LAUNCHER_JAR_REL);
+  const sdkIife = abs(S4_SDK_IIFE_REL);
+  const portStates = [8601, 8602, S4_STUB_PORT].map((port) => ({ port, state: listeningOn(port) }));
+  const pre = [
+    { ok: existsSync(collectorJar), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: existsSync(launcherJar), label: "launcher jar exists", detail: S4_LAUNCHER_JAR_REL },
+    { ok: existsSync(sdkIife), label: "SDK IIFE exists (repo-root default for preview)", detail: S4_SDK_IIFE_REL },
+    ...portStates.map(({ port, state }) => ({
+      ok: state.supported && state.lines.length === 0,
+      label: `port ${port} free before start`,
+      detail: state.lines.join(" | ") || "no listener",
+    })),
+  ];
+  const repro = `"${JDK21_JAVA}" -jar "${S4_LAUNCHER_JAR_REL}" preview --target "http://127.0.0.1:${S4_STUB_PORT}" --port 8602 --collector "${COLLECTOR_BASE}" --session "${S4_PREVIEW_SESSION}"`;
+  if (!pre.every((item) => item.ok)) {
+    return record(
+      "S4-D",
+      "preview injection + reverse proxy (preconditions)",
+      false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      repro,
+    );
+  }
+
+  const tags = '<script src="/traceboard/config.js"></script><script src="/traceboard/sdk.js"></script>';
+  const expectedConfig = `window.__TRACEBOARD_CONFIG__ = {"sessionId":"${S4_PREVIEW_SESSION}","ingestUrl":"/ingest","appName":"traceboard-preview","observeMs":1500};`;
+  const previewBase = S4_PREVIEW_BASE;
+  const header = (res, name) => (res.ok ? res.headers[name.toLowerCase()] ?? null : null);
+  const isAbsent = (res, names) => names.every((name) => header(res, name) === null);
+
+  let collector = null;
+  let preview = null;
+  let stub = null;
+  try {
+    collector = startJavaServer("collector(8601) S4-D", JDK21_JAVA, ["-jar", collectorJar], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(health), label: "collector 8601 /actuator/health 200", detail: health ? "UP" : "timeout" });
+
+    stub = await startS4Stub();
+    checks.push({
+      ok: stub.server.listening === true,
+      label: `static HTML stub listening on 127.0.0.1:${S4_STUB_PORT}`,
+      detail: `${Buffer.byteLength(stub.html, "utf8")} byte page + /plain /latin /fragment /gzip /big /nobody /missing`,
+    });
+
+    preview = startJavaServer("preview(8602) S4-D", JDK21_JAVA, [
+      "-jar", launcherJar, "preview",
+      "--target", `http://127.0.0.1:${S4_STUB_PORT}`, "--port", "8602",
+      "--collector", COLLECTOR_BASE, "--session", S4_PREVIEW_SESSION,
+    ], REPO);
+    const ready = await pollUntil(async () => {
+      const res = await httpRaw(`${previewBase}/`, { headers: { "Accept-Encoding": "gzip" } });
+      return res.ok && res.status === 200 ? res : null;
+    }, 45000, 250);
+    checks.push({
+      ok: Boolean(ready) && /PREVIEW_READY url=http:\/\/127\.0\.0\.1:8602/.test(preview.log.text),
+      label: "preview 8602 answers and prints PREVIEW_READY (repo-root SDK default, no --sdk)",
+      detail: ready ? lastLines(preview.log.text, 3).join(" | ").slice(0, 300) : `log=${lastLines(preview.log.text, 4).join(" | ").slice(0, 300)}`,
+    });
+
+    if (health && ready) {
+      // ---------------------------------------------------------------- injected HTML
+      const bodyClose = stub.html.toLowerCase().lastIndexOf("</body>");
+      const expectedHtml = bodyClose < 0 ? null : stub.html.slice(0, bodyClose) + tags + stub.html.slice(bodyClose);
+      const html = await httpRaw(`${previewBase}/`, { headers: { "Accept-Encoding": "gzip" } });
+      const htmlText = html.ok ? html.text : "";
+      const tagCount = (htmlText.match(/<script src="\/traceboard\/(config|sdk)\.js"><\/script>/g) ?? []).length;
+      checks.push({
+        ok: html.ok && html.status === 200 && expectedHtml !== null && htmlText === expectedHtml && tagCount === 2,
+        label: "GET / -> 200, both external /traceboard scripts inserted exactly once right before the last </body>",
+        detail: `status=${html.status} bytes=${html.buf?.length ?? 0} tags=${tagCount}`,
+      });
+      checks.push({
+        ok: header(html, "x-traceboard-preview") === "injected",
+        label: "injected response carries X-TraceBoard-Preview: injected",
+        detail: `x-traceboard-preview=${header(html, "x-traceboard-preview")}`,
+      });
+      checks.push({
+        ok: Number(header(html, "content-length")) === Buffer.byteLength(expectedHtml ?? "", "utf8") &&
+          Number(header(html, "content-length")) === (html.buf?.length ?? -1),
+        label: "Content-Length equals the rewritten UTF-8 byte length (and the bytes actually sent)",
+        detail: `content-length=${header(html, "content-length")} body=${html.buf?.length ?? "?"} expected=${Buffer.byteLength(expectedHtml ?? "", "utf8")}`,
+      });
+      checks.push({
+        ok: isAbsent(html, ["content-encoding", "transfer-encoding", "etag", "last-modified", "content-md5"]),
+        label: "injected response has no Content-Encoding/Transfer-Encoding/ETag/Last-Modified/Content-MD5",
+        detail: ["content-encoding", "transfer-encoding", "etag", "last-modified", "content-md5"]
+          .map((name) => `${name}=${header(html, name)}`).join(" "),
+      });
+      const forwardedHtml = stub.requests.filter((req) => req.method === "GET" && req.pathname === "/").pop();
+      checks.push({
+        ok: Boolean(forwardedHtml) && forwardedHtml.headers["accept-encoding"] === undefined,
+        label: "forwarded target request drops the client Accept-Encoding (no content negotiation)",
+        detail: forwardedHtml ? `accept-encoding=${forwardedHtml.headers["accept-encoding"] ?? "absent"}` : "no stub record",
+      });
+
+      // ---------------------------------------------------------------- local scripts
+      const config = await httpRaw(`${previewBase}/traceboard/config.js`);
+      checks.push({
+        ok: config.ok && config.status === 200 && config.text === expectedConfig &&
+          config.text.includes(S4_PREVIEW_SESSION) && config.text.includes('"ingestUrl":"/ingest"') &&
+          header(config, "x-traceboard-preview") === null,
+        label: 'config.js: exact window.__TRACEBOARD_CONFIG__ with session s_s4preview + ingestUrl "/ingest" (SDK derives /v1/events)',
+        detail: config.ok ? `status=${config.status} body=${show(config.text)}` : String(config.error),
+      });
+      const sdkRes = await httpRaw(`${previewBase}/traceboard/sdk.js`);
+      const sdkBytes = readFileSync(sdkIife);
+      checks.push({
+        ok: sdkRes.ok && sdkRes.status === 200 && sdkRes.buf.equals(sdkBytes) &&
+          sdkRes.text.includes("TraceBoardSDK") && header(sdkRes, "x-traceboard-preview") === null,
+        label: "sdk.js: byte-identical IIFE containing TraceBoardSDK, no preview header",
+        detail: sdkRes.ok ? `status=${sdkRes.status} bytes=${sdkRes.buf.length}` : String(sdkRes.error),
+      });
+
+      // ---------------------------------------------------------------- not-injected codes
+      const plain = await httpRaw(`${previewBase}/plain`);
+      checks.push({
+        ok: plain.ok && plain.status === 200 && header(plain, "x-traceboard-preview") === "not-injected:not_html" &&
+          plain.text === "plain-body",
+        label: "/plain (text/plain) -> not-injected:not_html, body byte-identical (no script tags)",
+        detail: `status=${plain.status} type=${header(plain, "content-type")} body=${show(plain.text)}`,
+      });
+      const fragment = await httpRaw(`${previewBase}/fragment`);
+      checks.push({
+        ok: fragment.ok && fragment.status === 200 && header(fragment, "x-traceboard-preview") === "not-injected:no_body" &&
+          fragment.text === "<div>fragment</div>",
+        label: "HTML without </body> -> not-injected:no_body, body unchanged",
+        detail: `status=${fragment.status} body=${show(fragment.text)}`,
+      });
+      const missing = await httpRaw(`${previewBase}/missing`);
+      checks.push({
+        ok: missing.ok && missing.status === 404 && header(missing, "x-traceboard-preview") === "not-injected:status" &&
+          missing.text === "<html><body>missing</body></html>" && !missing.text.includes("/traceboard/"),
+        label: "upstream 404 HTML page -> not-injected:status, never injected (a 404 cannot look PASS)",
+        detail: `status=${missing.status} body=${show(missing.text)}`,
+      });
+      const unknown = await httpRaw(`${previewBase}/traceboard/unknown.js`);
+      checks.push({
+        ok: unknown.ok && unknown.status === 404 && header(unknown, "x-traceboard-preview") === "not-injected:status",
+        label: "unknown /traceboard/* path falls through to the target 404 (not-injected:status)",
+        detail: `status=${unknown.status}`,
+      });
+      const nobody = await httpRaw(`${previewBase}/nobody`);
+      checks.push({
+        ok: nobody.ok && nobody.status === 204 && header(nobody, "x-traceboard-preview") === "not-injected:no_body" &&
+          nobody.buf.length === 0,
+        label: "204 -> not-injected:no_body, empty body",
+        detail: `status=${nobody.status} bytes=${nobody.buf?.length ?? "?"}`,
+      });
+      const head = await httpRaw(`${previewBase}/`, { method: "HEAD" });
+      checks.push({
+        ok: head.ok && head.status === 200 && header(head, "x-traceboard-preview") === "not-injected:head" &&
+          head.buf.length === 0,
+        label: "HEAD / -> not-injected:head, no body (headers only)",
+        detail: `status=${head.status} bytes=${head.buf?.length ?? "?"}`,
+      });
+      const gzip = await httpRaw(`${previewBase}/gzip`, { headers: { "Accept-Encoding": "gzip" } });
+      checks.push({
+        ok: gzip.ok && gzip.status === 200 && header(gzip, "x-traceboard-preview") === "not-injected:encoding" &&
+          gzip.buf.equals(stub.gzipHtml) && header(gzip, "content-encoding") === "gzip",
+        label: "gzip upstream -> not-injected:encoding, compressed body byte-identical (no decompress/inject)",
+        detail: `status=${gzip.status} content-encoding=${header(gzip, "content-encoding")} bytes=${gzip.buf?.length ?? "?"}`,
+      });
+      const latin = await httpRaw(`${previewBase}/latin`);
+      checks.push({
+        ok: latin.ok && latin.status === 200 && header(latin, "x-traceboard-preview") === "not-injected:encoding" &&
+          latin.text === "<html><body>latin</body></html>",
+        label: "text/html with charset=iso-8859-1 -> not-injected:encoding, body unchanged",
+        detail: `status=${latin.status} type=${header(latin, "content-type")}`,
+      });
+      const big = await httpRaw(`${previewBase}/big`);
+      checks.push({
+        ok: big.ok && big.status === 200 && header(big, "x-traceboard-preview") === "not-injected:too_large" &&
+          big.buf.length === Buffer.byteLength(stub.big, "utf8") &&
+          Number(header(big, "content-length")) === big.buf.length,
+        label: ">2MB HTML -> not-injected:too_large, body byte-identical",
+        detail: `status=${big.status} bytes=${big.buf?.length ?? "?"} content-length=${header(big, "content-length")}`,
+      });
+
+      // ---------------------------------------------------------------- ingest proxy
+      const caseA = readFileSync(abs(S3_CASE_A_EVENTS), "utf8")
+        .split(/\r?\n/).filter((line) => line.trim() !== "").slice(0, 2);
+      const batch = `${caseA.join("\n")}\n`;
+      const post = await httpRaw(`${previewBase}/ingest/v1/events`, {
+        method: "POST",
+        headers: { "Content-Type": NDJSON },
+        body: batch,
+        timeoutMs: 30000,
+      });
+      const postParsed = post.ok ? parseJson(post.text) : { ok: false };
+      checks.push({
+        ok: post.ok && post.status === 202 && postParsed.ok && postParsed.value?.accepted === 2 &&
+          postParsed.value?.rejected === 0 && header(post, "x-traceboard-preview") === null,
+        label: "POST /ingest/v1/events (S3 case A first 2 lines) -> 202 accepted=2/rejected=0 via collector, no preview header",
+        detail: post.ok ? `status=${post.status} body=${show(post.text)}` : String(post.error),
+      });
+      const stored = await requestBase(
+        COLLECTOR_BASE,
+        "/api/v1/sessions/s_s3demo/events?afterSeq=0&limit=10",
+        { method: "GET" },
+        10000,
+      );
+      const storedParsed = stored.ok ? parseJson(stored.text) : { ok: false };
+      checks.push({
+        ok: stored.ok && stored.status === 200 && Array.isArray(storedParsed.value?.events) &&
+          storedParsed.value.events.length === 2 && storedParsed.value.nextSeq === 2,
+        label: "proxied events really landed in collector 8601 (s_s3demo seq=1..2)",
+        detail: stored.ok ? `status=${stored.status} events=${storedParsed.value?.events?.length ?? "?"} nextSeq=${storedParsed.value?.nextSeq}` : String(stored.error),
+      });
+      const otherIngest = await httpRaw(`${previewBase}/ingest/v1/agent-hello`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      checks.push({
+        ok: otherIngest.ok && otherIngest.status === 404 && header(otherIngest, "x-traceboard-preview") === null &&
+          otherIngest.text.includes("只代理"),
+        label: "other /ingest/* (agent-hello) -> 404, no open write proxy",
+        detail: `status=${otherIngest.status} body=${show(otherIngest.text)}`,
+      });
+      const otherPath = await httpRaw(`${previewBase}/ingest/events`, {
+        method: "POST",
+        headers: { "Content-Type": NDJSON },
+        body: batch,
+      });
+      checks.push({
+        ok: otherPath.ok && otherPath.status === 404,
+        label: "non-/ingest/v1/events path under /ingest/ -> 404",
+        detail: `status=${otherPath.status}`,
+      });
+
+      // ---------------------------------------------------------------- collector down -> 502
+      await stopServer(collector);
+      collector = null;
+      const collectorDown = await pollUntil(async () => {
+        const res = await httpRaw(`${previewBase}/ingest/v1/events`, {
+          method: "POST",
+          headers: { "Content-Type": NDJSON },
+          body: batch,
+          timeoutMs: 20000,
+        });
+        return res.ok && res.status === 502 ? res : null;
+      }, 20000, 300);
+      checks.push({
+        ok: Boolean(collectorDown) && collectorDown.text.includes("collector unreachable") &&
+          header(collectorDown, "x-traceboard-preview") === null,
+        label: "collector down -> 502 + explanation (never a fake 202)",
+        detail: collectorDown ? `status=${collectorDown.status} body=${show(collectorDown.text)}` : "no 502 within 20s",
+      });
+
+      // ---------------------------------------------------------------- target down -> 502 read_error
+      await stub.close();
+      stub = null;
+      const targetDown = await pollUntil(async () => {
+        const res = await httpRaw(`${previewBase}/`, { timeoutMs: 20000 });
+        return res.ok && res.status === 502 ? res : null;
+      }, 15000, 300);
+      checks.push({
+        ok: Boolean(targetDown) && header(targetDown, "x-traceboard-preview") === "not-injected:read_error" &&
+          targetDown.text.includes("target unreachable") && !targetDown.text.includes("/traceboard/"),
+        label: "target down -> 502 with X-TraceBoard-Preview: not-injected:read_error (no injection)",
+        detail: targetDown ? `status=${targetDown.status} body=${show(targetDown.text)}` : "no 502 within 15s",
+      });
+
+      // ---------------------------------------------------------------- CLI boundary tokens
+      await stopServer(preview);
+      preview = null;
+      const tlsTarget = runLauncher([
+        "preview", "--target", "https://127.0.0.1:18080", "--port", "8602",
+        "--collector", COLLECTOR_BASE, "--session", S4_PREVIEW_SESSION,
+      ], { timeout: 60000 });
+      checks.push({
+        ok: tlsTarget.code === 3 && /TARGET_TLS_UNSUPPORTED/.test(tlsTarget.stderr),
+        label: "https --target -> exit 3 + TARGET_TLS_UNSUPPORTED (no TLS)",
+        detail: `exit=${tlsTarget.code} ${lastLines(tlsTarget.stderr, 1).join("").slice(0, 240)}`,
+      });
+      const nonLoopback = runLauncher([
+        "preview", "--target", "http://example.com:18080", "--port", "8602",
+        "--collector", COLLECTOR_BASE, "--session", S4_PREVIEW_SESSION,
+      ], { timeout: 60000 });
+      checks.push({
+        ok: nonLoopback.code === 2 && /NON_LOOPBACK_TARGET/.test(nonLoopback.stderr),
+        label: "non-loopback --target without --allow-non-loopback -> exit 2 + NON_LOOPBACK_TARGET",
+        detail: `exit=${nonLoopback.code} ${lastLines(nonLoopback.stderr, 1).join("").slice(0, 240)}`,
+      });
+
+      // ---------------------------------------------------------------- SDK missing
+      const emptyCwd = mkdtempSync(path.join(os.tmpdir(), "traceboard-s4preview-"));
+      tmpDirs.push(emptyCwd);
+      const cleanEnv = { ...process.env };
+      for (const name of ["TRACEBOARD_SDK_IIFE", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS"]) {
+        delete cleanEnv[name];
+      }
+      const missingSdk = runLauncher([
+        "preview", "--target", `http://127.0.0.1:${S4_STUB_PORT}`, "--port", "8602",
+        "--collector", COLLECTOR_BASE, "--session", S4_PREVIEW_SESSION,
+        "--sdk", path.join(emptyCwd, "missing-sdk.js"),
+      ], { cwd: emptyCwd, env: cleanEnv, timeout: 60000 });
+      checks.push({
+        ok: missingSdk.code === 3 && /SDK_IIFE_MISSING/.test(missingSdk.stderr) &&
+          /npm ci && npm run build/.test(missingSdk.stderr),
+        label: "missing --sdk with no repo-root default (cwd outside repo) -> exit 3 + SDK_IIFE_MISSING + build advice",
+        detail: `exit=${missingSdk.code} ${lastLines(missingSdk.stderr, 2).join(" | ").slice(0, 300)}`,
+      });
+
+      S4_EVIDENCE.preview = {
+        injectedStatus: html.status,
+        contentLength: header(html, "content-length"),
+        config: expectedConfig,
+        ingestStatus: post.status,
+        notInjected: {
+          plain: header(plain, "x-traceboard-preview"),
+          fragment: header(fragment, "x-traceboard-preview"),
+          missing: header(missing, "x-traceboard-preview"),
+          nobody: header(nobody, "x-traceboard-preview"),
+          head: header(head, "x-traceboard-preview"),
+          gzip: header(gzip, "x-traceboard-preview"),
+          latin: header(latin, "x-traceboard-preview"),
+          big: header(big, "x-traceboard-preview"),
+        },
+        targetDown: targetDown ? header(targetDown, "x-traceboard-preview") : null,
+        tlsExit: tlsTarget.code,
+        nonLoopbackExit: nonLoopback.code,
+        missingSdkExit: missingSdk.code,
+      };
+    }
+  } finally {
+    await stopServer(preview);
+    await stopServer(collector);
+    if (stub) {
+      await stub.close();
+      stub = null;
+    }
+  }
+
+  for (const port of [8602, 8601, S4_STUB_PORT]) {
+    const released = await pollUntil(async () => listeningOn(port).lines.length === 0, 15000, 300);
+    checks.push({
+      ok: Boolean(released),
+      label: `port ${port} released after preview/stub/collector cleanup`,
+      detail: released ? "no listener" : listeningOn(port).lines.join(" | ") || "still listening",
+    });
+  }
+
+  return gate(
+    "S4-D",
+    "preview: injection before the last </body> + recomputed Content-Length + stripped headers; config/sdk; not-injected head/no_body/status/encoding/not_html/too_large/read_error; /ingest/v1/events 202 vs 404; target/collector down 502; SDK_IIFE_MISSING; ports released",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S4-E: SDK IIFE gate. Builds and tests frontend/sdk (13 node --test cases: 8 ESM + 5 IIFE),
+ * asserts the 3-file dist with no sourcemap/external URL/CDN, then evaluates the real bundle in
+ * a vm sandbox: auto-init exactly once from __TRACEBOARD_CONFIG__ (derived /ingest/v1/events),
+ * double-load guard, no-config no-init, bad-config fail-open.
+ */
+async function checkS4E() {
+  section("S4-E: SDK IIFE (13 tests, 3 dist files, global/version, vm auto-init/guard/fail-open)");
+  const checks = [];
+  const sdkDir = abs(SDK_DIR);
+  const iifeRel = S4_SDK_IIFE_REL;
+  const repro = `(cd "${SDK_DIR}" && npm ci && npm run build && npm test)`;
+  const pre = [
+    { ok: existsSync(abs(`${SDK_DIR}/package.json`)), label: "frontend/sdk/package.json exists", detail: `${SDK_DIR}/package.json` },
+    { ok: existsSync(abs(`${SDK_DIR}/test/iife.test.js`)) && existsSync(abs(`${SDK_DIR}/test/sdk.test.js`)), label: "SDK ESM + IIFE test files exist", detail: "test/sdk.test.js test/iife.test.js" },
+  ];
+  if (!pre.every((item) => item.ok)) {
+    return record(
+      "S4-E",
+      "SDK IIFE (preconditions)",
+      false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      repro,
+    );
+  }
+
+  const build = runShell("npm run build", { cwd: sdkDir, timeout: 600000 });
+  checks.push({
+    ok: build.code === 0 && !build.error,
+    label: "npm run build (tsc ESM + .d.ts, esbuild IIFE) exit 0",
+    detail: `exit=${build.code} ${lastLines(`${build.stdout}\n${build.stderr}`, 1).join(" ").slice(0, 240)}`,
+  });
+  const test = runShell("npm test", { cwd: sdkDir, timeout: 600000 });
+  const testOut = `${test.stdout}\n${test.stderr}`;
+  const testsMatch = testOut.match(/# tests (\d+)/);
+  const passMatch = testOut.match(/# pass (\d+)/);
+  const failMatch = testOut.match(/# fail (\d+)/);
+  checks.push({
+    ok: test.code === 0 && testsMatch?.[1] === "13" && passMatch?.[1] === "13" && failMatch?.[1] === "0",
+    label: "npm test (pretest build) -> node --test: 13 tests / 13 pass / 0 fail (8 ESM + 5 IIFE)",
+    detail: `tests=${testsMatch?.[1] ?? "?"} pass=${passMatch?.[1] ?? "?"} fail=${failMatch?.[1] ?? "?"}`,
+  });
+
+  const dist = walk(abs(SDK_DIST_REL));
+  checks.push({
+    ok: deepEqual(dist.map(relOf).sort(), [
+      `${SDK_DIST_REL}/index.d.ts`,
+      `${SDK_DIST_REL}/index.js`,
+      `${SDK_DIST_REL}/traceboard-sdk.iife.js`,
+    ]),
+    label: "dist has exactly index.js + index.d.ts + traceboard-sdk.iife.js",
+    detail: dist.map(relOf).join(","),
+  });
+  checks.push({
+    ok: dist.every((file) => !file.endsWith(".map")),
+    label: "dist has no *.map sourcemap",
+    detail: "0 maps",
+  });
+
+  const bundle = readFileSync(abs(iifeRel), "utf8");
+  const sdkPkg = JSON.parse(readFileSync(abs(`${SDK_DIR}/package.json`), "utf8"));
+  checks.push({
+    ok: /var TraceBoardSDK = /.test(bundle) && bundle.includes('version = "0.1.0"') &&
+      sdkPkg.version === "0.1.0" &&
+      deepEqual(Object.keys(sdkPkg.devDependencies ?? {}).sort(), ["esbuild", "typescript"]) &&
+      Object.keys(sdkPkg.dependencies ?? {}).length === 0,
+    label: "bundle defines global TraceBoardSDK + version 0.1.0; devDeps esbuild+typescript only, no runtime deps",
+    detail: `bytes=${Buffer.byteLength(bundle, "utf8")} pkgVersion=${sdkPkg.version}`,
+  });
+  checks.push({
+    ok: !bundle.includes("sourceMappingURL") && !bundle.includes("https://") &&
+      !/jsdelivr|unpkg|cdnjs/.test(bundle) && !/\brequire\s*\(/.test(bundle),
+    label: "bundle: no sourceMappingURL, no external https/CDN, self-contained (no require)",
+    detail: "clean",
+  });
+  checks.push({
+    ok: bundle.includes("__TRACEBOARD_CONFIG__") && bundle.includes("__TRACEBOARD_AUTO_INIT__") &&
+      bundle.includes("__TRACEBOARD_SDK_ACTIVE__"),
+    label: "bundle reads window.__TRACEBOARD_CONFIG__ and carries both auto-init guards",
+    detail: "config + guards present",
+  });
+
+  const makeSandbox = (config) => {
+    const clicks = [];
+    const posts = [];
+    const warnings = [];
+    const sandbox = {
+      console: { warn: (message) => warnings.push(String(message)), log() {}, error() {} },
+      setTimeout,
+      clearTimeout,
+      queueMicrotask,
+      TextEncoder,
+      Headers,
+      URL,
+      Math,
+      Date,
+      JSON,
+      Promise,
+      Uint8Array,
+      document: {
+        addEventListener(type, handler, capture) {
+          if (type === "click" && capture === true) {
+            clicks.push(handler);
+          }
+        },
+      },
+      location: { href: "http://127.0.0.1:8602/" },
+      addEventListener() {},
+      fetch(input, init) {
+        const url = typeof input === "string" ? input : String(input && input.url ? input.url : input);
+        posts.push({ url, init });
+        return Promise.resolve({ status: 202 });
+      },
+    };
+    sandbox.window = sandbox;
+    if (config !== undefined) {
+      sandbox.__TRACEBOARD_CONFIG__ = config;
+    }
+    return { sandbox, context: vm.createContext(sandbox), clicks, posts, warnings };
+  };
+  const runIife = (context) => vm.runInContext(bundle, context, { filename: "traceboard-sdk.iife.js" });
+  const clickTarget = (id) => ({
+    tagName: "BUTTON",
+    id,
+    textContent: id,
+    parentElement: null,
+    children: [],
+    getAttribute() {
+      return null;
+    },
+  });
+  const ingestEvents = (posts) => {
+    const events = [];
+    for (const post of posts) {
+      const body = post.init && typeof post.init.body === "string" ? post.init.body : "";
+      for (const line of body.split("\n")) {
+        if (line.trim() !== "") {
+          events.push(JSON.parse(line));
+        }
+      }
+    }
+    return events;
+  };
+
+  const auto = makeSandbox({ sessionId: "s_s4verify", ingestUrl: "/ingest", appName: "traceboard-preview", observeMs: 25 });
+  let autoThrew = null;
+  try {
+    runIife(auto.context);
+  } catch (error) {
+    autoThrew = error;
+  }
+  checks.push({
+    ok: autoThrew === null && auto.clicks.length === 1 &&
+      auto.sandbox.__TRACEBOARD_SDK_ACTIVE__ === true && auto.sandbox.__TRACEBOARD_AUTO_INIT__ === true &&
+      auto.sandbox.TraceBoardSDK?.version === "0.1.0" &&
+      typeof auto.sandbox.TraceBoardSDK?.initTraceBoard === "function",
+    label: "vm: __TRACEBOARD_CONFIG__ auto-inits exactly once (one click listener, both guards, global version 0.1.0)",
+    detail: `clicks=${auto.clicks.length} active=${auto.sandbox.__TRACEBOARD_SDK_ACTIVE__} auto=${auto.sandbox.__TRACEBOARD_AUTO_INIT__} version=${auto.sandbox.TraceBoardSDK?.version}`,
+  });
+  if (auto.clicks[0]) {
+    auto.clicks[0]({ type: "click", target: clickTarget("btn-auto") });
+  }
+  await sleep(150);
+  const autoEvents = ingestEvents(auto.posts);
+  const autoRoot = autoEvents.find((event) => event.kind === "ui_event" && event.nodeKey === "#btn-auto");
+  checks.push({
+    ok: auto.posts.length > 0 && String(auto.posts[0].url) === "/ingest/v1/events" &&
+      autoRoot?.sessionId === "s_s4verify" && Array.isArray(autoRoot?.flags) && autoRoot.flags.includes("OBSERVE_MS=25"),
+    label: "vm: auto-init posts NDJSON to the SDK-derived /ingest/v1/events with the page session/observeMs",
+    detail: autoRoot ? `url=${auto.posts[0].url} session=${autoRoot.sessionId} flags=${autoRoot.flags.join(",")}` : `posts=${auto.posts.length} events=${autoEvents.length}`,
+  });
+
+  let secondThrew = null;
+  try {
+    runIife(auto.context);
+  } catch (error) {
+    secondThrew = error;
+  }
+  checks.push({
+    ok: secondThrew === null && auto.clicks.length === 1 &&
+      auto.warnings.some((message) => message.includes("already active")),
+    label: "vm: double load is guarded (still one listener, warning only)",
+    detail: `clicks=${auto.clicks.length} warnings=${auto.warnings.length}`,
+  });
+
+  const none = makeSandbox(undefined);
+  let noneThrew = null;
+  try {
+    runIife(none.context);
+  } catch (error) {
+    noneThrew = error;
+  }
+  checks.push({
+    ok: noneThrew === null && none.clicks.length === 0 && none.sandbox.__TRACEBOARD_SDK_ACTIVE__ !== true &&
+      typeof none.sandbox.TraceBoardSDK?.initTraceBoard === "function",
+    label: "vm: no window.__TRACEBOARD_CONFIG__ -> no auto-init (ESM-style API still exposed)",
+    detail: `clicks=${none.clicks.length} active=${none.sandbox.__TRACEBOARD_SDK_ACTIVE__}`,
+  });
+
+  const bad = makeSandbox({ sessionId: "s3demo", ingestUrl: "/ingest", appName: "x", observeMs: -5 });
+  let badThrew = null;
+  try {
+    runIife(bad.context);
+  } catch (error) {
+    badThrew = error;
+  }
+  checks.push({
+    ok: badThrew === null && bad.clicks.length === 0 && bad.sandbox.__TRACEBOARD_SDK_ACTIVE__ !== true &&
+      bad.warnings.some((message) => message.includes("invalid sessionId")) &&
+      typeof bad.sandbox.TraceBoardSDK === "object",
+    label: "vm: bad config fails open (no throw, no init, invalid-sessionId warning, global intact)",
+    detail: `clicks=${bad.clicks.length} active=${bad.sandbox.__TRACEBOARD_SDK_ACTIVE__} warnings=${bad.warnings.length}`,
+  });
+
+  return gate(
+    "S4-E",
+    "SDK IIFE: 13/13 tests, dist 3 files, global TraceBoardSDK/version, vm auto-init once + double-load guard + no-config no-init + bad-config fail-open, no sourcemap/external URLs",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S4-F: fixtures/s4-details -> collector requests/graph/replay + static workbench dist + the
+ * exported workbench derive helpers (×N grouping, per-invocation rows, gaps F>N>R). Everything
+ * here is derived from ALREADY-COLLECTED spans (9 events, LOST backend root); the F gap rule is
+ * asserted with an inline ui_event+fetch batch, never with the fixture itself.
+ */
+async function checkS4F() {
+  section("S4-F: details/×N/gaps (fixtures/s4-details -> collector 8601 -> workbench derive/dist)");
+  const checks = [];
+  const eventsText = readFileSync(abs(S4_EVENTS_REL), "utf8");
+  const eventLines = eventsText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const events = [];
+  const parseProblems = [];
+  for (const [index, line] of eventLines.entries()) {
+    const parsed = parseJson(line);
+    if (!parsed.ok) parseProblems.push(`line ${index + 1}: invalid JSON`);
+    else events.push(parsed.value);
+  }
+  const factsParsed = parseJson(readFileSync(abs(S4_FACTS_REL), "utf8"));
+  const facts = factsParsed.ok ? factsParsed.value : {};
+  const workbenchPkg = abs("workbench/package.json");
+  const pre = [
+    { ok: existsSync(abs(S4_EVENTS_REL)), label: "fixtures/s4-details/events.ndjson exists", detail: S4_EVENTS_REL },
+    { ok: existsSync(abs(S4_FACTS_REL)), label: "fixtures/s4-details/expected-facts.json exists", detail: S4_FACTS_REL },
+    { ok: eventLines.length === 9 && events.length === 9 && parseProblems.length === 0, label: "fixture has 9 parseable NDJSON events", detail: `lines=${eventLines.length} parsed=${events.length} ${parseProblems.join(",")}` },
+    { ok: factsParsed.ok && facts.eventCount === 9 && Array.isArray(facts.groups) && facts.groups.length === 3 && facts.gaps?.count === 3, label: "expected-facts: 9 events, 3 groups, 3 gaps", detail: `eventCount=${facts.eventCount} groups=${facts.groups?.length} gaps=${facts.gaps?.count}` },
+    { ok: existsSync(JDK21_JAVA), label: "JDK21 java.exe exists", detail: JDK21_JAVA },
+    { ok: existsSync(abs(COLLECTOR_JAR_REL)), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: existsSync(workbenchPkg) && existsSync(abs("workbench/src/s4/derive.ts")) && existsSync(abs("workbench/src/components/S4DetailPanel.vue")), label: "workbench s4/derive.ts + S4DetailPanel.vue sources exist", detail: "workbench/src/s4/derive.ts" },
+    { ok: listeningOn(8601).lines.length === 0, label: "port 8601 free before start", detail: listeningOn(8601).lines.join(" | ") || "no listener" },
+  ];
+  const repro = `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: application/x-ndjson; charset=utf-8" --data-binary @"${S4_EVENTS_REL}" && curl -s "http://127.0.0.1:8601/api/v1/sessions/${S4_DETAIL_SESSION}/graph?traceId=4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90" && (cd "workbench" && npm run build)`;
+  if (!pre.every((item) => item.ok)) {
+    return record(
+      "S4-F",
+      "node details/×N/gaps (preconditions)",
+      false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      repro,
+    );
+  }
+
+  let collector = null;
+  try {
+    /* ---------------- fixture schema + deterministic ingest ---------------- */
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    const validate = ajv.compile(JSON.parse(readFileSync(abs(SCHEMA_REL), "utf8")));
+    const schemaProblems = events
+      .filter((event) => !validate(event))
+      .map((event, index) => `${event.spanId ?? `#${index}`}: ${(validate.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ")}`);
+    checks.push({
+      ok: schemaProblems.length === 0,
+      label: "9/9 fixture events pass the frozen Ajv 2020-12 schema (strict)",
+      detail: schemaProblems.slice(0, 3).join(" || ") || "9/9 valid",
+    });
+
+    collector = startJavaServer("collector(8601) S4-F", JDK21_JAVA, ["-jar", abs(COLLECTOR_JAR_REL)], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(health), label: "collector 8601 /actuator/health 200", detail: health ? "UP" : "timeout" });
+    if (!health) {
+      return gate("S4-F", "node details/×N/gaps (collector unavailable)", checks, repro);
+    }
+
+    const ingest = await postNdjson("/ingest/v1/events", eventsText, `${NDJSON}; charset=utf-8`);
+    const ingestParsed = ingest.ok ? parseJson(ingest.text) : { ok: false };
+    const ingestBody = ingestParsed.ok && ingestParsed.value ? ingestParsed.value : {};
+    checks.push({
+      ok: ingest.ok && ingest.status === 202 && ingestBody.accepted === 9 && ingestBody.rejected === 0,
+      label: "ingest fixtures/s4-details/events.ndjson -> 202 accepted=9 rejected=0",
+      detail: `status=${ingest.status} body=${show(ingest.text)}`,
+    });
+
+    const traceId = facts.apiExpectations?.graph?.traceId ?? "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90";
+    const requestsRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_DETAIL_SESSION}/requests`);
+    const requestsParsed = requestsRes.ok ? parseJson(requestsRes.text) : { ok: false };
+    const requestsBody = requestsParsed.ok && requestsParsed.value ? requestsParsed.value : {};
+    const requestRows = Array.isArray(requestsBody.requests) ? requestsBody.requests : [];
+    const expectedRow = facts.apiExpectations?.requests?.row ?? {};
+    checks.push({
+      ok: requestsRes.ok && requestsRes.status === 200 && requestsBody.sessionId === S4_DETAIL_SESSION &&
+        requestsBody.sdkActive === false && requestsBody.sdkActive === facts.apiExpectations?.requests?.sdkActive &&
+        requestRows.length === 1 && deepEqual(requestRows[0], expectedRow) &&
+        requestRows[0]?.confidence === "LOST" && requestRows[0]?.spanCount === 9,
+      label: "requests: 1 row deep-equals expected (LOST / NOT_COLLECTED_POLICY / spanCount=9 / sdkActive=false)",
+      detail: show(requestRows[0]),
+    });
+
+    /* ---------------- graph: 9 nodes / 8 edges, 14 ordered fields ---------------- */
+    const graphUrl = `/api/v1/sessions/${S4_DETAIL_SESSION}/graph?traceId=${traceId}`;
+    const graphRes = await requestBase(COLLECTOR_BASE, graphUrl);
+    const graphParsed = graphRes.ok ? parseJson(graphRes.text) : { ok: false };
+    const graph = graphParsed.ok && graphParsed.value ? graphParsed.value : {};
+    const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    const graphExpected = facts.apiExpectations?.graph ?? {};
+    const fixtureBySpanId = new Map(events.map((event) => [event.spanId, event]));
+    const nodeProblems = [];
+    nodes.forEach((node, index) => {
+      const keys = Object.keys(node ?? {});
+      if (keys.join(",") !== S4_GRAPH_NODE_KEYS_ORDERED.join(",")) {
+        nodeProblems.push(`node${index} keys=${keys.join(",")}`);
+      }
+      const event = fixtureBySpanId.get(node.spanId);
+      if (!event) {
+        nodeProblems.push(`node${index} unknown spanId=${node.spanId}`);
+        return;
+      }
+      if (node.parentSpanId !== event.parentSpanId || node.kind !== event.kind ||
+          node.nodeKey !== event.nodeKey || node.status !== event.status ||
+          node.startNs !== event.startNs || node.durNs !== event.durNs) {
+        nodeProblems.push(`node${index} scalars`);
+      }
+      if (!deepEqual(node.return, event.return ?? null)) nodeProblems.push(`node${index} return`);
+      if (!deepEqual(node.sideEffects, event.sideEffects ?? [])) nodeProblems.push(`node${index} sideEffects`);
+      if (!deepEqual(node.thread, event.thread ?? null)) nodeProblems.push(`node${index} thread`);
+      if (!deepEqual(node.flags, event.flags ?? [])) nodeProblems.push(`node${index} flags`);
+      if (!deepEqual(node.reason, event.reason ?? null)) nodeProblems.push(`node${index} reason=${show(node.reason)}`);
+      if (!deepEqual(node.source, event.source ?? null)) nodeProblems.push(`node${index} source=${show(node.source)}`);
+      if (!deepEqual(node.confidence, event.confidence)) nodeProblems.push(`node${index} confidence=${show(node.confidence)}`);
+    });
+    checks.push({
+      ok: graphRes.ok && graphRes.status === 200 && graph.sessionId === S4_DETAIL_SESSION &&
+        graph.traceId === traceId && graph.rootEventId === graphExpected.rootEventId &&
+        graph.confidence === "LOST" && nodes.length === 9 && edges.length === 8 &&
+        nodes.map((node) => node.spanId).join(",") === (graphExpected.nodeOrder ?? []).join(",") &&
+        deepEqual(edges, graphExpected.edges ?? []) && edges.every((edge) => edge.count === 1) &&
+        nodeProblems.length === 0,
+      label: "graph: 9 nodes / 8 edges, every node has exactly the 14 ordered fields (reason/source/confidence from the event)",
+      detail: nodeProblems.length ? nodeProblems.slice(0, 6).join(" || ") : `${nodes.length} nodes, ${edges.length} edges`,
+    });
+    const mapper3 = nodes.find((node) => node.spanId === graphExpected.notCollectedNode?.spanId) ?? {};
+    checks.push({
+      ok: mapper3.reason === "policy:third_party_package" &&
+        deepEqual(mapper3.source, { file: "OrderMapper.java", line: 15 }) &&
+        mapper3.confidence === "LOST" && mapper3.status === "NOT_COLLECTED_POLICY" &&
+        deepEqual(mapper3.sideEffects, []),
+      label: 'mapper3 detail: reason="policy:third_party_package", source={"file":"OrderMapper.java","line":15}, confidence=LOST',
+      detail: `reason=${show(mapper3.reason)} source=${show(mapper3.source)} confidence=${mapper3.confidence}`,
+    });
+
+    /* ---------------- replay default window + events/seq untouched ---------------- */
+    const replayRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_DETAIL_SESSION}/replay`);
+    const replayParsed = replayRes.ok ? parseJson(replayRes.text) : { ok: false };
+    const replayBody = replayParsed.ok && replayParsed.value ? replayParsed.value : {};
+    const replayEntries = Array.isArray(replayBody.events) ? replayBody.events : [];
+    const replayExpected = facts.apiExpectations?.replay ?? {};
+    checks.push({
+      ok: replayRes.ok && replayRes.status === 200 && replayBody.mode === "replay" &&
+        replayBody.readOnly === true && replayBody.fromNs === replayExpected.defaultFromNs &&
+        replayBody.toNs === replayExpected.defaultToNs && replayBody.toNs === 5120000000 &&
+        replayEntries.length === replayExpected.count && replayEntries.length === 9 &&
+        replayEntries.every((entry, index) => entry.seq === index + 1 &&
+          deepEqual(entry.event, fixtureBySpanId.get(entry.event?.spanId))),
+      label: "replay default: fromNs=0 toNs=5120000000, 9 events in span order with seq 1..9 and exact bodies",
+      detail: `fromNs=${replayBody.fromNs} toNs=${replayBody.toNs} count=${replayEntries.length}`,
+    });
+
+    const page = await getEventsPage(S4_DETAIL_SESSION, "?afterSeq=0&limit=200");
+    checks.push({
+      ok: page.res.ok && page.res.status === 200 && page.value.nextSeq === 9 &&
+        (page.value.events ?? []).length === 9 &&
+        (page.value.events ?? []).map((entry) => entry.seq).join(",") === "1,2,3,4,5,6,7,8,9" &&
+        wrapperProblems(validate, page.value.events ?? [], "s4detail").length === 0,
+      label: "events/seq untouched by requests/graph/replay: 9 wrapper events, seq 1..9, nextSeq=9",
+      detail: `nextSeq=${page.value.nextSeq}`,
+    });
+    const graphRepeat = await requestBase(COLLECTOR_BASE, graphUrl);
+    checks.push({
+      ok: graphRepeat.ok && graphRepeat.status === 200 && graphRepeat.text === graphRes.text,
+      label: "repeated GET graph is byte-identical (read-only derivation)",
+      detail: graphRepeat.text === graphRes.text ? "identical" : "DIFFERS",
+    });
+
+    /* ---------------- workbench dist (static) ---------------- */
+    const build = runShell("npm run build", { cwd: abs("workbench"), timeout: 600000 });
+    checks.push({
+      ok: build.code === 0 && !build.error,
+      label: "workbench npm run build (prebuild syncs fixtures + vue-tsc + vite) exit 0",
+      detail: `exit=${build.code} ${lastLines(`${build.stdout}\n${build.stderr}`, 2).join(" | ").slice(0, 240)}`,
+    });
+    const distFiles = distTextFiles(WORKBENCH_DIST_REL);
+    const distAll = distFiles.map((file) => file.text).join("\n");
+    const missingTokens = S4_DIST_TOKENS.filter((token) => !distAll.includes(token));
+    checks.push({
+      ok: distFiles.length > 0 && missingTokens.length === 0,
+      label: "workbench dist contains node-details/×N/gaps tokens + all 未采集 texts (incl. runtime ×3 is S6)",
+      detail: missingTokens.length ? `missing=${missingTokens.join(",")}` : `${S4_DIST_TOKENS.length}/${S4_DIST_TOKENS.length} tokens`,
+    });
+    const missingSelectors = S4_SELECTORS.filter((id) => !distAll.includes(id));
+    checks.push({
+      ok: missingSelectors.length === 0,
+      label: "workbench dist contains the 11 stable #s4-* selectors (incl. #s4-detail/#s4-invocations/#s4-gaps/#s4-group-badge)",
+      detail: missingSelectors.length ? `missing=${missingSelectors.join(",")}` : `${S4_SELECTORS.length}/${S4_SELECTORS.length} selectors`,
+    });
+    const missingPanels = S4_RETAINED_PANELS.filter((id) => !distAll.includes(id));
+    checks.push({
+      ok: missingPanels.length === 0,
+      label: "workbench dist retains the S3/S2/S1/S0 panels (s3-panel/s2-panel/s1-panel/fixture-panel)",
+      detail: missingPanels.length ? `missing=${missingPanels.join(",")}` : "4/4 panels",
+    });
+    const panelSource = readFileSync(abs("workbench/src/components/S4DetailPanel.vue"), "utf8");
+    checks.push({
+      ok: (panelSource.match(/id="s4-group-badge"/g) ?? []).length === 1 &&
+        panelSource.includes(":data-node-key") && /count\s*>=\s*2/.test(panelSource) &&
+        distAll.includes("data-node-key"),
+      label: "#s4-group-badge is one container; each N>=2 group is a child with data-node-key (no duplicate ids)",
+      detail: `container=${(panelSource.match(/id="s4-group-badge"/g) ?? []).length} data-node-key=${distAll.includes("data-node-key")}`,
+    });
+
+    /* ---------------- workbench derive helpers over the collected graph ---------------- */
+    const derive = await loadS4DeriveModule();
+    checks.push({
+      ok: typeof derive.groupNodesByNodeKey === "function" && typeof derive.deriveGaps === "function" &&
+        typeof derive.rowsForInvocation === "function" && derive.MISSING === "未采集",
+      label: "workbench/src/s4/derive.ts bundles under esbuild and exports the read-only helpers",
+      detail: `${Object.keys(derive).length} exports`,
+    });
+
+    const expectedGroups = Array.isArray(facts.groups) ? facts.groups : [];
+    const groups = derive.groupNodesByNodeKey(nodes);
+    const groupByKey = new Map(groups.map((group) => [group.nodeKey, group]));
+    const groupProblems = [];
+    if (groups.length !== expectedGroups.length + 1) groupProblems.push(`groups=${groups.length} expected=${expectedGroups.length + 1}`);
+    expectedGroups.forEach((expected) => {
+      const group = groupByKey.get(expected.nodeKey);
+      if (!group) {
+        groupProblems.push(`${expected.nodeKey}:missing`);
+        return;
+      }
+      if (group.kind !== expected.kind) groupProblems.push(`${expected.nodeKey}:kind=${group.kind}`);
+      if (group.count !== expected.count) groupProblems.push(`${expected.nodeKey}:count=${group.count}`);
+      if (group.badge !== expected.groupBadge) groupProblems.push(`${expected.nodeKey}:badge=${group.badge}`);
+      if (group.nodes.map((node) => node.spanId).join(",") !== (expected.spanIds ?? []).join(",")) {
+        groupProblems.push(`${expected.nodeKey}:spanIds`);
+      }
+    });
+    if (groups.map((group) => group.nodeKey).sort().join("|") !==
+        [...expectedGroups.map((group) => group.nodeKey), nodes.find((node) => node.kind === "controller")?.nodeKey].sort().join("|")) {
+      groupProblems.push(`groupKeys=${groups.map((group) => group.nodeKey).join(",")}`);
+    }
+    const controllerGroup = groups.find((group) => group.kind === "controller");
+    if (!controllerGroup || controllerGroup.count !== 1) groupProblems.push(`controller group=${show(controllerGroup)}`);
+    checks.push({
+      ok: groupProblems.length === 0 && groups.length === 4 &&
+        groups.filter((group) => group.count >= 2).length === 3 &&
+        groups.filter((group) => group.count >= 2).map((group) => group.nodeKey).join("|") ===
+          expectedGroups.map((group) => group.nodeKey).join("|"),
+      label: "×N grouping by nodeKey: service ×3, mapper ×3, sql ×2 (+ controller ×1), startNs order, one group per nodeKey",
+      detail: groupProblems.length ? groupProblems.slice(0, 6).join(" || ") : groups.map((group) => `${group.kind}${group.badge}`).join(","),
+    });
+
+    const rowsProblems = [];
+    const rowsDetail = [];
+    for (const expected of expectedGroups) {
+      const group = groupByKey.get(expected.nodeKey);
+      if (!group) continue;
+      (expected.invocations ?? []).forEach((invocation, index) => {
+        const node = group.nodes[index];
+        if (!node || node.spanId !== invocation.spanId) {
+          rowsProblems.push(`${expected.kind}#${index + 1}:spanId`);
+          return;
+        }
+        const rows = derive.rowsForInvocation(node, nodes);
+        const text = derive.rowsText(rows);
+        rowsDetail.push(`${expected.kind}#${index + 1}=${text}`);
+        if (typeof invocation.rowsUiText === "string") {
+          if (text !== invocation.rowsUiText) rowsProblems.push(`${expected.kind}#${index + 1}:rows=${text} expected=${invocation.rowsUiText}`);
+        } else if (Array.isArray(invocation.rows)) {
+          if (text !== invocation.rows.map(String).join(", ")) rowsProblems.push(`${expected.kind}#${index + 1}:rows=${text}`);
+        } else if (typeof invocation.rows === "number") {
+          if (text !== String(invocation.rows)) rowsProblems.push(`${expected.kind}#${index + 1}:rows=${text}`);
+        }
+        if (Array.isArray(invocation.sqlSpanIds) &&
+            rows.sqlSpanIds.join(",") !== invocation.sqlSpanIds.join(",")) {
+          rowsProblems.push(`${expected.kind}#${index + 1}:sqlSpanIds=${rows.sqlSpanIds.join(",")}`);
+        }
+      });
+    }
+    const serviceGroup = groupByKey.get(expectedGroups[0]?.nodeKey);
+    const thirdService = serviceGroup?.nodes[2];
+    const thirdRows = thirdService ? derive.rowsText(derive.rowsForInvocation(thirdService, nodes)) : "?";
+    const sqlGroup = expectedGroups.find((group) => group.kind === "sql");
+    const sqlNode = sqlGroup ? groupByKey.get(sqlGroup.nodeKey)?.nodes[0] : null;
+    const sqlRows = sqlNode ? derive.rowsText(derive.rowsForInvocation(sqlNode, nodes)) : "?";
+    if (thirdRows !== "未采集") rowsProblems.push(`service#3 rows=${thirdRows} (must be 未采集, never 0)`);
+    if (sqlRows !== "0") rowsProblems.push(`sql rows=${sqlRows} (collected rowsAffected=0 shows 0)`);
+    const mapperGroup = expectedGroups.find((group) => group.kind === "mapper");
+    const mapperNodes = mapperGroup ? groupByKey.get(mapperGroup.nodeKey)?.nodes ?? [] : [];
+    const mapperRows = mapperNodes.map((node) => {
+      const rows = derive.rowsForInvocation(node, nodes);
+      return `${derive.rowsText(rows)}${rows.source === "child_sql" ? "(子 sql)" : ""}`;
+    });
+    if (mapperRows.join(",") !== "0(子 sql),0(子 sql),未采集") {
+      rowsProblems.push(`mapper rows=${mapperRows.join(",")} (mapper1/2 show the child sql 0; mapper3 is 未采集)`);
+    }
+    checks.push({
+      ok: rowsProblems.length === 0,
+      label: "per-invocation rows from that call's sql child only: service 0/0/未采集, sql 0/0, mapper 0(子 sql)/0(子 sql)/未采集 (never 0 when missing)",
+      detail: rowsProblems.length ? rowsProblems.slice(0, 6).join(" || ") : rowsDetail.join(","),
+    });
+
+    const gaps = derive.deriveGaps(nodes);
+    const expectedGaps = Array.isArray(facts.gaps?.items) ? facts.gaps.items : [];
+    const gapShape = gaps.map((gap) => ({ rule: gap.rule, spanId: gap.spanId, kind: gap.kind, nodeKey: gap.nodeKey, text: gap.text }));
+    const expectedGapShape = expectedGaps.map((gap) => ({ rule: gap.rule, spanId: gap.spanId, kind: gap.kind, nodeKey: gap.nodeKey, text: gap.uiText }));
+    const gapProblems = [];
+    if (!deepEqual(gapShape, expectedGapShape)) {
+      gapProblems.push(`gaps=${show(gapShape)} expected=${show(expectedGapShape)}`);
+    }
+    gaps.forEach((gap, index) => {
+      if (gaps.filter((item) => item.spanId === gap.spanId).length !== 1) gapProblems.push(`${gap.spanId}:duplicate gap`);
+      if (index > 0 && nodes.findIndex((node) => node.spanId === gap.spanId) < nodes.findIndex((node) => node.spanId === gaps[index - 1].spanId)) {
+        gapProblems.push(`${gap.spanId}:out of span order`);
+      }
+    });
+    const nonRowNodes = nodes.filter((node) => ["controller", "service", "sql"].includes(node.kind));
+    checks.push({
+      ok: gapProblems.length === 0 && gaps.length === 3 &&
+        expectedGapShape.every((gap) => gap.rule === "ROWS_NOT_COLLECTED" || gap.rule === "NOT_COLLECTED_REASON") &&
+        derive.deriveGaps(nonRowNodes).length === 0 && derive.GAP_EMPTY_TEXT === S4_GAP_EMPTY_TEXT &&
+        facts.gaps?.emptyListText === S4_GAP_EMPTY_TEXT,
+      label: "gaps: exactly 3 in span order (mapper1/mapper2 ROWS_NOT_COLLECTED 未采集; mapper3 NOT_COLLECTED_REASON with verbatim reason)",
+      detail: gapProblems.length ? gapProblems.slice(0, 5).join(" || ") : gapShape.map((gap) => `${gap.rule}:${gap.text}`).join(" | "),
+    });
+
+    const mapper3Node = nodes.find((node) => node.spanId === graphExpected.notCollectedNode?.spanId) ?? mapper3;
+    checks.push({
+      ok: derive.reasonText(mapper3Node) === "policy:third_party_package" &&
+        derive.sourceText(mapper3Node) === graphExpected.notCollectedNode?.sourceUiText &&
+        derive.confidenceText(mapper3Node.confidence).includes("LOST") &&
+        derive.reasonText({ ...mapper3Node, reason: null }) === "未采集（无 reason）" &&
+        derive.sourceText({ ...mapper3Node, source: null }) === "未采集" &&
+        derive.sourceText({ ...mapper3Node, source: { file: "OrderMapper.java", line: null } }) === "未采集",
+      label: 'detail texts: verbatim reason/source "OrderMapper.java:15"/LOST; missing reason -> 未采集（无 reason）, incomplete source -> 未采集',
+      detail: `reason=${derive.reasonText(mapper3Node)} source=${derive.sourceText(mapper3Node)} confidence=${derive.confidenceText(mapper3Node.confidence)}`,
+    });
+
+    /* ---------------- inline frontend batch: F rule (not the fixture) ---------------- */
+    const inlineNode = (spanId, startNs, kind, parentSpanId, extras = {}) => ({
+      spanId,
+      parentSpanId,
+      kind,
+      nodeKey: extras.nodeKey ?? `inline.${kind}#${spanId}`,
+      status: extras.status ?? "OK",
+      return: null,
+      sideEffects: extras.sideEffects ?? [],
+      startNs,
+      durNs: 10,
+      thread: null,
+      flags: [],
+      reason: extras.reason ?? null,
+      source: null,
+      confidence: extras.confidence ?? "EXACT",
+    });
+    const inline = [
+      inlineNode("aaaaaaaaaaaaaa01", 100, "ui_event", null, { nodeKey: "#btn-s4f" }),
+      inlineNode("aaaaaaaaaaaaaa02", 110, "fetch", "aaaaaaaaaaaaaa01", { nodeKey: "fetch:/api/orders" }),
+      inlineNode("aaaaaaaaaaaaaa03", 120, "controller", "aaaaaaaaaaaaaa02", { nodeKey: "com.example.OrderController#list" }),
+      inlineNode("aaaaaaaaaaaaaa04", 200, "fetch", "aaaaaaaaaaaaaa01", { nodeKey: "fetch:/api/orphan", status: "NOT_COLLECTED_POLICY", reason: "policy:blocked" }),
+      inlineNode("aaaaaaaaaaaaaa05", 300, "mapper", null, { nodeKey: "com.example.OrderMapper#n", status: "NOT_COLLECTED_POLICY" }),
+      inlineNode("aaaaaaaaaaaaaa06", 400, "mapper", null, { nodeKey: "com.example.OrderMapper#r" }),
+      inlineNode("aaaaaaaaaaaaaa07", 500, "sql", null, { nodeKey: "OrderMapper.r", sideEffects: [{ type: "sql", sqlId: "OrderMapper.r", rowsAffected: 0, transaction: "UNKNOWN" }] }),
+    ];
+    const inlineGaps = derive.deriveGaps(inline);
+    const gapOf = (spanId) => inlineGaps.filter((gap) => gap.spanId === spanId);
+    const inlineProblems = [];
+    if (gapOf("aaaaaaaaaaaaaa02").length !== 0) inlineProblems.push("referenced fetch must not be a gap");
+    if (gapOf("aaaaaaaaaaaaaa01").length !== 0) inlineProblems.push("ui_event must not be a gap");
+    const fetcher = gapOf("aaaaaaaaaaaaaa04")[0];
+    if (!fetcher || fetcher.rule !== "FETCH_WITHOUT_BACKEND" || fetcher.text !== S4_FETCH_WITHOUT_BACKEND_TEXT) {
+      inlineProblems.push(`unreferenced fetch=${show(fetcher)} (F beats N)`);
+    }
+    const collectorGap = gapOf("aaaaaaaaaaaaaa05")[0];
+    if (!collectorGap || collectorGap.rule !== "NOT_COLLECTED_REASON" || collectorGap.text !== "未采集（无 reason）") {
+      inlineProblems.push(`NOT_COLLECTED mapper=${show(collectorGap)}`);
+    }
+    const mapperGap = gapOf("aaaaaaaaaaaaaa06")[0];
+    if (!mapperGap || mapperGap.rule !== "ROWS_NOT_COLLECTED" || mapperGap.text !== "未采集") {
+      inlineProblems.push(`rows mapper=${show(mapperGap)}`);
+    }
+    if (gapOf("aaaaaaaaaaaaaa07").length !== 0) inlineProblems.push("collected rows=0 sql must not be a gap");
+    if (inlineGaps.length !== 3) inlineProblems.push(`inline gaps=${inlineGaps.length} expected=3`);
+    checks.push({
+      ok: inlineProblems.length === 0,
+      label: "inline ui_event+fetch batch: F FETCH_WITHOUT_BACKEND (backend-unreferenced fetch, F>N), N beats R, collected rows=0 is not a gap",
+      detail: inlineProblems.length ? inlineProblems.join(" || ") : inlineGaps.map((gap) => `${gap.rule}:${gap.text}`).join(" | "),
+    });
+
+    S4_EVIDENCE.details = {
+      requestsRow: requestRows[0] ?? null,
+      nodes: nodes.length,
+      edges: edges.length,
+      groups: groups.map((group) => `${group.kind}${group.badge}`),
+      gaps: gapShape,
+      replay: { fromNs: replayBody.fromNs, toNs: replayBody.toNs, count: replayEntries.length },
+    };
+  } catch (error) {
+    checks.push({ ok: false, label: "S4-F unexpected error", detail: String(error && error.message ? error.message : error) });
+  } finally {
+    await stopServer(collector);
+    const freed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
+    checks.push({
+      ok: Boolean(freed),
+      label: "S4-F cleanup: collector stopped, port 8601 released",
+      detail: listeningOn(8601).lines.join(" | ") || "free",
+    });
+  }
+
+  return gate(
+    "S4-F",
+    "details/×N/gaps: 9 schema-valid fixture events -> requests/graph(9/8, 14 ordered fields)/replay; workbench dist+derive ×3/×3/×2, rows 未采集≠0, exactly 3 gaps, inline F rule",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S4-G: `diagnose` on the real local chain. Full preview -> 7 PASS/exit 0; no --preview-url ->
+ * skip=2/exit 0; missing session -> FAIL/exit 3; app URL down -> FAIL/exit 3; preview target
+ * non-injectable -> preview_injection FAIL/exit 3. Counts always sum to 7.
+ */
+async function checkS4G() {
+  section("S4-G: diagnose seven checks (collector + demo/agent + preview) — PASS and FAIL branches");
+  const checks = [];
+  const collectorJar = abs(COLLECTOR_JAR_REL);
+  const launcherJar = abs(S4_LAUNCHER_JAR_REL);
+  const demoJar = abs(DEMO_JAR_REL);
+  const agentJar = abs(AGENT_JAR_REL);
+  const suffix = `${process.pid}-${Date.now().toString(36)}`;
+  const pidFileRel = `work/s4-diag-${suffix}.pid`;
+  const pidFileAbs = abs(pidFileRel);
+  const portStates = [8080, 8601, 8602, S4_STUB_PORT].map((port) => ({ port, state: listeningOn(port) }));
+  const pre = [
+    { ok: existsSync(collectorJar), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: existsSync(launcherJar), label: "launcher jar exists", detail: S4_LAUNCHER_JAR_REL },
+    { ok: existsSync(demoJar), label: "demo jar exists", detail: DEMO_JAR_REL },
+    { ok: existsSync(agentJar), label: "agent jar exists", detail: AGENT_JAR_REL },
+    { ok: existsSync(JDK8_JAVA), label: "JDK8 java.exe exists (demo/agent --java)", detail: JDK8_JAVA },
+    ...portStates.map(({ port, state }) => ({
+      ok: state.supported && state.lines.length === 0,
+      label: `port ${port} free before start`,
+      detail: state.lines.join(" | ") || "no listener",
+    })),
+  ];
+  const repro = `"${JDK21_JAVA}" -jar "${S4_LAUNCHER_JAR_REL}" jar --jar "${DEMO_JAR_REL}" --agent "${AGENT_JAR_REL}" --collector "http://127.0.0.1:8601" --session "${S4_DIAG_SESSION}" --java "${JDK8_JAVA}" --port 8080 --detach --pid-file "${pidFileRel}" --log-dir "work/logs" && "${JDK21_JAVA}" -jar "${S4_LAUNCHER_JAR_REL}" diagnose --collector "http://127.0.0.1:8601" --app-url "${S4_DIAG_APP_URL}" --session "${S4_DIAG_SESSION}" --preview-url "http://127.0.0.1:8602/" && "${JDK21_JAVA}" -jar "${S4_LAUNCHER_JAR_REL}" stop --pid-file "${pidFileAbs}"`;
+  if (!pre.every((item) => item.ok)) {
+    return record(
+      "S4-G",
+      "diagnose seven checks (preconditions)",
+      false,
+      pre.map((item) => `${item.ok ? "ok " : "BAD"} ${item.label} :: ${item.detail}`),
+      repro,
+    );
+  }
+
+  let collector = null;
+  let preview = null;
+  let htmlStub = null;
+  let plainStub = null;
+  let demoPid = null;
+  const diagnose = (args) => runLauncherAsync(["diagnose", ...args], { timeout: 90000 });
+  try {
+    collector = startJavaServer("collector(8601) S4-G", JDK21_JAVA, ["-jar", collectorJar], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    checks.push({ ok: Boolean(health), label: "collector 8601 /actuator/health 200", detail: health ? "UP" : "timeout" });
+    if (!health) {
+      return gate("S4-G", "diagnose seven checks (collector unavailable)", checks, repro);
+    }
+
+    const launch = runLauncher([
+      "jar", "--jar", demoJar, "--agent", agentJar,
+      "--collector", COLLECTOR_BASE, "--session", S4_DIAG_SESSION,
+      "--java", JDK8_JAVA, "--port", "8080", "--detach",
+      "--pid-file", pidFileRel, "--log-dir", "work/logs",
+    ], { timeout: 150000 });
+    const launchOut = `${launch.stdout}\n${launch.stderr}`;
+    const pidMatch = launchOut.match(/^PID=(\d+)$/m) ?? launchOut.match(/pid=(\d+)/i);
+    demoPid = pidMatch ? Number(pidMatch[1]) : null;
+    checks.push({
+      ok: launch.code === 0 && /^READY pid=\d+/m.test(launchOut) && demoPid !== null && pidAlive(demoPid),
+      label: "launcher `jar --detach` starts the JDK8 demo+agent (READY, pid alive) for s_s4diag",
+      detail: `exit=${launch.code} pid=${demoPid} ${lastLines(launchOut, 4).join(" | ").slice(0, 240)}`,
+    });
+
+    const ready = await pollUntil(async () => {
+      const orders = await tryRequest(8080, "/api/orders", { method: "GET" }, 4000);
+      const agent = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S4_DIAG_SESSION}/agent`, { method: "GET" }, 4000);
+      const agentParsed = agent.ok ? parseJson(agent.text) : { ok: false };
+      return orders.ok && orders.status === 200 && agent.ok && agent.status === 200 &&
+        agentParsed.ok && agentParsed.value?.connected === true ? { orders, agent: agentParsed.value } : null;
+    }, 45000, 500);
+    checks.push({
+      ok: Boolean(ready),
+      label: "demo GET /api/orders -> 200 and agent handshake GET .../agent -> connected:true",
+      detail: ready ? `agent pid=${ready.agent.pid} version=${ready.agent.version}` : "timeout (health/handshake)",
+    });
+
+    const cancel = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" }, 15000);
+    const recorded = await pollUntil(async () => {
+      const page = await getEventsPage(S4_DIAG_SESSION, "?afterSeq=0&limit=200");
+      const list = Array.isArray(page.value.events) ? page.value.events : [];
+      return page.res.ok && page.res.status === 200 && list.length >= 1 ? list : null;
+    }, 25000, 500);
+    checks.push({
+      ok: cancel.ok && cancel.status >= 200 && cancel.status < 300 && Boolean(recorded) &&
+        recorded.every((entry) => entry?.event?.sessionId === S4_DIAG_SESSION),
+      label: "POST /api/orders/1/cancel -> 2xx and the agent records >=1 event (recent_events can PASS)",
+      detail: `cancel=${cancel.ok ? cancel.status : String(cancel.error)} events=${recorded ? recorded.length : 0}`,
+    });
+    if (!ready || !recorded) {
+      return gate("S4-G", "diagnose seven checks (demo/agent not ready)", checks, repro);
+    }
+
+    /* ---------------- branch 1: full preview, 7 PASS ---------------- */
+    htmlStub = await startS4Stub();
+    preview = startJavaServer("preview(8602) S4-G", JDK21_JAVA, [
+      "-jar", launcherJar, "preview", "--target", `http://127.0.0.1:${S4_STUB_PORT}`,
+      "--port", "8602", "--collector", COLLECTOR_BASE, "--session", S4_DIAG_SESSION,
+    ], REPO);
+    const previewReady = await pollUntil(async () => {
+      const res = await httpRaw(`${S4_PREVIEW_BASE}/`);
+      return res.ok && res.status === 200 ? res : null;
+    }, 45000, 250);
+    checks.push({
+      ok: Boolean(previewReady),
+      label: "preview 8602 serves the 18080 static HTML stub (injectable target)",
+      detail: previewReady ? "200" : `log=${lastLines(preview.log.text, 3).join(" | ").slice(0, 240)}`,
+    });
+
+    const fullPreview = await diagnose([
+      "--collector", COLLECTOR_BASE, "--app-url", S4_DIAG_APP_URL,
+      "--session", S4_DIAG_SESSION, "--preview-url", `${S4_PREVIEW_BASE}/`,
+    ]);
+    checks.push(s4DiagnoseCase(
+      "full preview: seven checks run -> pass=7 warn=0 fail=0 skip=0, SUMMARY: PASS, exit 0",
+      fullPreview,
+      {
+        exit: 0,
+        verdict: "PASS",
+        counts: { pass: 7, warn: 0, fail: 0, skip: 0 },
+        levels: {
+          collector_health: "PASS", collector_meta: "PASS", app_health: "PASS",
+          agent_handshake: "PASS", recent_events: "PASS", preview_injection: "PASS", sdk_script: "PASS",
+        },
+        contains: ["X-TraceBoard-Preview=injected", "TraceBoardSDK", "connected=true", "capabilities={"],
+      },
+    ));
+
+    /* ---------------- branch 2: no --preview-url, skip=2, exit 0 ---------------- */
+    const noPreview = await diagnose(["--collector", COLLECTOR_BASE, "--app-url", S4_DIAG_APP_URL, "--session", S4_DIAG_SESSION]);
+    checks.push(s4DiagnoseCase(
+      "no --preview-url: preview_injection+sdk_script SKIP reason=no_preview_url -> pass=5 skip=2 fail=0, exit 0",
+      noPreview,
+      {
+        exit: 0,
+        verdict: "PASS",
+        counts: { pass: 5, warn: 0, fail: 0, skip: 2 },
+        levels: {
+          collector_health: "PASS", collector_meta: "PASS", app_health: "PASS",
+          agent_handshake: "PASS", recent_events: "PASS", preview_injection: "SKIP", sdk_script: "SKIP",
+        },
+        contains: ["SKIP preview_injection: reason=no_preview_url", "SKIP sdk_script: reason=no_preview_url"],
+      },
+    ));
+    const noPreviewRows = parseS4DiagnoseOutput(noPreview).rows;
+    checks.push({
+      ok: ["preview_injection", "sdk_script"].every((check) => {
+        const row = noPreviewRows.find((item) => item.check === check);
+        return row?.evidence === "reason=no_preview_url";
+      }),
+      label: "no-preview rows are honest SKIPs (never PASS, never FAIL)",
+      detail: noPreviewRows.filter((row) => row.level === "SKIP").map((row) => row.line).join(" | "),
+    });
+
+    /* ---------------- branch 3: missing session -> FAIL, exit 3 ---------------- */
+    const missing = await diagnose([
+      "--collector", COLLECTOR_BASE, "--app-url", S4_DIAG_APP_URL, "--session", S4_DIAG_MISSING_SESSION,
+    ]);
+    checks.push(s4DiagnoseCase(
+      "missing session: agent_handshake FAIL + recent_events WARN -> pass=3 warn=1 fail=1 skip=2, SUMMARY: FAIL, exit 3",
+      missing,
+      {
+        exit: 3,
+        verdict: "FAIL",
+        counts: { pass: 3, warn: 1, fail: 1, skip: 2 },
+        levels: {
+          collector_health: "PASS", collector_meta: "PASS", app_health: "PASS",
+          agent_handshake: "FAIL", recent_events: "WARN", preview_injection: "SKIP", sdk_script: "SKIP",
+        },
+        contains: ["agent_handshake: GET "],
+      },
+    ));
+
+    /* ---------------- branch 4: app URL down -> FAIL, exit 3 ---------------- */
+    const appDown = await diagnose([
+      "--collector", COLLECTOR_BASE, "--app-url", S4_DIAG_APP_DOWN_URL, "--session", S4_DIAG_SESSION,
+    ]);
+    checks.push(s4DiagnoseCase(
+      "app URL down: app_health FAIL (connect failed) while other checks stay honest -> pass=4 fail=1 skip=2, exit 3",
+      appDown,
+      {
+        exit: 3,
+        verdict: "FAIL",
+        counts: { pass: 4, warn: 0, fail: 1, skip: 2 },
+        levels: {
+          collector_health: "PASS", collector_meta: "PASS", app_health: "FAIL",
+          agent_handshake: "PASS", recent_events: "PASS", preview_injection: "SKIP", sdk_script: "SKIP",
+        },
+        contains: ["connect failed"],
+      },
+    ));
+
+    /* ---------------- branch 5: preview target non-injectable -> FAIL, exit 3 ---------------- */
+    await stopServer(preview);
+    preview = null;
+    await htmlStub.close();
+    htmlStub = null;
+    plainStub = await startS4PlainStub();
+    preview = startJavaServer("preview(8602) S4-G plain", JDK21_JAVA, [
+      "-jar", launcherJar, "preview", "--target", `http://127.0.0.1:${S4_STUB_PORT}`,
+      "--port", "8602", "--collector", COLLECTOR_BASE, "--session", S4_DIAG_SESSION,
+    ], REPO);
+    const plainReady = await pollUntil(async () => {
+      const res = await httpRaw(`${S4_PREVIEW_BASE}/`);
+      return res.ok && res.status === 200 ? res : null;
+    }, 45000, 250);
+    checks.push({
+      ok: Boolean(plainReady),
+      label: "preview 8602 serves the text/plain stub as root (non-injectable target)",
+      detail: plainReady ? "200 text/plain" : `log=${lastLines(preview.log.text, 3).join(" | ").slice(0, 240)}`,
+    });
+    const plainPreview = await diagnose([
+      "--collector", COLLECTOR_BASE, "--app-url", S4_DIAG_APP_URL,
+      "--session", S4_DIAG_SESSION, "--preview-url", `${S4_PREVIEW_BASE}/`,
+    ]);
+    checks.push(s4DiagnoseCase(
+      "preview target non-injectable: preview_injection FAIL (not-injected:not_html) + sdk_script PASS -> pass=6 fail=1 skip=0, exit 3",
+      plainPreview,
+      {
+        exit: 3,
+        verdict: "FAIL",
+        counts: { pass: 6, warn: 0, fail: 1, skip: 0 },
+        levels: {
+          collector_health: "PASS", collector_meta: "PASS", app_health: "PASS",
+          agent_handshake: "PASS", recent_events: "PASS", preview_injection: "FAIL", sdk_script: "PASS",
+        },
+        contains: ["X-TraceBoard-Preview=not-injected:not_html"],
+      },
+    ));
+    const plainRows = parseS4DiagnoseOutput(plainPreview).rows;
+    checks.push({
+      ok: plainRows.filter((row) => row.level === "PASS").every((row) => row.check !== "preview_injection") &&
+        plainRows.some((row) => row.check === "preview_injection" && row.level === "FAIL"),
+      label: "non-injectable preview is never reported as PASS (no fake success)",
+      detail: plainRows.map((row) => `${row.level}:${row.check}`).join(","),
+    });
+
+    S4_EVIDENCE.diagnose = [fullPreview, noPreview, missing, appDown, plainPreview].map((run) => {
+      const parsed = parseS4DiagnoseOutput(run);
+      return { exit: run.code, summary: parsed.summary, counts: parsed.counts };
+    });
+  } catch (error) {
+    checks.push({ ok: false, label: "S4-G unexpected error", detail: String(error && error.message ? error.message : error) });
+  } finally {
+    await stopServer(preview);
+    if (htmlStub) await htmlStub.close().catch(() => {});
+    if (plainStub) await plainStub.close().catch(() => {});
+    if (demoPid !== null) {
+      runLauncher(["stop", "--pid-file", pidFileAbs], { timeout: 60000 });
+      if (pidAlive(demoPid)) {
+        spawnSync("taskkill", ["/PID", String(demoPid), "/T", "/F"], { encoding: "utf8", windowsHide: true });
+      }
+    }
+    await stopServer(collector);
+    const freed = await pollUntil(
+      () => [8080, 8601, 8602, S4_STUB_PORT].every((port) => listeningOn(port).lines.length === 0) &&
+        (demoPid === null || !pidAlive(demoPid)),
+      30000,
+      500,
+    );
+    checks.push({
+      ok: Boolean(freed) && !existsSync(pidFileAbs),
+      label: "S4-G cleanup: demo stopped via launcher stop, ports 8080/8601/8602/18080 released, no PID file left",
+      detail: `ports=${[8080, 8601, 8602, S4_STUB_PORT].map((port) => `${port}:${listeningOn(port).lines.length}`).join(",")} pidFile=${existsSync(pidFileAbs)}`,
+    });
+  }
+
+  return gate(
+    "S4-G",
+    "diagnose: full preview 7 PASS/exit 0, no preview skip=2/exit 0, missing session/app down/non-injectable preview FAIL exit 3, counts sum 7, no fake PASS",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S4-H: regression closure. Reads the RESULTS of the S0–S3 suite (so it needs a full run),
+ * re-hashes the frozen face (schema + S0–S3 fixtures via the S2/S3 plan-review baselines and the
+ * S4 G1 freeze) and proves the agent hello stayed a control-plane message: no session, no event,
+ * no seq, and the runtime backend span count/kinds are unchanged.
+ */
+function checkS4H() {
+  section("S4-H: S0–S3 regression + schema/fixture/freeze hashes + hello is not an event");
+  const checks = [];
+  const repro = `(cd "tools/verify" && node verify.mjs)`;
+
+  /* -------- every S0–S3 gate still passes (no regression hidden by a later failure) -------- */
+  const prior = RESULTS.filter((item) => !item.id.startsWith("S4"));
+  const priorFailed = prior.filter((item) => !item.ok);
+  checks.push({
+    ok: !S4_ONLY && prior.length >= 50 && priorFailed.length === 0,
+    label: "every S0–S3 gate still PASS in this run (RESULTS, >=50 prior gates)",
+    detail: S4_ONLY
+      ? "S4-only mode: S0–S3 gates were skipped by design (run the full suite)"
+      : `${prior.length} prior gates, failed=${priorFailed.map((item) => item.id).join(",") || "none"}`,
+  });
+  const missingAnchors = S4_H_ANCHORS.filter((id) => resultById(id)?.ok !== true);
+  checks.push({
+    ok: !S4_ONLY && missingAnchors.length === 0,
+    label: `${S4_H_ANCHORS.length} anchor gates present and PASS (S0 V1/V1b/V1c/V4b, S1 A/B/C0-C3/D/F, S2 1-8/L, S3 1-10)`,
+    detail: S4_ONLY ? "S4-only mode: anchors unavailable" : missingAnchors.length ? `missing/failed=${missingAnchors.join(",")}` : "all anchors PASS",
+  });
+
+  /* -------- schema hash is the G1 value -------- */
+  const schemaHash = existsSync(abs(SCHEMA_REL)) ? sha256File(abs(SCHEMA_REL)) : "missing";
+  checks.push({
+    ok: schemaHash === S4_H_SCHEMA_HASH && S4_G1_FREEZE[SCHEMA_REL] === S4_H_SCHEMA_HASH,
+    label: "frozen schema hash is 927937df…a489a (same value in the S4 G1 freeze)",
+    detail: schemaHash,
+  });
+
+  /* -------- S4 G1 freeze: zero drift over the 12 frozen files -------- */
+  const frozenEntries = Object.entries(S4_G1_FREEZE);
+  const freezeDrift = [];
+  for (const [rel, expected] of frozenEntries) {
+    const now = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
+    if (now !== expected) freezeDrift.push(`${rel} (${expected.slice(0, 12)}… -> ${now.slice(0, 12)}…)`);
+  }
+  checks.push({
+    ok: frozenEntries.length === 12 && freezeDrift.length === 0,
+    label: "S4 G1 freeze zero drift: schema, 4 contracts, guide, 3 S4 fixtures, S4 plan/dispatch/amendment (12 files)",
+    detail: freezeDrift.length ? freezeDrift.slice(0, 4).join(" || ") : `${frozenEntries.length}/${frozenEntries.length} hashes match`,
+  });
+
+  /* -------- S0–S3 fixture bytes unchanged vs the recorded baselines -------- */
+  const fixtureBaseline = new Map();
+  const fixtureConflicts = [];
+  const collectFixtures = (entries) => {
+    for (const entry of entries) {
+      if (!entry.rel.startsWith("fixtures/")) continue;
+      const expected = S4_G1_FREEZE[entry.rel] ?? entry.hash;
+      if (fixtureBaseline.has(entry.rel) && fixtureBaseline.get(entry.rel) !== expected) fixtureConflicts.push(entry.rel);
+      fixtureBaseline.set(entry.rel, expected);
+    }
+  };
+  collectFixtures(s3FreezeSections().all);
+  collectFixtures(s2FreezeSections().all);
+  const fixtureDrift = [];
+  for (const [rel, expected] of fixtureBaseline) {
+    const now = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
+    if (now !== expected) fixtureDrift.push(rel);
+  }
+  checks.push({
+    ok: fixtureBaseline.size >= 10 && fixtureConflicts.length === 0 && fixtureDrift.length === 0,
+    label: `S0–S3 fixture bytes unchanged (${fixtureBaseline.size} frozen fixture hashes from the S2/S3 plan-review baselines)`,
+    detail: fixtureDrift.length || fixtureConflicts.length
+      ? `drift=${fixtureDrift.join(",")} conflicts=${fixtureConflicts.join(",")}`
+      : `${fixtureBaseline.size}/${fixtureBaseline.size} match`,
+  });
+
+  /* -------- the agent hello is a control message, not an event -------- */
+  const helloEvidence = resultById("S4-C")?.evidence ?? [];
+  const evidenceLine = (needle) => helloEvidence.find((text) => text.includes(needle)) ?? "";
+  const seqLine = evidenceLine("hellos consumed no seq");
+  const sessionLine = evidenceLine("hello-only session does not appear");
+  const metaLine = evidenceLine("meta capabilities still exactly 5 keys");
+  checks.push({
+    ok: resultById("S4-C")?.ok === true && seqLine.startsWith("ok ") &&
+      sessionLine.startsWith("ok ") && metaLine.startsWith("ok "),
+    label: "hello stays in-memory control plane: no session, no event, no seq consumed, meta stays 5 keys (S4-C evidence)",
+    detail: [seqLine, sessionLine, metaLine].join(" || ").slice(0, 400) || "S4-C evidence unavailable",
+  });
+
+  const launchEvidence = resultById("S4-B")?.evidence ?? [];
+  const spanLine = launchEvidence.find((text) => /events=\d+ kinds=/.test(text)) ?? "";
+  const spanMatch = spanLine.match(/events=(\d+) kinds=([a-z_,]+)/);
+  const kinds = spanMatch ? [...new Set(spanMatch[2].split(","))].sort() : [];
+  checks.push({
+    ok: resultById("S4-B")?.ok === true && Boolean(spanMatch) && Number(spanMatch[1]) >= 4 &&
+      deepEqual(kinds, ["controller", "mapper", "service", "sql"]),
+    label: "runtime span counts unchanged: the demo request yields exactly the 4 backend kinds (no hello/agent span)",
+    detail: spanLine || "S4-B span evidence unavailable",
+  });
+
+  /* -------- no S3 regression on the anchor chains -------- */
+  const regressionIds = ["S2-3", "S3-3", "S3-4", "S3-5", "S3-6", "S3-7", "S3-9"];
+  const regressionBad = regressionIds.filter((id) => resultById(id)?.ok !== true);
+  checks.push({
+    ok: regressionBad.length === 0,
+    label: "no S3 regression: S2 4-span LOST + S3 EXACT E2E, replay 0-write, board, case B, S3-9 all PASS",
+    detail: regressionBad.length ? `failed=${regressionBad.join(",")}` : `${regressionIds.length}/${regressionIds.length} PASS`,
+  });
+
+  return gate(
+    "S4-H",
+    "regression: S0–S3 all PASS, schema 927937df…, S0–S3 fixtures + S4 G1 freeze zero drift, hello is not an event (span counts unchanged)",
+    checks,
+    repro,
+  );
+}
+
+/**
+ * S4-I: scope, security and cleanup closure. No S5/S6/S7 capability in the S4-owned sources, no
+ * secrets/CDN/mirrors, injection is external-script-only with CSP untouched, loopback + no TLS,
+ * fixed ports free, no java/node leftovers, git index/HEAD/status untouched, product files stable,
+ * and the git change set stays inside the S4 whitelist.
+ */
+function checkS4I() {
+  section("S4-I: scope/security/cleanup (no S5/S6/S7, no secrets/CDN/mirrors, loopback, ports, leftovers, whitelist)");
+  const checks = [];
+  const repro = `netstat -ano | grep -E ":(${S1_PORTS.join("|")})\\s" ; tasklist | grep -iE "java|node" ; git status --porcelain ; git diff --cached --name-only`;
+
+  /* -------- no S5/S6/S7 capability in the S4 sources -------- */
+  const scopeFiles = S4_SCOPE_TREES.flatMap((rel) => dirTextFiles(rel))
+    .map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
+  const forbiddenMarkers = [
+    { name: "sourcemap", re: /sourceMappingURL|sourcesContent|--sourcemap\b|sourcemap:\s*true/ },
+    { name: "build-plugin", re: /unplugin|rollup-plugin|vite-plugin-|webpack/i },
+    { name: "L1/L2-values", re: /["']values["']\s*:/ },
+    { name: "WAR/Tomcat", re: /<packaging>\s*war|org\.apache\.catalina|\bwar\s*部署|Tomcat\s*(?:部署|容器)/i },
+    { name: "cloud", re: /\b(kubernetes|k8s|terraform|cloudformation|lambda@edge)\b/i },
+    { name: "SSE/WS", re: /new\s+EventSource|SseEmitter|@ServerEndpoint|new\s+WebSocket/ },
+    { name: "pixel-replay", re: /rrweb|html2canvas|MediaRecorder|toDataURL/ },
+    { name: "persistence", re: /localStorage|sessionStorage|indexedDB/ },
+  ];
+  const markerHits = [];
+  for (const file of scopeFiles) {
+    if (file.rel.includes("/test/")) continue;
+    for (const marker of forbiddenMarkers) {
+      if (marker.re.test(file.text)) markerHits.push(`${file.rel} [${marker.name}]`);
+    }
+  }
+  checks.push({
+    ok: markerHits.length === 0 && scopeFiles.length > 0,
+    label: "S4 sources contain no S5/S6/S7 capability (sourcemap, build plugin, L1/L2 values, WAR/Tomcat, cloud, SSE/WS, pixel replay, persistence)",
+    detail: markerHits.slice(0, 5).join(",") || `${scopeFiles.length} files clean`,
+  });
+
+  const sdkPkg = parseJson(readFileSync(abs("frontend/sdk/package.json"), "utf8"));
+  const iifeScript = String(sdkPkg.value?.scripts?.["build:iife"] ?? "");
+  checks.push({
+    ok: sdkPkg.ok && /esbuild/.test(iifeScript) && !/--sourcemap/.test(iifeScript) && !/sourcemap"\s*:\s*true/.test(iifeScript),
+    label: "SDK IIFE build uses esbuild without --sourcemap (no map/plugin step)",
+    detail: iifeScript.slice(0, 220) || "build:iife missing",
+  });
+
+  /* -------- no secrets / CDN / mirrors -------- */
+  const secretPatterns = [
+    /(?:password|passwd|pwd)\s*[:=]\s*["'][^"'\n]{3,}["']/gi,
+    /(?:api[_-]?key|apikey|access[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token)\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{8,}/gi,
+    /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    /\bAKIA[0-9A-Z]{16}\b/g,
+    /\bghp_[A-Za-z0-9]{20,}/g,
+  ];
+  const placeholderAllow = /placeholder|changeme|change_me|example|sample|dummy|redacted|xxx|<[^>]+>|\$\{|your_|demo|test/i;
+  const secretHits = [];
+  for (const file of scopeFiles) {
+    if (/package-lock\.json/.test(file.rel)) continue;
+    for (const pattern of secretPatterns) {
+      pattern.lastIndex = 0;
+      for (const match of file.text.matchAll(pattern)) {
+        if (!placeholderAllow.test(match[0])) secretHits.push(`${file.rel} ${match[0].slice(0, 48)}`);
+      }
+    }
+  }
+  const cdnHosts = [
+    "unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com",
+    "npmmirror.com", "cnpmjs.org", "registry.npm.taobao.org", "mirrors.aliyun.com", "cdn.bootcss.com", "staticfile.org",
+  ];
+  const cdnHits = [];
+  const cdnTargets = [...scopeFiles];
+  if (existsSync(abs(S4_SDK_IIFE_REL))) {
+    cdnTargets.push({ rel: S4_SDK_IIFE_REL, text: readFileSync(abs(S4_SDK_IIFE_REL), "utf8") });
+  }
+  for (const file of cdnTargets) {
+    const lower = file.text.toLowerCase();
+    for (const host of cdnHosts) if (lower.includes(host)) cdnHits.push(`${file.rel} -> ${host}`);
+  }
+  const sharedHygiene = ["V8a", "V8b", "V6d"];
+  const hygieneOk = S4_ONLY ? true : sharedHygiene.every((id) => resultById(id)?.ok === true);
+  checks.push({
+    ok: secretHits.length === 0 && cdnHits.length === 0 && hygieneOk,
+    label: "no secrets, no CDN/mirror host in S4 sources/SDK bundle (V8a/V8b/V6d also PASS in a full run)",
+    detail: `secrets=${secretHits.slice(0, 3).join(",") || "none"} cdn=${cdnHits.slice(0, 3).join(",") || "none"} hygiene=${sharedHygiene.map((id) => `${id}=${resultById(id)?.ok ? "PASS" : S4_ONLY ? "n/a" : "FAIL"}`).join(",")}`,
+  });
+
+  const mirrorUrls = [];
+  let resolvedCount = 0;
+  for (const rel of S4_LOCKFILES) {
+    if (!existsSync(abs(rel))) continue;
+    for (const match of readFileSync(abs(rel), "utf8").matchAll(/"resolved":\s*"([^"]+)"/g)) {
+      const url = match[1];
+      if (!/^https?:/i.test(url)) continue; // local file: dependency of the demo frontend (SDK)
+      resolvedCount += 1;
+      if (!url.startsWith("https://registry.npmjs.org/")) mirrorUrls.push(`${rel} -> ${url}`);
+    }
+  }
+  checks.push({
+    ok: mirrorUrls.length === 0 && resolvedCount > 0,
+    label: `lockfiles resolve only from registry.npmjs.org (${resolvedCount} http(s) tarballs, no third-party mirror)`,
+    detail: mirrorUrls.slice(0, 3).join(",") || "all npmjs.org",
+  });
+
+  /* -------- injection is external-script-only; CSP untouched; loopback; no TLS -------- */
+  const launcherCode = dirTextFiles("server/launcher/src").map((file) => file.text).join("\n");
+  const scriptTags = [...launcherCode.matchAll(/<script[^>]*>/gi)].map((match) => match[0]);
+  checks.push({
+    ok: scriptTags.length > 0 && scriptTags.every((tag) => /\ssrc=\\?"/.test(tag) && !/<script>\s*\S/i.test(tag)),
+    label: `preview/diagnose inject only external <script src=...> tags (${scriptTags.length} tags, no inline script)`,
+    detail: [...new Set(scriptTags)].join(" | ") || "no script tags",
+  });
+  checks.push({
+    ok: !/Content-Security-Policy/i.test(launcherCode) && !/nonce/i.test(launcherCode),
+    label: "preview never rewrites/relaxes CSP and adds no nonce (external same-origin scripts only)",
+    detail: /Content-Security-Policy/i.test(launcherCode) ? "CSP handling found" : "CSP untouched",
+  });
+  const loopbackBind = /HttpServer\.create\(\s*new\s+InetSocketAddress\(\s*"127\.0\.0\.1"/.test(launcherCode);
+  const loopbackSet = /LOOPBACK\s*=\s*Set\.of\(\s*"127\.0\.0\.1"\s*,\s*"localhost"\s*,\s*"::1"\s*\)/.test(launcherCode);
+  const noTls = !/HttpsServer|SSLContext|KeyStore|\.jks\b|\.pfx\b/i.test(launcherCode);
+  const collectorYml = readFileSync(abs("server/collector/src/main/resources/application.yml"), "utf8");
+  const noBindAll = !/0\.0\.0\.0/.test(launcherCode) && !/0\.0\.0\.0/.test(collectorYml);
+  checks.push({
+    ok: loopbackBind && loopbackSet && noTls && noBindAll && /address:\s*127\.0\.0\.1/.test(collectorYml),
+    label: "launcher preview binds 127.0.0.1 only, loopback target set {127.0.0.1,localhost,::1}, http only (no TLS), collector loopback",
+    detail: `bind=${loopbackBind} loopbackSet=${loopbackSet} noTls=${noTls} noBindAll=${noBindAll}`,
+  });
+
+  /* -------- cleanup: fixed ports free, no java/node leftovers -------- */
+  const portProblems = [];
+  for (const port of S1_PORTS) {
+    const state = listeningOn(port);
+    if (!state.supported || state.lines.length > 0) portProblems.push(`${port}:${state.lines.join("|") || state.error}`);
+  }
+  checks.push({
+    ok: portProblems.length === 0,
+    label: `ports ${S1_PORTS.join("/")} not LISTENING after the S4 gates (collector/demo/workbench/demo-frontend/preview/stub stopped)`,
+    detail: portProblems.join(" ; ") || "all free",
+  });
+  const nowJava = javaPids();
+  const javaLeft = nowJava.filter((pid) => !BASELINE.javaPids.includes(pid));
+  const nowNode = nodePids();
+  const nodeLeft = nowNode.filter((pid) => !BASELINE.nodePids.includes(pid) && pid !== process.pid);
+  const descendants = descendantSpawnedProcesses(process.pid);
+  const descendantHits = descendants.items.map((item) => `${item.name}:${item.pid}`);
+  checks.push({
+    ok: descendants.supported
+      ? descendantHits.length === 0
+      : javaLeft.length === 0 && nodeLeft.length === 0,
+    label: "no java/node process spawned by this run is still alive (verifier process tree empty; no orphan launcher/demo/preview/build)",
+    detail: descendants.supported
+      ? `descendants=${descendantHits.join(",") || "none"} (pid diff java=${javaLeft.join(",") || "none"} node=${nodeLeft.join(",") || "none"})`
+      : `powershell unavailable (${descendants.error}); pid diff java=${javaLeft.join(",") || "none"} node=${nodeLeft.join(",") || "none"}`,
+  });
+
+  /* -------- cleanup: git index/HEAD/status untouched, product files stable -------- */
+  const status = gitStatusLines();
+  const staged = status.lines.filter((line) => {
+    const index = line[0] ?? " ";
+    return index !== " " && index !== "?";
+  });
+  const statusNow = status.lines.slice().sort().join("\n");
+  const headNow = gitHeadHash();
+  checks.push({
+    ok: status.ok && staged.length === 0 && statusNow === BASELINE.gitStatus && headNow === BASELINE.gitHead,
+    label: "git index untouched (no staged entries), HEAD/status identical to the run baseline (verifier ran no git write)",
+    detail: `staged=${staged.length} statusUnchanged=${statusNow === BASELINE.gitStatus} head=${headNow === BASELINE.gitHead ? "unchanged" : `${BASELINE.gitHead} -> ${headNow}`}`,
+  });
+  const snapshotNow = sourceSnapshot();
+  const touched = [];
+  for (const [rel, hash] of Object.entries(SNAPSHOT)) {
+    if (snapshotNow[rel] !== hash) touched.push(rel);
+  }
+  const added = Object.keys(snapshotNow).filter((rel) => !(rel in SNAPSHOT));
+  checks.push({
+    ok: touched.length === 0 && added.length === 0,
+    label: "no product file modified or added by the verify run (build outputs only)",
+    detail: touched.length || added.length
+      ? `modified=${touched.slice(0, 5).join(",")} added=${added.slice(0, 5).join(",")}`
+      : `${Object.keys(SNAPSHOT).length} product files stable`,
+  });
+
+  /* -------- cleanup: git changes stay inside the S4 whitelist -------- */
+  const allowedExact = new Set(["pom.xml", "README.md", ".gitattributes"]);
+  const allowedPrefixes = [
+    "agent/",
+    "server/collector/",
+    "server/launcher/",
+    "frontend/sdk/",
+    "demo/buggy-shop-boot-vue/frontend/",
+    "workbench/",
+    "docs/contracts/",
+    "docs/guides/",
+    "docs/plans/stages/S4/",
+    "fixtures/s4-details/",
+    "tools/verify/",
+  ];
+  const forbiddenPrefixes = [
+    "schema/",
+    "fixtures/case-a-zero-rows/",
+    "fixtures/s1-walking-skeleton/",
+    "fixtures/s2-zero-row-chain/",
+    "fixtures/s3-frontend-facts/",
+    "demo/buggy-shop-boot-vue/backend/",
+    "docs/plans/stages/S0/",
+  ];
+  const unexpected = [];
+  const forbidden = [];
+  for (const line of status.lines) {
+    const rel = line.slice(3).trim().replace(/^"|"$/g, "").split("\\").join("/");
+    const allowed = allowedExact.has(rel) || allowedPrefixes.some((entry) => rel.startsWith(entry));
+    if (!allowed) unexpected.push(line);
+    if (forbiddenPrefixes.some((entry) => rel.startsWith(entry))) forbidden.push(line);
+  }
+  checks.push({
+    ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
+    label: "git change set is inside the S4 whitelist only (agent/collector/launcher/sdk/demo frontend/workbench/docs contracts+guides+S4/fixtures/s4-details/tools/pom)",
+    detail: unexpected.length || forbidden.length
+      ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
+      : `${status.lines.length} entries within scope`,
+  });
+
+  /* -------- gate cleanup evidence from the S4 service gates (full run only) -------- */
+  if (!S4_ONLY) {
+    const cleanupGates = ["S4-B", "S4-D", "S4-F", "S4-G"];
+    const missingCleanup = cleanupGates.filter((id) => resultById(id)?.ok !== true);
+    const cleanupLines = cleanupGates.flatMap((id) => (resultById(id)?.evidence ?? [])
+      .filter((text) => /cleanup|orphan|released|stopped/i.test(text))
+      .map((text) => `${id}: ${text}`));
+    const badCleanup = cleanupLines.filter((text) => !text.includes(": ok "));
+    checks.push({
+      ok: missingCleanup.length === 0 && badCleanup.length === 0 && cleanupLines.length > 0,
+      label: "S4-B/D/F/G report their own cleanup (services stopped, ports released, no orphans)",
+      detail: `${cleanupLines.length} cleanup lines, bad=${badCleanup.slice(0, 3).join(" || ") || "none"}`,
+    });
+  }
+
+  return gate(
+    "S4-I",
+    "scope/security/cleanup: no S5/S6/S7, no secrets/CDN/mirrors, external-script-only injection + CSP untouched, loopback/no TLS, ports free, no java/node leftovers, git untouched, S4 whitelist only",
+    checks,
+    repro,
+  );
+}
+
+/** Run the S4 gates requested by --s4 (or every implemented gate in a normal full run). */
+async function checkS4() {
+  const selected = S4_SELECTED ?? new Set(S4_IMPLEMENTED);
+  const unimplemented = [...selected].filter((letter) => !S4_IMPLEMENTED.includes(letter));
+  for (const letter of unimplemented) {
+    record(
+      `S4-${letter}`,
+      `S4-${letter} is not implemented by this verifier`,
+      false,
+      [`requested --s4=${[...selected].join(",")}; implemented=${S4_IMPLEMENTED.join(",")}`],
+      `node verify.mjs --s4=${S4_IMPLEMENTED.join(",")}`,
+    );
+  }
+
+  checkS4Builds();
+  if (selected.has("A")) await checkS4A();
+  if (selected.has("B")) await checkS4B();
+  if (selected.has("C")) await checkS4C();
+  if (selected.has("D")) await checkS4D();
+  if (selected.has("E")) await checkS4E();
+  if (selected.has("F")) await checkS4F();
+  if (selected.has("G")) await checkS4G();
+  if (selected.has("H")) checkS4H();
+  if (selected.has("I")) checkS4I();
+}
+
+/* ------------------------------------------------------------------ */
 /* source snapshot (product files only)                                */
 /* ------------------------------------------------------------------ */
 
 let SNAPSHOT = {};
-let BASELINE = { javaPids: [], gitStatus: "" };
+let BASELINE = { javaPids: [], nodePids: [], gitStatus: "", gitHead: "" };
 
 function sourceSnapshot() {
   const files = [];
@@ -6061,17 +8872,17 @@ function sourceSnapshot() {
   const addTree = (rel) => {
     walk(abs(rel), { skip: new Set(["node_modules", "target", "dist", ".git", "coverage"]) }).forEach((f) => files.push(f));
   };
-  ["pom.xml", ".gitignore", ".gitattributes", "agent/pom.xml", "server/collector/pom.xml", "demo/buggy-shop-boot-vue/backend/pom.xml",
+  ["pom.xml", ".gitignore", ".gitattributes", "agent/pom.xml", "server/collector/pom.xml", "server/launcher/pom.xml", "demo/buggy-shop-boot-vue/backend/pom.xml",
     "workbench/package.json", "workbench/package-lock.json", "workbench/index.html", "workbench/vite.config.ts", "workbench/tsconfig.json", "workbench/env.d.ts", "workbench/.gitignore", "workbench/README.md",
     "demo/buggy-shop-boot-vue/frontend/package.json", "demo/buggy-shop-boot-vue/frontend/package-lock.json", "demo/buggy-shop-boot-vue/frontend/index.html",
     "demo/buggy-shop-boot-vue/frontend/vite.config.ts", "demo/buggy-shop-boot-vue/frontend/tsconfig.json", "demo/buggy-shop-boot-vue/frontend/env.d.ts",
-    "frontend/sdk/package.json", "frontend/sdk/package-lock.json", "frontend/sdk/tsconfig.json",
+    "frontend/sdk/package.json", "frontend/sdk/package-lock.json", "frontend/sdk/tsconfig.json", "frontend/sdk/README.md",
   ].forEach(add);
-  ["schema", "fixtures", "docs/contracts", "agent/src", "server/collector/src", "demo/buggy-shop-boot-vue/backend/src",
+  ["schema", "fixtures", "docs/contracts", "docs/guides", "agent/src", "server/collector/src", "server/launcher/src", "demo/buggy-shop-boot-vue/backend/src",
     "demo/buggy-shop-boot-vue/frontend/src", "workbench/src", "workbench/scripts", "frontend/sdk/src", "frontend/sdk/test",
   ].forEach(addTree);
-  // S0–S3 stage docs are owned by other agents; test-report.md files are tester outputs.
-  for (const stage of ["S0", "S1", "S2", "S3"]) {
+  // S0–S4 stage docs are owned by other agents; test-report.md files are tester outputs.
+  for (const stage of ["S0", "S1", "S2", "S3", "S4"]) {
     for (const file of walk(abs(`docs/plans/stages/${stage}`))) {
       if (path.basename(file) === "test-report.md") continue;
       files.push(file);
@@ -6092,7 +8903,11 @@ function sourceSnapshot() {
 async function main() {
   const startedAt = new Date();
   console.log("==============================================");
-  console.log("TraceBoard S0 + S1 + S2 (re-migrated) + S3 verifier");
+  if (S4_ONLY) {
+    console.log(`TraceBoard S4 verifier (S4-only: ${[...S4_SELECTED].join(",") || "none"})`);
+  } else {
+    console.log("TraceBoard S0 + S1 + S2 (re-migrated) + S3 + S4 (part 1) verifier");
+  }
   console.log(`repo: ${REPO}`);
   console.log(`started: ${startedAt.toISOString()}`);
   console.log("==============================================");
@@ -6101,7 +8916,9 @@ async function main() {
   const statusBefore = gitStatusLines();
   BASELINE = {
     javaPids: javaPids(),
+    nodePids: nodePids(),
     gitStatus: statusBefore.lines.slice().sort().join("\n"),
+    gitHead: gitHeadHash(),
   };
 
   const env = captureEnv();
@@ -6122,37 +8939,46 @@ async function main() {
     null,
   );
 
-  const v1 = checkV1();
-  checkV1b(v1.parsed);
-  checkV1c(v1.parsed, v1.validate);
-  checkV4b(v1.parsed);
+  if (S4_ONLY) {
+    console.log("");
+    console.log(`mode: S4-only (--s4=${[...S4_SELECTED].join(",") || "none"}); S0–S3 gates are skipped by design.`);
+    await checkS4();
+  } else {
+    const v1 = checkV1();
+    checkV1b(v1.parsed);
+    checkV1c(v1.parsed, v1.validate);
+    checkV4b(v1.parsed);
 
-  checkS2Fixture(v1.validate);
+    checkS2Fixture(v1.validate);
 
-  const builds = checkV2();
-  checkS3Builds(v1.validate);
-  checkV3();
+    const builds = checkV2();
+    checkS3Builds(v1.validate);
+    checkV3();
 
-  checkS1A(v1.validate);
-  checkS1B(builds, v1.validate);
-  checkS2Artifacts();
+    checkS1A(v1.validate);
+    checkS1B(builds, v1.validate);
+    checkS2Artifacts();
 
-  await checkS1CDF(v1.validate);
-  await checkS2E2E(v1.validate);
-  checkS3Fixtures(v1.validate);
-  await checkS3E2E(v1.validate);
+    await checkS1CDF(v1.validate);
+    await checkS2E2E(v1.validate);
+    checkS3Fixtures(v1.validate);
+    await checkS3E2E(v1.validate);
 
-  checkV6();
-  checkS2Workbench();
-  checkS3Workbench();
-  checkV8();
+    checkV6();
+    checkS2Workbench();
+    checkS3Workbench();
+    checkV8();
 
-  checkS2Drift();
-  checkS2Scope();
-  checkS3CaseB();
-  checkS3Scope();
-  checkS3Regression();
-  checkS3Cleanup();
+    checkS2Drift();
+    checkS2Scope();
+    checkS3CaseB();
+    checkS3Scope();
+    checkS3Regression();
+    checkS3Cleanup();
+
+    // S4-BUILD + S4-A..I run here; S4-H reads the S0–S3 RESULTS, S4-I asserts the final cleanup.
+    await checkS4();
+  }
 
   section("SUMMARY");
   const failed = RESULTS.filter((r) => !r.ok);
@@ -6163,12 +8989,14 @@ async function main() {
     for (const item of failed) console.log(`  - ${item.id}: ${item.title}`);
   }
   const verdict = failed.length === 0 ? "PASS" : "FAIL";
-  console.log(`S3 TEST: ${verdict}`);
+  console.log(`${S4_ONLY ? "S4 TEST" : "S4 TEST (full S0–S4)"}: ${verdict}`);
 
   if (process.argv.includes("--json")) {
     console.log(
       `VERIFY_JSON:${JSON.stringify({
         repo: REPO,
+        mode: S4_ONLY ? "s4-only" : "full",
+        s4Selected: S4_ONLY ? [...S4_SELECTED] : S4_IMPLEMENTED.slice(),
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
         env,

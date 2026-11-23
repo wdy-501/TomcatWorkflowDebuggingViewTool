@@ -1,0 +1,154 @@
+package io.traceboard.launcher;
+
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+
+/**
+ * TraceBoard S4 local launcher CLI.
+ *
+ * <p>Subcommands: {@code idea}, {@code jar}, {@code stop}, {@code preview}, {@code diagnose}.
+ * Global exit codes: {@code 0} success / no FAIL, {@code 1} unexpected launcher error
+ * ({@code LAUNCHER_ERROR}), {@code 2} usage error, {@code 3} expected failure (spawn / health
+ * timeout / stop refused / diagnose has at least one FAIL).</p>
+ *
+ * <p>This class must be started with JDK 21 (class file major 65): the demo application and the
+ * agent still run on JDK 8 via {@code jar --java}. Never invoke it with a bare PATH {@code java}.</p>
+ */
+public final class Launcher {
+
+    public static final int EXIT_OK = 0;
+    public static final int EXIT_LAUNCHER_ERROR = 1;
+    public static final int EXIT_USAGE = 2;
+    public static final int EXIT_FAILED = 3;
+
+    private Launcher() {
+    }
+
+    public static void main(String[] argv) {
+        // Git Bash tooling expects UTF-8; keep the tokens ASCII and the advice UTF-8.
+        System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(new FileOutputStream(FileDescriptor.err), true, StandardCharsets.UTF_8));
+
+        int code;
+        try {
+            code = run(argv);
+        } catch (LauncherException e) {
+            System.err.println(e.render());
+            code = e.exitCode;
+        } catch (Throwable t) {
+            System.err.println("LAUNCHER_ERROR: " + t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : ": " + t.getMessage())
+                    + "\n建议: launcher 自身异常（不代表检查结论）。确认用 JDK21 运行: "
+                    + "\"$JAVA21/bin/java\" -jar \"server/launcher/target/traceboard-launcher-0.1.0-SNAPSHOT.jar\" --help；"
+                    + "JDK8 只用于 demo/agent（jar --java）。");
+            code = EXIT_LAUNCHER_ERROR;
+        }
+        System.out.flush();
+        System.err.flush();
+        System.exit(code);
+    }
+
+    private static int run(String[] argv) throws LauncherException {
+        if (argv.length == 0) {
+            printUsage(System.out);
+            return EXIT_USAGE;
+        }
+        String command = argv[0];
+        if (command.equals("--help") || command.equals("-h") || command.equals("help")) {
+            printUsage(System.out);
+            return EXIT_OK;
+        }
+        String[] rest = Arrays.copyOfRange(argv, 1, argv.length);
+        if (hasHelp(rest)) {
+            printCommandUsage(command);
+            return EXIT_OK;
+        }
+        switch (command) {
+            case "idea":
+                return new IdeaCommand().run(rest);
+            case "jar":
+                return new JarCommand().run(rest);
+            case "stop":
+                return new StopCommand().run(rest);
+            case "preview":
+                return new PreviewCommand().run(rest);
+            case "diagnose":
+                return new DiagnoseCommand().run(rest);
+            default:
+                System.err.println("USAGE: 未知子命令 \"" + command + "\"；可用: idea | jar | stop | preview | diagnose（--help 查看用法）。");
+                printUsage(System.err);
+                return EXIT_USAGE;
+        }
+    }
+
+    private static boolean hasHelp(String[] rest) {
+        for (String a : rest) {
+            if (a.equals("--help") || a.equals("-h")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void printCommandUsage(String command) {
+        PrintStream out = System.out;
+        switch (command) {
+            case "idea":
+                out.println("用法: idea --jar <demo.jar> --agent <agent.jar> [--collector <base>] --session <id> [--port 8080]");
+                out.println("只打印可粘贴的 IDEA VM options 与步骤清单；不启动进程、不写文件。");
+                break;
+            case "jar":
+                out.println("用法: jar --jar <demo.jar> --agent <agent.jar> [--collector <base>] --session <id>"
+                        + " [--java <jdk8 java>] [--port 8080] [--health <url>] [--detach]"
+                        + " [--pid-file <path>] [--log-dir <path>]");
+                out.println("用指定 JDK8 java 以 -javaagent 启动应用；等待端口/健康最多 30s；日志写 work/logs/。");
+                out.println("--detach 就绪后打印 PID=/PID_FILE=/LOG_DIR= 并退出；不加 --detach 则跟随进程。");
+                break;
+            case "stop":
+                out.println("用法: stop --pid-file <path>");
+                out.println("仅当进程命令行与记录的 jar/启动时间匹配时才停止（否则 PID_MISMATCH 拒绝）；进程不存在时 NOT_RUNNING（exit 0）。");
+                break;
+            case "preview":
+                out.println("用法: preview --target <http://静态HTML> [--port 8602] [--collector <base>] --session <id>"
+                        + " [--sdk <path>] [--allow-non-loopback]");
+                out.println("只绑 127.0.0.1:<port> 的注入反代：/traceboard/config.js、/traceboard/sdk.js 本地提供，"
+                        + "/ingest/v1/events 反代到 collector，其余转发 target 并在 </body> 前注入两个外部脚本。");
+                break;
+            case "diagnose":
+                out.println("用法: diagnose [--collector <base>] [--app-url <url>] --session <id> [--preview-url <url>]");
+                out.println("七项只读检查（collector_health/collector_meta/app_health/agent_handshake/recent_events/"
+                        + "preview_injection/sdk_script），无 --preview-url 时后两项 SKIP；fail=0 → exit 0，任一 FAIL → exit 3。");
+                break;
+            default:
+                out.println("用法: <idea|jar|stop|preview|diagnose> ... （--help 查看子命令用法）");
+                break;
+        }
+        out.println();
+        out.println("通用: --collector 是 collector origin（默认 http://127.0.0.1:8601），不接受 --ingest/--ingest-url。");
+        out.println("退出码: 0 成功/无 FAIL；1 LAUNCHER_ERROR；2 用法/参数非法；3 预期失败（spawn/健康超时/stop 拒绝/diagnose FAIL）。");
+    }
+
+    private static void printUsage(PrintStream out) {
+        out.println("TraceBoard S4 本地启动器（launcher）。必须用 JDK21 运行；demo/agent 由 jar --java 用 JDK8 运行。");
+        out.println();
+        out.println("用法: \"$JAVA21/bin/java\" -jar \"server/launcher/target/traceboard-launcher-0.1.0-SNAPSHOT.jar\" <命令> [选项]");
+        out.println();
+        out.println("命令:");
+        out.println("  idea     --jar <demo.jar> --agent <agent.jar> [--collector <base>] --session <id> [--port 8080]");
+        out.println("  jar      --jar <demo.jar> --agent <agent.jar> [--collector <base>] --session <id> [--java <jdk8 java>]"
+                + " [--port 8080] [--health <url>] [--detach] [--pid-file <path>] [--log-dir <path>]");
+        out.println("  stop     --pid-file <path>");
+        out.println("  preview  --target <http://静态HTML> [--port 8602] [--collector <base>] --session <id> [--sdk <path>] [--allow-non-loopback]");
+        out.println("  diagnose [--collector <base>] [--app-url <url>] --session <id> [--preview-url <url>]");
+        out.println();
+        out.println("约定:");
+        out.println("  --collector 只收 http://<loopback-host>:<port>（默认 http://127.0.0.1:8601），末尾 / 归一化；旧的 --ingest/--ingest-url 已移除。");
+        out.println("  --session 必须匹配 ^s_[A-Za-z0-9_-]+$（如 s_s4demo）；stop 除外必填。");
+        out.println("  端口固定: collector 8601 / demo 8080 / workbench 5173 / demo 前端 5174 / preview 8602（仅测试 18080）。");
+        out.println("  只在本机回环工作；无 secret、无外部网络、无 CDN；日志/ PID 仅写 work/**。");
+        out.println("退出码: 0 成功/无 FAIL；1 launcher 未预期错误（LAUNCHER_ERROR）；2 用法/参数非法；3 预期失败。");
+    }
+}

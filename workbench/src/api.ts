@@ -354,7 +354,12 @@ export interface SideEffectItem {
   transaction: string | null;
 }
 
-/** One graph node; fields mirror the frozen §8.2 shape (11 fields). */
+/**
+ * One graph node. S4 (api.v1.md §8.2/§10.8) makes this a fixed 14-field shape:
+ * the S2/S3 11 fields plus additive read-only `reason`/`source`/`confidence`
+ * taken verbatim from the node's own event. Nothing here is aggregated or
+ * inferred; reason/source are `null` when the event did not carry them.
+ */
 export interface GraphNode {
   spanId: string;
   parentSpanId: string | null;
@@ -367,6 +372,12 @@ export interface GraphNode {
   durNs: number;
   thread: EventThread | null;
   flags: string[];
+  /** S4 additive: event `reason` verbatim (null when absent). */
+  reason: string | null;
+  /** S4 additive: event `source` verbatim (null when absent; no defaults). */
+  source: EventSourceLocation | null;
+  /** S4 additive: event `confidence` verbatim (no re-derivation). */
+  confidence: string;
 }
 
 export interface GraphEdge {
@@ -422,6 +433,7 @@ function toGraphNode(value: unknown): GraphNode {
   const rawThread = isRecord(record.thread) ? record.thread : null;
   const rawReturn = isRecord(record.return) ? record.return : null;
   const rawSideEffects = Array.isArray(record.sideEffects) ? record.sideEffects : [];
+  const rawSource = isRecord(record.source) ? record.source : null;
   return {
     spanId: asString(record.spanId, ""),
     parentSpanId: typeof record.parentSpanId === "string" ? record.parentSpanId : null,
@@ -438,6 +450,19 @@ function toGraphNode(value: unknown): GraphNode {
       ? { id: asNumber(rawThread.id, 0), name: asString(rawThread.name, "") }
       : null,
     flags: asStringArray(record.flags),
+    // S4 additive fields: verbatim from the event, never synthesized. An S3
+    // collector without these fields yields null/"" (the UI renders 未采集).
+    reason: typeof record.reason === "string" ? record.reason : null,
+    source: rawSource
+      ? {
+          file: typeof rawSource.file === "string" ? rawSource.file : null,
+          line:
+            typeof rawSource.line === "number" && Number.isFinite(rawSource.line)
+              ? rawSource.line
+              : null,
+        }
+      : null,
+    confidence: asString(record.confidence, ""),
   };
 }
 

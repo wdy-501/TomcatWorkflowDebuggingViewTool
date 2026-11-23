@@ -1,6 +1,6 @@
 # HTTP API 契约 v1（api.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24；S4 增补：2026-11-24；S4-AMD-01：2026-11-26，日期笔误按 2026-11-23 生效）
 > 变更记录：**2026-11-23 S1 增补**——ingest 与两个只读查询转为 IMPLEMENTED，meta `capabilities.ingestEvents=true`；
 >   S0 的矩阵/端点章节按原样保留为历史（§2、§3、§4、§6），S1 当时权威定义在 **§7**。graph/replay/stream/links 当时仍为 RESERVED。
 >   **2026-11-23 G1 第 1 轮**：§7.5 补一句“agent controller span 为游离后端根”，指向 `event-model.v1.md` §5 第 2 条例外（仅文档）。
@@ -14,6 +14,14 @@
 >   **2026-11-24 S3 G1 前补丁（时钟模型，形状/字段/状态码不变）**：S3 单机 `startNs` 为 epoch 纳秒（公式见 `event-model.v1.md` §12.10）；
 >   `replay` 的 `fromNs/toNs` 与 `requests.startedAtNs/durNs` 都是**原始 epoch-ns**，collector 不转换；客户端仅显示时归一化
 >   `relNs = startNs − minStartNs`（选中 trace/会话），请求仍发原始值；fixture 中的秒级数值仅示意。
+>   **2026-11-24 S4 增补**：新增 **agent 握手**（控制通路）`POST /ingest/v1/agent-hello` 与只读状态 `GET /api/v1/sessions/{sessionId}/agent`，均为 **IMPLEMENTED**（§2.4 矩阵、§10 定义）。
+>   握手是 JSON（**非 NDJSON**）、**last-wins 内存记录**、**不入 EventStore、不建会话、不改 `seq`**、meta `capabilities` 仍**恰好 5 键**（握手不是能力开关）。
+>   事件 schema、`ingest`、`sessions/events/requests/graph/replay` 全部**零改动**；`stream`/`ws`/`links` 仍 RESERVED（404）；无 SSE/WS/鉴权/CORS/TLS。
+>   S4 的 ×N 只是工作台对**已采集 span 按 `nodeKey` 的前端聚合**（运行时 ×3 属 S6）；`fixtures/s4-details/**` 仅为 UI/测试数据，不是运行时证据。
+>   **2026-11-26 S4-AMD-01 增补（binding，日期笔误按 2026-11-23 生效）**：S4 起 `graph` 节点**加性**新增只读
+>   `reason`/`source`/`confidence`（11 → **固定 14 字段**；`flags` 语义不变；`nodes`/`edges`/排序/节点数/`rootEventId`/顶层 `confidence` 与
+>   `events`/`seq`/`requests`/`replay` 全部零改动；不改 schema、不改 S0–S3 fixture）。字段定义见 **§8.2** 与 **§10.8**；
+>   CLI `--collector` 寻址、`diagnose` 七项/SKIP/WARN/`SUMMARY` 语义、预览响应改写规则见 `s4-plan.md` §4 与 `docs/guides/local-launcher.md`。
 > 范围：collector HTTP API + demo 应用 API（附录）。**S3 的写入面仍只有 `POST /ingest/v1/events`**，其余 collector 端点全部只读。
 > 关联：`transport.v1.md`（ingest 线上格式与 202/400/413/415、查询通路 C）、`event-model.v1.md`（事件体）。
 
@@ -92,7 +100,7 @@ S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不
 - **查询 ≠ 回放**：requests/graph 不重新执行程序、不发 HTTP 写请求、不触发 SQL、不提供虚拟时钟；`capabilities.replay` 保持 `false`。
 - 未注册路径 404、方法不匹配 405（Boot 默认响应体可接受）；错误信封见 `transport.v1.md` §4.3。
 
-### 2.3 S3 实现矩阵（当前权威；S0–S2 矩阵保留为历史）
+### 2.3 S3 实现矩阵（S3 时权威；S4 起以 §2.4 为准）
 
 | 方法 | 路径 | S3 状态 | 说明 |
 |---|---|---|---|
@@ -112,6 +120,30 @@ S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不
 - 路由数 = S1/S2 六条 + `replay`，共 **7 条**；`stream`/`ws`/`links` 不得出现路径字符串。
 - **回放 ≠ 实时**：replay 是“已存事件的只读时间窗视图”，不是 SSE/WS、不重跑、不重发请求；`capabilities.realtime` 仍为 `false`。
 - 未注册路径 404、方法不匹配 405；错误信封见 `transport.v1.md` §4.3。
+
+### 2.4 S4 实现矩阵（当前权威；S0–S3 矩阵保留为历史）
+
+| 方法 | 路径 | S4 状态 | 说明 |
+|---|---|---|---|
+| GET | `/actuator/health` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/meta` | **IMPLEMENTED** | `capabilities` 仍**恰好 5 键**、取值与 S3 相同（`replay=true`、`realtime=false`）；握手**不是**能力键（§10.4） |
+| POST | `/ingest/v1/events` | **IMPLEMENTED** | 与 S1–S3 逐字相同，仍是**唯一事件写通路** |
+| POST | `/ingest/v1/agent-hello` | **IMPLEMENTED（S4 新增）** | agent 启动诊断握手；`application/json`（**非 NDJSON**）；不写事件、不建会话（§10.2） |
+| GET | `/api/v1/sessions` | **IMPLEMENTED** | 不变；**只有握手、没有事件**的会话不出现在列表里 |
+| GET | `/api/v1/sessions/{sessionId}/events` | **IMPLEMENTED** | 不变（只读分页，**不是回放**） |
+| GET | `/api/v1/sessions/{sessionId}/requests` | **IMPLEMENTED** | 不变（S3 字段与派生 `confidence` 不变） |
+| GET | `/api/v1/sessions/{sessionId}/graph?traceId=<32hex>` | **IMPLEMENTED** | S4 **加性**：节点 11 → **固定 14 字段**（+`reason/source/confidence`，§8.2/§10.8）；edges `count=1`、排序/节点数不变；**无** ×N 聚合 |
+| GET | `/api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>` | **IMPLEMENTED** | 不变（只读窗口，0 写） |
+| GET | `/api/v1/sessions/{sessionId}/agent` | **IMPLEMENTED（S4 新增）** | 只读返回该 session 最近一次握手事实；无记录 404（§10.3） |
+| GET | `/api/v1/stream` | RESERVED | SSE 不实现（404） |
+| WS | `/ws/v1/events` | RESERVED | WebSocket 不实现（404） |
+| POST | `/api/v1/sessions/{sessionId}/links` | RESERVED | 手工关联不实现（S6，404） |
+
+- 端点计数：含 `/actuator/health` 共 **10 条**；collector **业务路由 9 条**（meta、ingest、hello、sessions、events、requests、graph、replay、agent），actuator 另计。
+- S4 **不新增事件写通路**：`agent-hello` 是**控制/诊断通路**，与事件存储完全分离；事件写入仍只有 `POST /ingest/v1/events`。
+- S3 的 7 条业务路由（meta/ingest/sessions/events/requests/graph/replay）**除 graph 节点按 §10.8 加性新增 3 个只读字段外**，形状与语义零改动；S4 只新增 hello（POST）与 agent（GET）两条。
+- `stream`/`ws`/`links` 仍不得注册路径字符串；未注册 404、方法不匹配 405；错误信封见 `transport.v1.md` §4.3。
+- S4 的 ×N/详情/缺口**全部在前端派生**，collector 不新增端点；graph 只按 §10.8 加性新增只读字段，不做聚合（同 `nodeKey` 多次调用仍是多个节点）；运行时 ×3 属 S6。
 
 ## 3. S0 已实现端点（S0 历史；S1 现状见 §7）
 
@@ -533,7 +565,10 @@ Host: 127.0.0.1:8601
 | `rootEventId` | string \| null | 根 span 的 `rootEventId`（S2 为 `click_lost_<根spanId>`）；无根时 `null` |
 | `confidence` | string | 根 span 的 `confidence`；无根时固定 `"LOST"` |
 
-**`nodes[]`（每条固定 11 个字段，字段恒出现）**
+**`nodes[]`（S2–S3：每条固定 11 个字段；S4 起：每条固定 14 个字段，字段恒出现）**
+
+> 上例为 S2 历史形状（11 字段）。S4 起每个节点**加性**多出 `reason`/`source`/`confidence` 三个只读字段（见下表末三行与 §10.8）；
+> 其余字段、`nodes` 顺序、`edges`、节点数、`rootEventId`、顶层 `confidence` 不变。
 
 | 字段 | 类型 | 语义 |
 |---|---|---|
@@ -548,6 +583,12 @@ Host: 127.0.0.1:8601
 | `durNs` | int | 原样 |
 | `thread` | object \| null | 事件 `thread` 原样；事件无该字段时为 `null`（不伪造线程） |
 | `flags` | array\<string\> | 事件 `flags` 原样；事件无该字段时为 `[]` |
+| `reason` | string \| null | **S4 加性**；事件 `reason` 原样；事件无该字段（非 `NOT_COLLECTED_*`）→ `null`；不改写/截断 |
+| `source` | object \| null | **S4 加性**；事件 `source` 原样 `{"file": string\|null, "line": int\|null}`；事件无 → `null`；不补默认值 |
+| `confidence` | string | **S4 加性**；事件 `confidence` 原样（`EXACT/INFERRED/LOST/MANUAL`）；不按节点重算、不伪造 |
+
+- S4 加性字段的顺序固定为节点字段末尾：`spanId, parentSpanId, kind, nodeKey, status, return, sideEffects, startNs, durNs, thread, flags, reason, source, confidence`（14 项，每项恒出现）。
+- `flags` 是**既有**字段（S2 起 11 字段之一），S4 **不改其语义**；`reason/source/confidence` 只来自该节点对应事件，不聚合、不跨节点继承。
 
 **`edges[]`**
 
@@ -751,7 +792,7 @@ Host: 127.0.0.1:8601
 
 ### 9.4 `GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex>`（S3 语义补充）
 
-- 形状、11 个节点字段、`edges[{from,to,count}]`、排序、400/404/405、只读与两次一致**全部沿用 §8.2**，S3 **不新增字段**、不改形状。
+- 形状、节点字段、`edges[{from,to,count}]`、排序、400/404/405、只读与两次一致**全部沿用 §8.2**；S3 当时**不新增字段**、不改形状；S4 起按 §8.2/§10.8 **加性**新增 `reason/source/confidence`（其余仍不变）。
 - 节点自然混合前端与后端：案例 A 的根是 `ui_event`（`parentSpanId=null`、`confidence=EXACT`），`fetch` 挂 click 根，
   `controller.parentSpanId=fetch.spanId`，`service/mapper/sql` 依次挂父，`render` 挂 click 根（异步续体回落）；
   案例 B 为 `ui_event → js_method → render`，无后端节点。
@@ -814,6 +855,184 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/stream"  
 
 期望：A+B 同会话时默认 `toNs=2004000000`、`events` 共 10 条；每两次相同 GET 响应逐字一致；前后 `/events` 与 demo `GET /api/orders`
 （仍 `CREATED`）不变。以上 `Ns` 数值均为 fixture 作用域；运行时是 epoch-ns，客户端显示时归一化、请求仍用原始值。
+
+## 10. S4 实现（本地接入 + 诊断握手）
+
+> S4 只新增**一条诊断握手（控制通路）**与**一个只读连接状态查询**；事件 schema、`ingest`、`sessions/events/requests/graph/replay`
+> **全部零改动**（形状、字段、排序、错误码、0 写约束逐字沿用 S1–S3）。本地启动器（`server/launcher`）与预览代理（`127.0.0.1:8602`）
+> 不改变 collector 线上格式：预览只把浏览器请求转发到 `--target` 与 `/ingest/v1/events`（其他 `/ingest/*` 404），并注入 `config.js`/`sdk.js` 两个**外部脚本**。
+> collector 不新增 CORS、不加鉴权、不持久化；无 SSE/WS/长连接；`capabilities` 仍**恰好 5 键**（握手不是能力开关）。
+
+### 10.1 S4 端点一览
+
+| # | 方法 | 路径 | 类别 | 是否写事件 | 说明 |
+|---|---|---|---|---|---|
+| 1 | GET | `/actuator/health` | 健康 | 否 | 不变 |
+| 2 | GET | `/api/v1/meta` | 元信息 | 否 | 5 键不变 |
+| 3 | POST | `/ingest/v1/events` | 事件写入 | **是（唯一）** | 不变 |
+| 4 | POST | `/ingest/v1/agent-hello` | 诊断握手 | 否 | S4 新增（§10.2） |
+| 5 | GET | `/api/v1/sessions` | 只读查询 | 否 | 不变；不含“只有握手”的会话 |
+| 6 | GET | `/api/v1/sessions/{sessionId}/events` | 只读查询 | 否 | 不变 |
+| 7 | GET | `/api/v1/sessions/{sessionId}/requests` | 只读派生 | 否 | 不变 |
+| 8 | GET | `/api/v1/sessions/{sessionId}/graph?traceId=` | 只读派生 | 否 | S4 加性 14 字段（§10.8）；edges/排序/节点数不变 |
+| 9 | GET | `/api/v1/sessions/{sessionId}/replay?fromNs=&toNs=` | 只读派生 | 否 | 不变（0 写） |
+| 10 | GET | `/api/v1/sessions/{sessionId}/agent` | 只读状态 | 否 | S4 新增（§10.3） |
+
+- 业务路由 9 条（2–10），`/actuator/health` 另计；`stream`/`ws`/`links` 仍为 RESERVED（404）。
+- 握手与 agent 状态是**诊断/连接事实**，不是事件、不是图、不是回放；两者都不得改变事件计数或 `seq`。
+
+### 10.2 `POST /ingest/v1/agent-hello`（IMPLEMENTED，控制通路，非事件）
+
+```http
+POST /ingest/v1/agent-hello HTTP/1.1
+Host: 127.0.0.1:8601
+Content-Type: application/json; charset=utf-8
+Content-Length: 118
+```
+
+```json
+{"schema":"traceboard.agent.v1","sessionId":"s_s4demo","version":"0.1.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000}
+```
+
+| 字段 | 类型 | 必填 | 约束 |
+|---|---|---|---|
+| `schema` | string | 是 | **精确等于** `traceboard.agent.v1`（大小写敏感；**不是**事件 schema `traceboard.event.v1`） |
+| `sessionId` | string | 是 | 匹配 `^s_[A-Za-z0-9_-]+$`；agent 侧取自 `-Dtraceboard.sessionId` |
+| `version` | string | 是 | 非空、≤64 字符（agent jar manifest `Implementation-Version`，回退 `0.1.0-SNAPSHOT`） |
+| `pid` | integer | 是 | ≥1（JVM `RuntimeMXBean.getName()` 的 `@` 前缀；解析失败则 agent 不发送） |
+| `startedAtMs` | integer | 是 | ≥0，agent 侧 Unix 毫秒 |
+
+- 未知字段**忽略**（只保留契约字段）；不要求 `traceId`/`spanId`/`rootEventId`；body 不得含 token/secret（本阶段无 token）。
+- **判定顺序固定**：方法不是 `POST` → `405`；`Content-Type` 不是 `application/json`（允许 `; charset=utf-8`，大小写不敏感）→ `415`；
+  body > **4096 字节** → `413`；JSON 非法或任一字段校验失败 → `400`；否则 `200`。
+- `200 OK`（**精确形状**，字段顺序固定）：
+
+```json
+{"schema":"traceboard.agent.v1","sessionId":"s_s4demo","accepted":true}
+```
+
+| 状态码 | 条件 | 响应体 |
+|---|---|---|
+| `200` | 握手合法并已记录（last-wins） | 上述 `accepted:true` 形状 |
+| `400` | JSON 非法；顶层非对象；`schema` 不精确；`sessionId` 形状错；`version` 空/超长；`pid<1`；`startedAtMs<0`；空 body | 错误信封 `error="bad_request"`（`message` 只指出哪个字段不合法，**不回显 body**） |
+| `405` | 非 `POST`（含 `GET`/`PUT`/`HEAD` 等） | 框架默认响应体可接受；不解析 body |
+| `413` | body > 4096 字节（含超限即停读，不无限读） | 错误信封 `error="payload_too_large"` |
+| `415` | `Content-Type` 缺失或不是 `application/json` | 错误信封 `error="unsupported_media_type"` |
+
+- **不写事件**：不解析事件、不写 EventStore、不消耗 `seq`、不创建会话、不改 meta；响应不返回事件计数。
+- **last-wins**：collector 内存 `ConcurrentHashMap<sessionId, hello>`，每个 session 只保留**最近一次成功**握手；同 session 多次 hello 覆盖、
+  不累积、不保留历史；无 TTL、无持久化、无 TTL 清理；多应用同 session 时以最后到达者为准（诊断只表示“最近一次握手”）。
+- 无鉴权（仅回环）；`transport.v1.md` §1/§7 的本地边界同样适用于本端点。
+
+### 10.3 `GET /api/v1/sessions/{sessionId}/agent`（IMPLEMENTED，只读）
+
+```http
+GET /api/v1/sessions/s_s4demo/agent HTTP/1.1
+Host: 127.0.0.1:8601
+```
+
+`200 OK`（**精确形状**，字段顺序固定）：
+
+```json
+{"sessionId":"s_s4demo","connected":true,"version":"0.1.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000,"lastSeenMs":1763900000456}
+```
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `sessionId` | string | 路径参数逐字回显（形状必须匹配 `^s_[A-Za-z0-9_-]+$`，否则 404） |
+| `connected` | boolean | 有握手记录时恒为 `true`（该字段是“连接事实”，不是实时在线探测；无心跳/超时判定） |
+| `version` | string | 最近一次握手上报的 agent 版本 |
+| `pid` | int | 最近一次握手上报的 JVM pid（用于多实例辨识） |
+| `startedAtMs` | int | 最近一次握手上报的 agent 启动毫秒（agent 时钟） |
+| `lastSeenMs` | int | **collector 接收该握手的时刻**（collector 时钟，Unix 毫秒）；与 `startedAtMs` 不同源，不得直接相减推断时延 |
+
+- `404`：该 session **从未**收到成功握手 → 错误信封 `error="not_found"`；`sessionId` 形状不合法一律 `404`（不返回 400，避免把手误输入当成协议错误）。
+- 只允许 `GET`；`POST/PUT/PATCH/DELETE` → `405`（框架默认响应体可接受）；无查询参数（额外参数忽略）、无分页。
+- 只读：不触发采集、不创建会话、不改握手记录、不读写事件存储；两次相同 GET 在无新握手时逐字一致。
+- **有握手但无事件**是合法状态：agent 状态 200 与同 session 的 `/events` 404 并存，不得为了让两者一致而伪造空会话。
+
+### 10.4 与事件通路的关系（不变式）
+
+1. 握手**不进入 EventStore**：只有 hello 的 session **不出现**在 `GET /api/v1/sessions`；其 `/events`、`requests`、`graph`、`replay` 均 404（未知 session）。
+2. 握手不改变任何既有端点输出：事件数、`seq`、`requests`/`graph`/`replay` 响应与无握手时逐字一致（可回归比对）。
+3. meta `capabilities` 仍**恰好 5 键**且取值不变（`health=true`、`meta=true`、`ingestEvents=true`、`realtime=false`、`replay=true`）；
+   握手**不是能力开关**：不得新增第 6 键，也不得把 `realtime` 写成 `true`。
+4. 无 SSE/WS/长连接；`diagnose` 与工作台都用普通 GET 点查/轮询。
+5. 多应用同 session：last-wins；`GET agent` 只反映最后一次；诊断展示 `pid`/`startedAtMs` 供辨识；文档建议一应用一 session。
+6. collector 重启：事件与握手记录同在内存、一起丢失；agent 只在 premain 握手一次、不自动重发 → `GET agent` 404 直到应用重启（如实报告，不伪造 `connected`）。
+7. 握手失败（连接拒绝/超时/非 2xx）对应用 **fail-open**：agent 只计数（`hello_failed=n`），不阻塞启动、不重试风暴、不影响事件上报。
+8. 事件模型无 S4 变更：握手不是事件，不新增事件类型/字段/枚举；schema 字节不变。
+
+### 10.5 S4 状态码汇总（新增部分；其余沿用 §7.4/§8.4/§9.6）
+
+| 码 | 场景（S4） |
+|---|---|
+| `200` | hello 合法并记录；agent 状态命中 |
+| `400` | hello JSON 非法/字段不合法/空 body |
+| `404` | agent 状态：该 session 从未握手或 `sessionId` 形状不合法；未注册的 RESERVED 路由 |
+| `405` | hello 收到非 POST；agent 状态收到非 GET |
+| `413` | hello body > 4096 字节 |
+| `415` | hello `Content-Type` 不是 `application/json` |
+
+错误信封（`transport.v1.md` §4.3）：`{"error":"<code>","message":"<≤200 字符、不含内部路径/凭据>","apiVersion":"v1"}`。
+
+### 10.6 S4 明确未实现（S5/S6 边界，越界即失败）
+
+- 无 L1/L2：不采参数/实体字段/局部变量/`values[]`/字段 diff（S5/S6）；`REDACTED`/`TRUNCATED` 仅沿用既有显示语义。
+- 无 sourcemap/构建插件/源码片段/函数行号/方法名映射（S5）；详情缺失只写“未采集”，不承诺行号。
+- **运行时 ×3 是 S6**：S4 的 ×N 只是工作台对已采集 span 按 `nodeKey` 的前端聚合；`fixtures/s4-details/**` 的三次调用是 UI/测试数据，不是运行时能力。
+- 无 SSE/WS/实时、无持久化/DB/缓存/CORS/鉴权/TLS、无手工关联 `/links`、无时间窗 `INFERRED`（S6）。
+- 无 WAR/Tomcat/React/cloud（S7+）；不改 demo 后端、H2 seed 与案例 A 行为。
+- 预览代理不改写 CSP、不注入内联脚本、不做 TLS、不重写绝对 URL/`Location`；受 CSP/压缩/无 `</body>` 限制（见 `docs/guides/local-launcher.md`）。
+
+### 10.7 S4 冒烟命令
+
+```bash
+# 1) 握手：合法 → 200 accepted:true
+curl -s -X POST "http://127.0.0.1:8601/ingest/v1/agent-hello" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  --data-binary '{"schema":"traceboard.agent.v1","sessionId":"s_s4demo","version":"0.1.0-SNAPSHOT","pid":12345,"startedAtMs":1763900000000}'
+
+# 2) 只读连接事实（有记录 200 / 无记录 404）
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s4demo/agent"                 # 200 connected=true + lastSeenMs
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_none/agent"   # 404
+
+# 3) 握手不建会话、不改事件计数（只有握手时列表不含 s_s4demo）
+curl -s "http://127.0.0.1:8601/api/v1/sessions"
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_s4demo/events" # 404（无事件）
+
+# 4) 错误码
+curl -s -o /dev/null -w "%{http_code}\n" -X GET "http://127.0.0.1:8601/ingest/v1/agent-hello"                  # 405
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:8601/api/v1/sessions/s_s4demo/agent"        # 405
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:8601/ingest/v1/agent-hello" \
+  -H "Content-Type: application/x-ndjson" --data-binary '{}'                                                    # 415
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:8601/ingest/v1/agent-hello" \
+  -H "Content-Type: application/json" --data-binary '{"schema":"traceboard.agent.v1"}'                          # 400
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:8601/ingest/v1/agent-hello" \
+  -H "Content-Type: application/json" --data-binary @- <<< "$(printf 'a%.0s' $(seq 1 5000))"          # 413
+
+# 5) meta 仍 5 键（握手不是能力）
+curl -s "http://127.0.0.1:8601/api/v1/meta"
+```
+
+期望：`accepted:true` / agent 200 且 `lastSeenMs` 为 collector 时刻 / `s_s4demo` 不在 sessions 列表 / `404` / `405` / `405` / `415` / `400` / `413` /
+capabilities 仍为 5 键（`replay=true`、`realtime=false`）。S4 不改变 `ingest` 的任何行为（§7.1 照旧）。
+
+### 10.8 S4 注记：graph 节点的加性只读字段（`reason`/`source`/`confidence`）
+
+> 这是**加性契约变更**，不是 schema 变更：事件字节、`events`/`seq`、`requests`/`replay`、ingest、hello 全部零改动；
+> 只允许 collector 在只读派生层（`SpanFacts`/`GraphNode`/`TraceDeriver` 及对应测试）把节点从 11 字段扩为 **固定 14 字段**。
+
+- 字段顺序固定（恒出现）：`spanId, parentSpanId, kind, nodeKey, status, return, sideEffects, startNs, durNs, thread, flags, reason, source, confidence`。
+- `reason`：事件 `reason` 原样（string 或 `null`）；事件无该字段（通常非 `NOT_COLLECTED_*`）→ `null`；不改写/截断。
+- `source`：事件 `source` 原样（`{"file": string|null, "line": int|null}` 或 `null`）；事件无 → `null`；不补默认值（S5 前没有行号映射）。
+- `confidence`：事件 `confidence` 原样（`EXACT/INFERRED/LOST/MANUAL`）；不按节点重算、不伪造。
+- `flags`：**既有字段**，保持事件 `flags` 原样（缺省 `[]`），本次**不改语义**。
+- 不变：`nodes` 排序（`startNs` 升序、同值 `spanId`）、`edges`（`count` 恒 1）、节点数、`rootEventId`、顶层 `confidence`、`sessionId`/`traceId`；
+  不聚合、不合并同 `nodeKey`；错误码/只读/两次一致不变。
+- 工作台**直接从 graph 读取** `reason/source/confidence/flags` 展示详情，不再为这三个字段翻页 join 事件；`reason` 缺失且 status 为
+  `NOT_COLLECTED_*` → `未采集（无 reason）`；`source` 非完整 `file:line` → `未采集`。
+- `fixtures/s4-details/**` 无需修改事件字节；S2/S3 graph 回归与 `tools/verify` 的 `GRAPH_NODE_KEYS` 迁移为 14 键（仅加性），节点值/边/顺序断言不变。
 
 ## 附录 A：demo 应用 API（非 TraceBoard API，S0 历史）
 

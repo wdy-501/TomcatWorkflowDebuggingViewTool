@@ -15,6 +15,7 @@
   <modules>
     <module>agent</module>
     <module>server/collector</module>
+    <module>server/launcher</module>
   </modules>
 
   <properties>

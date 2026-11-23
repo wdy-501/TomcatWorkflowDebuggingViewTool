@@ -13,8 +13,13 @@ import {
   type SideEffectItem,
 } from "../api";
 import { useS3Store, type S3Error, type S3Tab } from "../stores/s3";
+import S4DetailPanel from "./S4DetailPanel.vue";
+import { groupNodesByNodeKey } from "../s4/derive";
 
 const s3 = useS3Store();
+
+/** S4: selected graph node (detail drawer); selection is display-only. */
+const selectedSpanId = ref<string | null>(null);
 
 /** Low-frequency polling only while LIVE and visible — this is not realtime. */
 const POLL_INTERVAL_MS = 5000;
@@ -126,6 +131,9 @@ async function refresh(): Promise<void> {
     const kept =
       previous !== null && filtered.some((item) => item.traceId === previous);
     const next = kept ? previous : (filtered[0]?.traceId ?? null);
+    if (next !== previous) {
+      selectedSpanId.value = null;
+    }
     if (next === null) {
       s3.selectTrace(null);
       s3.clearGraph();
@@ -159,6 +167,7 @@ function selectRequest(traceId: string): void {
     return;
   }
   s3.selectTrace(traceId);
+  selectedSpanId.value = null;
   void loadGraphFor(traceId);
 }
 
@@ -585,6 +594,34 @@ function buildRows(nodes: readonly GraphNode[]): TreeRow[] {
 }
 
 const treeRows = computed<TreeRow[]>(() => buildRows(visibleNodes.value));
+
+// ---------------------------------------------------------------------------
+// S4: selected node, ×N grouping (display only) and detail drawer
+// ---------------------------------------------------------------------------
+
+const nodeGroups = computed(() =>
+  groupNodesByNodeKey(s3.graph?.nodes ?? [])
+);
+
+const groupCounts = computed<Map<string, number>>(() => {
+  const counts = new Map<string, number>();
+  for (const group of nodeGroups.value) {
+    counts.set(group.nodeKey, group.count);
+  }
+  return counts;
+});
+
+function groupCount(nodeKey: string): number {
+  return groupCounts.value.get(nodeKey) ?? 1;
+}
+
+function selectSpan(spanId: string): void {
+  selectedSpanId.value = spanId;
+}
+
+function clearSelection(): void {
+  selectedSpanId.value = null;
+}
 
 const replayTraceEventCount = computed<number>(() => {
   const traceId = s3.selectedTraceId;
@@ -1184,7 +1221,8 @@ function rawTimeTitle(node: GraphNode): string {
           <p v-if="s3.graphStatus === 'loading'" class="s3-state">正在读取事实链…</p>
         </template>
 
-        <div id="s3-tree" class="s3-tree">
+        <div class="s4-split">
+          <div id="s3-tree" class="s3-tree">
           <p v-if="selectedRequest === null" class="s3-state">
             空态：无事实树可显示；请先选择一条请求。
           </p>
@@ -1206,7 +1244,17 @@ function rawTimeTitle(node: GraphNode): string {
                 </span>
                 <div
                   class="s3-node"
-                  :class="`s3-node--${statusMeta(row.node.status).tone}`"
+                  :class="[
+                    `s3-node--${statusMeta(row.node.status).tone}`,
+                    { 's3-node--selected': selectedSpanId === row.node.spanId },
+                  ]"
+                  role="button"
+                  tabindex="0"
+                  :aria-pressed="selectedSpanId === row.node.spanId"
+                  :title="`点击查看节点详情：${row.node.kind} · ${row.node.nodeKey}`"
+                  @click="selectSpan(row.node.spanId)"
+                  @keydown.enter="selectSpan(row.node.spanId)"
+                  @keydown.space.prevent="selectSpan(row.node.spanId)"
                 >
                   <div class="s3-node__head">
                     <span v-if="row.node.parentSpanId === null" class="s3-node__root-tag">根</span>
@@ -1220,6 +1268,12 @@ function rawTimeTitle(node: GraphNode): string {
                       ></span>
                       {{ statusMeta(row.node.status).label }}
                     </span>
+                    <span
+                      v-if="groupCount(row.node.nodeKey) >= 2"
+                      class="s4-xn"
+                      :title="`该 nodeKey 在所选 trace 内已采集 ${groupCount(row.node.nodeKey)} 次（前端 ×N 聚合；运行时 ×3 属 S6）`"
+                    >×{{ groupCount(row.node.nodeKey) }}</span>
+                    <span v-if="selectedSpanId === row.node.spanId" class="s4-node-selected">节点详情已打开</span>
                     <span v-if="statusHint(row.node.status)" class="s3-node__hint">
                       {{ statusHint(row.node.status) }}
                     </span>
@@ -1259,6 +1313,15 @@ function rawTimeTitle(node: GraphNode): string {
               图为空：该 trace 暂无节点（未采集）；空态不判定为“没发请求”。
             </p>
           </template>
+          </div>
+
+          <S4DetailPanel
+            :nodes="s3.graph?.nodes ?? []"
+            :selected-span-id="selectedSpanId"
+            :min-start-ns="minStartNs"
+            @select="selectSpan"
+            @close="clearSelection"
+          />
         </div>
 
         <div class="s3-legend">
@@ -1398,7 +1461,8 @@ function rawTimeTitle(node: GraphNode): string {
     <p class="s3-panel__footnote">
       本板只读：GET requests / graph / replay。回放不会重发请求、不写数据库、不调用 demo、不执行程序；
       时间轴按所选 trace 的 min(startNs) 归一化显示，API 参数仍是原始 epoch-ns。
-      S0/S1/S2 面板保留在下方折叠区；无 S4/S5（无详情抽屉/sourcemap/局部变量/图库/SSE/WS）。
+      S4 节点详情 / ×N 分组 / 缺口清单均为已采集 graph 的只读前端派生（运行时 ×3 属 S6）；
+      无 S5/S6（无 sourcemap/局部变量/行号映射/图库/SSE/WS）。S0/S1/S2 面板保留在下方折叠区。
     </p>
   </section>
 </template>

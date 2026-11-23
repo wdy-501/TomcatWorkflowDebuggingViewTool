@@ -105,7 +105,7 @@ public final class SpanContext {
         } catch (Throwable ignored) {
             // fail-open: treat as missing headers (S2 LOST)
         }
-        enter(KIND_CONTROLLER, CONTROLLER_NODE_KEY, link);
+        enter(KIND_CONTROLLER, CONTROLLER_NODE_KEY, enterNs, link);
     }
 
     public static void exitController(long enterNs, Object returned, Throwable thrown) {
@@ -140,7 +140,7 @@ public final class SpanContext {
     // ---------------------------------------------------------------- service
 
     public static void enterService(long enterNs) {
-        enter(KIND_SERVICE, SERVICE_NODE_KEY);
+        enter(KIND_SERVICE, SERVICE_NODE_KEY, enterNs, null);
     }
 
     public static void exitService(long enterNs, boolean returned, Throwable thrown) {
@@ -191,7 +191,7 @@ public final class SpanContext {
     }
 
     public static void enterMapper(long enterNs) {
-        enter(KIND_MAPPER, MAPPER_NODE_KEY);
+        enter(KIND_MAPPER, MAPPER_NODE_KEY, enterNs, null);
     }
 
     public static void exitMapper(long enterNs, Object returned, Throwable thrown) {
@@ -235,7 +235,7 @@ public final class SpanContext {
     }
 
     public static void enterSql(long enterNs) {
-        enter(KIND_SQL, SQL_NODE_KEY);
+        enter(KIND_SQL, SQL_NODE_KEY, enterNs, null);
     }
 
     public static void exitSql(long enterNs, int rowsAffected, Throwable thrown) {
@@ -260,11 +260,7 @@ public final class SpanContext {
 
     // ---------------------------------------------------------------- stack
 
-    private static void enter(String kind, String nodeKey) {
-        enter(kind, nodeKey, null);
-    }
-
-    private static void enter(String kind, String nodeKey, RequestHeaders.Link link) {
+    private static void enter(String kind, String nodeKey, long enterNs, RequestHeaders.Link link) {
         try {
             if (!SpanEmitter.isEnabled()) {
                 return;
@@ -274,9 +270,10 @@ public final class SpanContext {
                 stack.clear();
                 TraceAgent.log("stack_reset=" + RESET.incrementAndGet() + " reason=depth");
             }
-            // S3 clock (event-model.v1.md §12.10 intent): epoch-ns taken once at span start;
-            // durations still use the monotonic System.nanoTime delta captured by the advice.
-            long startNs = SpanEmitter.epochNanos();
+            // Use the same advice-captured nanoTime for startNs and duration. Taking startNs
+            // later (inside this method) inflates parent spans on cold classloading and can
+            // make a child end after its parent.
+            long startNs = SpanEmitter.epochNanosFrom(enterNs);
             Frame parent = stack.peek();
             Frame frame;
             if (parent == null) {

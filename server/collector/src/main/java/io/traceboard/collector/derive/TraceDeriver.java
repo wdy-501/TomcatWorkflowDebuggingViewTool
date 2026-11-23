@@ -182,7 +182,7 @@ public class TraceDeriver {
             positionBySpanId.put(span.spanId(), i);
             nodes.add(new GraphNode(span.spanId(), span.parentSpanId(), span.kind(), span.nodeKey(),
                     span.status(), span.returnValue(), span.sideEffects(), span.startNs(), span.durNs(),
-                    span.thread(), span.flags()));
+                    span.thread(), span.flags(), span.reason(), span.source(), span.confidence()));
         }
 
         // One edge per parent/child pair (count is always 1: spanId is unique per session).
@@ -300,7 +300,9 @@ public class TraceDeriver {
                 event.get("return"),
                 arrayOrEmpty(event.get("sideEffects")),
                 event.get("thread"),
-                arrayOrEmpty(event.get("flags")));
+                arrayOrEmpty(event.get("flags")),
+                text(event, "reason"),
+                event.get("source"));
     }
 
     private static String text(JsonNode event, String field) {

@@ -20,6 +20,9 @@
  * `INFERRED`/`MANUAL` confidence, DOM diffing/screenshots.
  */
 
+/** SDK version; keep in sync with package.json (asserted by the IIFE tests). */
+export const version = "0.1.0";
+
 export interface InitOptions {
   /** Ingest base path; the SDK posts NDJSON to `${ingestUrl}/v1/events`. Default `/ingest`. */
   ingestUrl?: string;
@@ -1019,6 +1022,97 @@ class TraceBoardRuntime {
 
 let activeRuntime: TraceBoardRuntime | null = null;
 
+// Replaced with `true` by the esbuild IIFE build (`--define:__TRACEBOARD_IIFE__=true`).
+// The ESM build keeps this undefined, so page-config auto-init never runs on import.
+declare const __TRACEBOARD_IIFE__: boolean;
+
+const SESSION_ID_PATTERN = /^s_[A-Za-z0-9_-]+$/;
+const CONFIG_GUARD_ACTIVE = "__TRACEBOARD_SDK_ACTIVE__";
+const CONFIG_GUARD_AUTO = "__TRACEBOARD_AUTO_INIT__";
+
+function windowObject(): any | null {
+  try {
+    const globalObj: any = typeof globalThis !== "undefined" ? (globalThis as any) : null;
+    if (!globalObj) {
+      return null;
+    }
+    return globalObj.window !== undefined && globalObj.window !== null ? globalObj.window : globalObj;
+  } catch {
+    return null;
+  }
+}
+
+/** Mark the page as already instrumented (explicit ESM init and IIFE auto-init both set it). */
+function markSdkActive(win: any): void {
+  if (!win) {
+    return;
+  }
+  try {
+    win[CONFIG_GUARD_ACTIVE] = true;
+  } catch {
+    // fail-open
+  }
+  try {
+    // Contract alias: dispatch §4.6 names this guard `window.__TRACEBOARD_AUTO_INIT__`.
+    win[CONFIG_GUARD_AUTO] = true;
+  } catch {
+    // fail-open
+  }
+}
+
+function safeWarn(message: string): void {
+  try {
+    const consoleObj = (globalThis as any).console;
+    if (consoleObj && typeof consoleObj.warn === "function") {
+      consoleObj.warn(`[traceboard-sdk] ${message}`);
+    }
+  } catch {
+    // fail-open
+  }
+}
+
+function configText(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
+}
+
+/**
+ * Preview injection entry point: called once when the IIFE script loads and
+ * `window.__TRACEBOARD_CONFIG__` (served by the launcher) is an object.
+ * Validates sessionId/ingestUrl/appName/observeMs, inits exactly once, never throws.
+ */
+function autoInitFromPageConfig(): void {
+  try {
+    const win = windowObject();
+    if (!win) {
+      return;
+    }
+    const config = win.__TRACEBOARD_CONFIG__;
+    if (config === null || typeof config !== "object") {
+      return;
+    }
+    if (win[CONFIG_GUARD_ACTIVE] || win[CONFIG_GUARD_AUTO]) {
+      safeWarn("auto-init skipped: SDK already active");
+      return;
+    }
+    const sessionId = configText((config as any).sessionId, "");
+    if (!SESSION_ID_PATTERN.test(sessionId)) {
+      safeWarn("auto-init skipped: invalid sessionId (expected s_[A-Za-z0-9_-]+)");
+      return;
+    }
+    const ingestUrl = configText((config as any).ingestUrl, "/ingest");
+    const appName = configText((config as any).appName, "traceboard-preview");
+    const observeRaw = (config as any).observeMs;
+    const observeMs =
+      typeof observeRaw === "number" && Number.isFinite(observeRaw) && observeRaw >= 1 && observeRaw <= 60000
+        ? Math.round(observeRaw)
+        : DEFAULT_OBSERVE_MS;
+    initTraceBoard({ ingestUrl, sessionId, appName, observeMs });
+    markSdkActive(win);
+  } catch {
+    // fail-open: a broken config must never break the host page
+  }
+}
+
 function createNoopHandle(): TraceBoardHandle {
   return {
     wrapFn: <T extends (...args: any[]) => any>(_name: string, fn: T): T => fn,
@@ -1032,15 +1126,21 @@ function createNoopHandle(): TraceBoardHandle {
 export function initTraceBoard(options: InitOptions = {}): TraceBoardHandle {
   try {
     if (activeRuntime) {
+      markSdkActive(windowObject());
       return activeRuntime.handle;
     }
     const runtime = new TraceBoardRuntime(normalizeOptions(options));
     runtime.install();
     activeRuntime = runtime;
+    markSdkActive(windowObject());
     return runtime.handle;
   } catch {
     return createNoopHandle();
   }
+}
+
+if (typeof __TRACEBOARD_IIFE__ !== "undefined" && __TRACEBOARD_IIFE__) {
+  autoInitFromPageConfig();
 }
 
 export function wrapFn<T extends (...args: any[]) => any>(name: string, fn: T): T {
