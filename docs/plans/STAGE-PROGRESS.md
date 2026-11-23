@@ -1,7 +1,7 @@
 # TraceBoard 阶段进度看板（S0–S10）
 
-> 更新时间：2026-11-23｜最新已验收：S5（`s5-baseline`）｜下一阶段：S6
-> 最近门禁：S0–S5 全量 **70 PASS / 0 FAIL**（`S5 TEST (full S0–S5): PASS`）；perf ratio **1.29**（>1.25 WARN，已记录）
+> 更新时间：2026-11-23｜最新已验收：S5（`s5-baseline`）｜当前阶段：S6a（L2 行级/×3）🟡
+> 最近门禁：S0–S5 全量 **70 PASS / 0 FAIL**；S6a G1 PASS、编码完成（独立门禁待跑）；perf ratio 1.29 WARN
 > 权威计划：[SOLO-PLAN.md](SOLO-PLAN.md)、[00-master-plan.md](00-master-plan.md)
 > 用途：目标暂停/恢复/换账号后，以本文件 + git tag/阶段备份为准，不依赖聊天上下文。
 > 当前分支：`master`｜最新已验收 tag：`s5-baseline`
@@ -16,7 +16,7 @@
 | **S3** | 前端事实与回放：runtime SDK + 案例 B 确认没发 + traceparent EXACT + 只读回放 | ✅ 已验收 | tag `s3-baseline`；`docs/plans/stages/S3/`；archive `stage-S3-2026-11-23/` |
 | **S4** | 本地接入与详情：launcher IDEA/JAR、preview/SDK 注入、握手诊断、节点详情/×N/缺口 | ✅ 已验收 | tag `s4-baseline`；`docs/plans/stages/S4/`；archive `stage-S4-2026-11-23/`；61/61 PASS；flake 修复 8/8；浏览器详情/×3/缺口 + preview 注入 |
 | **S5** | L1 与前端浅层：参数/字段、脱敏/截断、sourcemap、Vite/Vue 浅层、性能基线 | ✅ 已验收 | tag `s5-baseline`；`docs/plans/stages/S5/`；archive `stage-S5-2026-11-23/`；70/70；L1 100→0/脱敏/截断；manifest/source；perf 1.29 WARN |
-| **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | ⬜ 未开始 | 任务 #30；V1 |
+| **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | 🟡 S6a 进行中 | G1 PASS；L2DemoService/ASM 行探针/×3/workbench 已编码；E2E `[100,0,100]`、第 2 次 local 100→0；待 S6a 独立门禁 + S6b（异步/无调试/预算/性能）+ S6 验收/tag |
 | **S7** | 第二栈：Tomcat WAR/SSM 或 React/Webpack 二选一 | ⬜ 未开始 | 任务 #31；扩展 |
 | **S8** | 第三栈/矩阵：另一栈 + 本地矩阵/兼容报告 | ⬜ 未开始 | 任务 #32；扩展 |
 | **S9** | 云端 Boot：上传/隔离/DB/预览/保留/启动诊断 | ⬜ 未开始 | 任务 #33；云端（后置） |
@@ -48,6 +48,12 @@
 2. ✅ 浏览器实测：`#btn-discount` → workbench L1 5 行、100→0、已脱敏、已截断、L1；案例 B/预览 js_method `src/App.vue:104（manifest 映射）`。
 3. ✅ G2：更新 README 为 S5，写 `acceptance.md`/`progress.md`，生成 `docs/plans/archive/stage-S5-2026-11-23/`。
 4. ✅ 提交 S5 + tag `s5-baseline`；下一阶段 S6（需新分发书）。
+
+## 4.1 S6a 当前（S6 未验收，不跨阶段）
+
+- ✅ 分发/G1 PASS；`L2DemoService#reconcileAmount` + ASM 行探针 + 3 次调用/workbench L2/×3 已编码。
+- ✅ 编码师 E2E：`POST /api/orders/1/reconcile` = `[100,0,100]`；3 个同 nodeKey span；第 2 次 `local 100→0`（行 23/25）；DB 100；case A/L1 未回归。
+- ⏳ 下一步：S6a 独立测试/门禁迁移 → S6b（异步、无调试信息、预算/循环折叠、L2 性能）→ S6 验收 + 备份 + tag `s6-baseline`。
 
 ## 5. 恢复方法（目标暂停后）
 
