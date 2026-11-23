@@ -15,7 +15,7 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Collector</name>
-  <description>S2 collector: NDJSON ingest, in-memory append-only store, read-only session query and read-time requests/graph derivation</description>
+  <description>S3 collector: NDJSON ingest, in-memory append-only store, read-only session query, read-time requests/graph derivation (S3 frontend facts, derived confidence) and read-only replay window</description>
 
   <dependencies>
     <dependency>

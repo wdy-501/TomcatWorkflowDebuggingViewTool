@@ -117,7 +117,7 @@ function formatWallClock(ms: number): string {
 </script>
 
 <template>
-  <section class="s1-panel" aria-labelledby="s1-panel-title">
+  <section id="s1-panel" class="s1-panel" aria-labelledby="s1-panel-title">
     <header class="s1-panel__header">
       <h2 id="s1-panel-title" class="s1-panel__title">S1 Walking skeleton（假点击/请求 → collector → 读回）</h2>
       <span class="s1-panel__badge">S1 · 2 条前端假事件 + 1 条真实 controller span</span>

@@ -135,3 +135,48 @@ code {
   margin: 12px 0 0;
   padding: 6px 14px;
 }
+
+/* S3 case B (pure front-end validation) */
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+
+.form-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.form-row label {
+  color: var(--text);
+  font-size: 13px;
+}
+
+#amount-b {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  padding: 6px 10px;
+  width: 160px;
+}
+
+#amount-b:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+#btn-save-b {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 6px 18px;
+}
+
+#btn-save-b:hover {
+  background: #eef4fd;
+}

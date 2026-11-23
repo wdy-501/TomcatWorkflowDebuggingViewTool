@@ -2,7 +2,40 @@
 
 Vue 3 + TypeScript + Vite + Pinia, local styling only (no CDN, no external fonts or assets).
 
-## S2 0-row fact chain panel (primary)
+## S3 frontend-facts board (primary)
+
+`#s3-panel` is the main board (default session `s_s3demo`). It reads only
+`GET /api/v1/sessions/{sessionId}/requests`, `/graph?traceId=` and
+`/replay?fromNs=&toNs=` — no POST, no demo call, no SSE/WS, no graph library.
+
+1. Session input `#s3-session` (default `s_s3demo`), `#s3-refresh`, tabs
+   `#s3-tabs` (全部/请求/点击) and request list `#s3-ops` showing root
+   kind/nodeKey, status, spanCount, confidence, `sdkActive`, `fetchCount`,
+   `hasBackend`, `backendSpanCount`, `hasError`. Clicking a request switches it.
+2. Mixed fact tree `#s3-tree` ordered by `startNs` with CSS connectors:
+   click → js_method → fetch → controller → service → mapper → sql → render.
+   Each node shows kind / nodeKey / status / return / sideEffects / flags /
+   thread / relNs / durNs. `relNs = startNs − minStartNs`; raw `startNs` is in
+   the tooltip.
+3. Status semantics (colour + text): `OK` green, `RETURNED_FALSE` amber
+   "正常返回 false", `THREW` red, `NOT_COLLECTED_*` grey dashed + reason,
+   `TRUNCATED` striped, `REDACTED` lock, `UNKNOWN`; `LOST`/`MANUAL` are
+   confidence labels, not statuses.
+4. Case-B verdict `#s3-caseb`: shows `已确认：本次点击因果链内没有网络请求`
+   only when `sdkActive=true`, the root is an EXACT `ui_event`,
+   `fetchCount=0`, `hasBackend=false` and the observe window (OBSERVE_MS,
+   default 1500 ms) has elapsed; before that `观察中…`; without SDK
+   `无法确认：前端采集未接入`; `fetchCount>0 && !hasBackend` shows
+   `前端已发请求但后端未采集（LOST）`. Empty is never shown as success.
+5. Timeline `#s3-timeline`: slider 0..maxRel with click/fetch/sql/render ticks,
+   LIVE/REPLAY toggle `#s3-replay-toggle`, play/pause + speed, and the permanent
+   `#s3-readonly` banner `只读：不会重发请求/不写数据库`. REPLAY issues only
+   `GET /replay` (raw epoch-ns window) and hides events whose `startNs` is
+   after the cursor as `未发生`; polling (5 s) runs only in LIVE.
+6. `npm ci && npm run build` is strict (`vue-tsc --noEmit`). No sourcemap,
+   no build plugin, no JS locals/values (S5), no S4 detail/launcher.
+
+## S2 0-row fact chain panel (secondary, collapsed)
 
 `#s2-panel` reads the collector's read-only derivations and shows one real
 cancel request end-to-end:

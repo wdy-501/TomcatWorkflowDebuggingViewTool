@@ -1,13 +1,20 @@
 # HTTP API 契约 v1（api.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24）
 > 变更记录：**2026-11-23 S1 增补**——ingest 与两个只读查询转为 IMPLEMENTED，meta `capabilities.ingestEvents=true`；
 >   S0 的矩阵/端点章节按原样保留为历史（§2、§3、§4、§6），S1 当时权威定义在 **§7**。graph/replay/stream/links 当时仍为 RESERVED。
 >   **2026-11-23 G1 第 1 轮**：§7.5 补一句“agent controller span 为游离后端根”，指向 `event-model.v1.md` §5 第 2 条例外（仅文档）。
 >   **2026-11-24 S2 增补**：新增 `GET .../requests` 与 `GET .../graph?traceId=` 两个**只读派生**查询为 IMPLEMENTED（§2.2 矩阵、§8 定义）；
 >   `replay`/`stream`/`ws`/`links` **仍为 RESERVED**（不注册路由）。meta `capabilities` 5 键**不变**（`ingestEvents=true`、`realtime=false`、`replay=false`）。
 >   demo 后端植入 0 行缺陷（H2+MyBatis），行为见**附录 B**；附录 A 保留 S0 历史。§2.1/§7 保留为 S1 历史。
-> 范围：collector HTTP API + demo 应用 API（附录）。S2 的写入面仍只有 `POST /ingest/v1/events`，其余 collector 端点全部只读。
+>   **2026-11-24 S3 增补**：`GET .../replay?fromNs=&toNs=` 由 RESERVED 转为 **IMPLEMENTED（只读窗口，0 写）**；`requests` 追加
+>   `sdkActive` 与每条 `fetchCount/hasFrontend/hasBackend/backendSpanCount` 及派生 `confidence` 规则；`graph` 形状不变但自然包含前端节点
+>   （click 根 + `controller.parentSpanId=fetch.spanId`）；meta `capabilities.replay=true`（键仍 5 个）。新增 §2.3 当前矩阵、§9 S3 定义、
+>   附录 C 案例 B（纯前端校验，零 fetch）；附录 A/B 与 §2/§2.1/§2.2/§7/§8 保留为 S0–S2 历史，不改写。
+>   **2026-11-24 S3 G1 前补丁（时钟模型，形状/字段/状态码不变）**：S3 单机 `startNs` 为 epoch 纳秒（公式见 `event-model.v1.md` §12.10）；
+>   `replay` 的 `fromNs/toNs` 与 `requests.startedAtNs/durNs` 都是**原始 epoch-ns**，collector 不转换；客户端仅显示时归一化
+>   `relNs = startNs − minStartNs`（选中 trace/会话），请求仍发原始值；fixture 中的秒级数值仅示意。
+> 范围：collector HTTP API + demo 应用 API（附录）。**S3 的写入面仍只有 `POST /ingest/v1/events`**，其余 collector 端点全部只读。
 > 关联：`transport.v1.md`（ingest 线上格式与 202/400/413/415、查询通路 C）、`event-model.v1.md`（事件体）。
 
 ## 1. 约定
@@ -25,11 +32,12 @@
 - 状态图例：**IMPLEMENTED**（该阶段必须可验证）、**PLACEHOLDER**（端点存在但固定返回 501）、**RESERVED**（不实现、不得出现在代码路由中）。
   S1 起：`POST /ingest/v1/events`、`GET /api/v1/sessions`、`GET /api/v1/sessions/{sessionId}/events` 为 IMPLEMENTED；
   **S2 起**：另有 `GET /api/v1/sessions/{sessionId}/requests`、`GET /api/v1/sessions/{sessionId}/graph?traceId=` 转为 IMPLEMENTED（§8）；
-  `replay`/`stream`/`ws`/`links` 在 S1/S2 均为 RESERVED（S2 代码同样不得注册这些路由）。
+  **S3 起**：`GET /api/v1/sessions/{sessionId}/replay?fromNs=&toNs=` 转为 IMPLEMENTED（§9.1），`requests` 扩展（§9.2），
+  `stream`/`ws`/`links` 仍为 RESERVED（S3 代码同样不得注册这些路由）。
 
 ## 2. S0 实现矩阵（S0 历史，冻结，不改写）
 
-> S1 起 ingest 与两个查询已实现，**当前权威矩阵见 §2.1**；本节保留 S0 原始状态作为历史记录。
+> S1 起 ingest 与两个查询已实现；**S3 当前权威矩阵见 §2.3**（§2.1/§2.2 为历史）。本节保留 S0 原始状态作为历史记录。
 
 | 方法 | 路径 | 状态 | 说明 |
 |---|---|---|---|
@@ -46,7 +54,7 @@
 
 除上表 3 个 S0 端点外，collector 不暴露任何写接口；未知路径返回 404（Boot 默认即可），方法不匹配返回 405。
 
-### 2.1 S1 实现矩阵（S1 当时权威；S2 起以 §2.2 为准）
+### 2.1 S1 实现矩阵（S1 当时权威；S2 见 §2.2、S3 起以 §2.3 为准）
 
 | 方法 | 路径 | S1 状态 | 说明 |
 |---|---|---|---|
@@ -64,7 +72,7 @@
 S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不存在 graph/replay/stream/links 路由，
 未知路径 404、方法不匹配 405（Boot 默认响应体可接受）。
 
-### 2.2 S2 实现矩阵（当前权威）
+### 2.2 S2 实现矩阵（S2 当时权威；S3 起以 §2.3 为准）
 
 | 方法 | 路径 | S2 状态 | 说明 |
 |---|---|---|---|
@@ -83,6 +91,27 @@ S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不
 - S2 的写入面仍只有 `POST /ingest/v1/events`；requests/graph 是**读时派生**，不落 DB/文件、不缓存、不改写事件、不消耗 `seq`。
 - **查询 ≠ 回放**：requests/graph 不重新执行程序、不发 HTTP 写请求、不触发 SQL、不提供虚拟时钟；`capabilities.replay` 保持 `false`。
 - 未注册路径 404、方法不匹配 405（Boot 默认响应体可接受）；错误信封见 `transport.v1.md` §4.3。
+
+### 2.3 S3 实现矩阵（当前权威；S0–S2 矩阵保留为历史）
+
+| 方法 | 路径 | S3 状态 | 说明 |
+|---|---|---|---|
+| GET | `/actuator/health` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/meta` | **IMPLEMENTED** | `capabilities` 仍 5 键：`health=true`、`meta=true`、`ingestEvents=true`、`realtime=false`、**`replay=true`**（§9.5） |
+| POST | `/ingest/v1/events` | **IMPLEMENTED** | 与 S1/S2 完全一致，无改动；仍是唯一写通路 |
+| GET | `/api/v1/sessions` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/sessions/{sessionId}/events` | **IMPLEMENTED** | 不变，只读分页，**不是回放**（§7.2） |
+| GET | `/api/v1/sessions/{sessionId}/requests` | **IMPLEMENTED** | S2 字段全部保留，追加 `sdkActive` 与 4 个每请求字段；派生 `confidence`（§9.2） |
+| GET | `/api/v1/sessions/{sessionId}/graph?traceId=<32hex>` | **IMPLEMENTED** | 形状与 §8.2 完全相同；节点自然混合前端/后端，click 根 + `controller.parentSpanId=fetch.spanId`（§9.4） |
+| GET | `/api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>` | **IMPLEMENTED**（S3 新增） | 只读窗口；0 写、不消耗 `seq`、不调 demo、不执行程序（§9.1） |
+| GET | `/api/v1/stream` | RESERVED | SSE 不实现（404） |
+| WS | `/ws/v1/events` | RESERVED | WebSocket 不实现（404） |
+| POST | `/api/v1/sessions/{sessionId}/links` | RESERVED | 手工关联不实现（S4，404） |
+
+- S3 的写入面仍只有 `POST /ingest/v1/events`；requests/graph/replay 都是**读时派生**，不落 DB/文件、不缓存、不改写事件、不消耗 `seq`。
+- 路由数 = S1/S2 六条 + `replay`，共 **7 条**；`stream`/`ws`/`links` 不得出现路径字符串。
+- **回放 ≠ 实时**：replay 是“已存事件的只读时间窗视图”，不是 SSE/WS、不重跑、不重发请求；`capabilities.realtime` 仍为 `false`。
+- 未注册路径 404、方法不匹配 405；错误信封见 `transport.v1.md` §4.3。
 
 ## 3. S0 已实现端点（S0 历史；S1 现状见 §7）
 
@@ -190,6 +219,7 @@ GET /api/v1/sessions/{sessionId}/replay?fromNs=0&toNs=1000000000
 
 - 回放视图只读：不重新执行程序、不发写请求、不触发 SQL；`toNs` 是回放滑块的虚拟时钟上界。
 - 响应不得包含凭据/原始敏感值；`redacted/truncated` 标记原样保留。
+- **S3 起已实现**：权威形状/参数/排序/0 写见 §9.1（含 `fromNs`/`toNs` 生效值回显）；本节保留 S0 DRAFT 历史。
 
 ### 4.2 派生图（只读）
 
@@ -235,6 +265,7 @@ POST /api/v1/sessions/{sessionId}/links
 
 > S2 变更：上表 `graph` 行已由 RESERVED 转为 **IMPLEMENTED**（`GET .../graph?traceId=`，§8.2），并新增 `GET .../requests`（§8.1）；
 > 上表其余 RESERVED 行在 S2 仍不注册路由。
+> S3 变更：上表 `replay` 行已由 RESERVED 转为 **IMPLEMENTED**（`GET .../replay?fromNs=&toNs=`，§9.1）；`stream`/`ws`/`links` 仍不注册。
 
 ## 5. 端口、同源与代理
 
@@ -246,6 +277,8 @@ POST /api/v1/sessions/{sessionId}/links
 | demo 前端 dev | 5174 | 固定端口（与 workbench 5173 错开），`strictPort:true` |
 
 - 同源代理优先（主计划 §8.3）：demo 前端只请求相对路径 `/api/...`，由 Vite 代理到 8080；不配置 CORS。
+- **S3**：demo 前端另有 `/ingest` → `http://127.0.0.1:8601` 的 Vite 代理（dev + preview），runtime SDK 把 NDJSON 发到
+  `/ingest/v1/events`；`/api` 仍 → 8080。workbench 仍经 `/api` 读 collector。无新端口、无 CORS。
 - 端口冲突时先诊断并记录（`netstat -ano | findstr :<port>`），不得静默改端口；确需变更须同步更新本契约。
 
 ## 6. S0 冒烟命令（历史；S1 现状见 §7.6）
@@ -407,7 +440,7 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/
 期望：`ingestEvents=true` / `202 accepted=2`（重发 → `dropped=2`）/ `s_wb_demo` 计数 2 / 2 条 `{seq,event}` 且 `nextSeq=2` /
 `405` / `404` / `400`。
 
-## 8. S2 实现（0 行事实链的只读派生）
+## 8. S2 实现（0 行事实链的只读派生；S3 当前见 §9）
 
 > S2 只新增两个**只读**查询：`requests`（按 trace 分组）与 `graph`（单 trace 节点/边）。二者都是**读时派生**：
 > 输入是内存 append-only 事件流，输出不改写、不持久化、不缓存、不消耗 `seq`，两次相同 GET 结果一致。
@@ -440,7 +473,7 @@ Host: 127.0.0.1:8601
 | `requests[].status` | string | 该 trace **聚合最严重级**（见下）；无根时仍按全部 span 聚合 |
 | `requests[].confidence` | string | 根 span 的 `confidence`；**无根时固定 `"LOST"`**（不伪造 `EXACT`） |
 | `requests[].spanCount` | int | 该 trace 已存储事件数（ingest 幂等之后的真实条数，≥1） |
-| `requests[].startedAtNs` | int | 该 trace 的最小 `startNs` |
+| `requests[].startedAtNs` | int | 该 trace 的最小 `startNs`（原始值；S3 起为 epoch-ns，S2/fixture 的相对值仅示意） |
 | `requests[].durNs` | int | `max(startNs+durNs) − min(startNs)`，`≥0`；根存在且区间包含成立时等于根 `durNs` |
 | `requests[].hasError` | boolean | 该 trace 是否存在 `status="THREW"` 的 span |
 
@@ -553,6 +586,7 @@ Host: 127.0.0.1:8601
 
 - S2 **不新增能力键**、不改 5 键取值：requests/graph 是只读查询能力，不是 `realtime`/`replay` 能力。
 - `ingestEvents=true` 仍表示“ingest 已落地”；`realtime=false`/`replay=false` 必须保持（无 SSE/WS/回放）。
+- **S3 起**：`replay=true`（只读窗口已实现），`realtime` 仍 `false`，键仍 5 个；见 §9.5。
 
 ### 8.4 S2 状态码汇总（新增部分；ingest 的 202/400/413/415 见 §7.4，不变）
 
@@ -593,6 +627,194 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/
 期望：capabilities 5 键不变 / `202 accepted=4`（重发 → `dropped=4`）/ requests 1 条 `spanCount=4`、`status=OK`、`confidence=LOST` /
 graph 4 节点 3 边（按 `startNs` 排序、`return`/`sideEffects` 原样）/ `404` / `400` / `404` / `405` / `404`。
 
+## 9. S3 实现（前端事实 + 只读回放）
+
+> S3 只证明：①浏览器 runtime SDK 的点击/控件/请求/DOM 事件能进入事件流；②案例 A 通过 `traceparent` + `X-TraceBoard-Click`
+> 与后端 4 span **EXACT** 关联；③案例 B 的纯前端校验在观察窗关闭后 `fetchCount=0`，可**确认没发请求**；④已存事件可被
+> `replay` 只读回放，回放 **0 写**。S3 **不是** S4：无启动器/IDEA/JAR 接入、无 sourcemap/构建插件、无 L2/局部变量、无像素回放/SSE/WS/持久化。
+> 本节是 S3 当前权威；§8 的 S2 取值保留为历史。
+>
+> **时钟（S3 单机 epoch-ns）**：事件 `startNs` 与本节所有 `Ns` 字段/参数都是原始 epoch-ns（SDK `round((performance.timeOrigin+performance.now())*1e6)`；
+> agent `System.currentTimeMillis()*1e6+(System.nanoTime()%1e6)`，见 `event-model.v1.md` §12.10）。**API 不做归一化**；工作台仅在显示时用
+> `relNs = startNs − minStartNs`（选中 trace/会话）算标签/刻度，调用 `fromNs/toNs` 前换算回原始值。fixture 的 1.0s/2.0s 等数值仅示意，不得假定与运行时绝对相等。
+
+### 9.1 `GET /api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>`（IMPLEMENTED，只读）
+
+```http
+GET /api/v1/sessions/s_s3demo/replay?fromNs=0&toNs=1034500000 HTTP/1.1
+Host: 127.0.0.1:8601
+```
+
+`200 OK`（**精确形状**；字段顺序固定，`events[]` 可空）：
+
+```json
+{"mode":"replay","readOnly":true,"sessionId":"s_s3demo","fromNs":0,"toNs":1034500000,
+ "events":[{"seq":1,"event":{"schema":"traceboard.event.v1","type":"span","sessionId":"s_s3demo","traceId":"1f2e3d4c5b6a79880a1b2c3d4e5f6071","spanId":"1000000000000001","parentSpanId":null,"rootEventId":"click_a1b2c3d4e5f60718","kind":"ui_event","nodeKey":"#btn-cancel","thread":{"id":0,"name":"browser-main"},"startNs":1000000000,"durNs":38000000,"status":"OK","return":null,"confidence":"EXACT","flags":["SDK_ACTIVE","S3_RUNTIME_SDK","OBSERVE_MS=1500"]}}]}
+```
+
+> 示例为节选（只展开 1 条事件）；`toNs=1034500000` 的实际窗口为 6 条（render 于 1035000000 起，尚未发生），完整期望见
+> `fixtures/s3-frontend-facts/case-a-joined-chain/expected-facts.json` 的 `replayWindows`。
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `mode` | string | 固定 `"replay"`（契约字段；客户端不得据此发写请求） |
+| `readOnly` | boolean | 固定 `true`（契约字段） |
+| `sessionId` | string | 路径参数逐字回显 |
+| `fromNs` | int | **生效值**（缺省补 0 后回显） |
+| `toNs` | int | **生效值**（缺省补默认值后回显；请求值大于会话最大值时仍回显请求值） |
+| `events` | array | 窗口内事件，按 `startNs` 升序、同值 `spanId` 字典序；元素为 `{"seq":<int>,"event":{<event-v1>}}` |
+
+**参数**
+
+| 参数 | 默认 | 约束 | 非法时 |
+|---|---|---|---|
+| `fromNs` | `0` | 匹配 `^[0-9]+$`、可解析为 64 位有符号整数、`>= 0`；**原始 epoch-ns（S3 单机）** | `400` 错误信封 `error="bad_request"` |
+| `toNs` | 会话内 `max(startNs+durNs)`；空会话 / 无事件为 `0` | 同上；**原始 epoch-ns（S3 单机）** | `400` 错误信封 `error="bad_request"` |
+
+- **判定顺序固定**：①参数格式/范围/`fromNs<=toNs` 失败 → `400`；②未知 session（从未接收过任何事件）→ `404 not_found`；
+  ③命中 → `200`（窗口为空也返回 `200` + `events:[]`，不返回 404）。
+- 负号、小数点、空串、前后空格、科学计数法、超过 64 位范围都按 `400` 处理；不静默截断、不回落默认值。
+- **原始值口径**：`fromNs`/`toNs` 与事件 `startNs` 同为 epoch-ns，API 不接收“相对秒/相对纳秒”语义、不做归一化。
+  客户端若按相对时间展示（`relNs = startNs − minStartNs`），只转换标签/刻度，请求参数仍必须换算回原始 epoch-ns。
+- 过滤条件为 **`fromNs <= startNs <= toNs`**（两端包含，按事件 **`startNs`** 判断，不看 `startNs+durNs`）。
+- 排序：`startNs` 升序；同 `startNs` 按 `spanId` 字典序。`seq` 保持存储原值，**不重新编号**。
+- `events[].event` 与 `/events` 的 `event` 相同：逐字来自 ingest 的已存 JSON、仍是合法 v1 事件；`seq` 在 `event` 之外。
+- 只允许 `GET`；`POST/PUT/PATCH/DELETE` → `405`（Boot 默认响应体可接受）。未识别的额外查询参数被忽略。
+- 无分页、无 `limit`/`afterSeq`、无 `nextSeq`；不提供 SSE/WS/长连接。
+
+**只读（0 写）语义（硬约束）**
+
+1. 读时派生自内存快照：不写事件、不追加存储、不消耗 `seq`、不改写/重排事件、不缓存、不落 DB/文件。
+2. 不重新执行程序、不调用 demo 后端、不发 HTTP 写请求、不触发 SQL、不建立派生图、不提供服务器端播放引擎。
+3. 两次相同 GET 的响应逐字一致；回放前后 `sessions`/`events`/`seq`、demo H2 订单状态（仍 `CREATED`）与事件数不变，回放期间 0 新事件。
+4. `mode`/`readOnly` 只是契约字段，不授权任何写操作；工作台时间轴只是客户端按 `toNs` 隐藏未来事件。
+5. 回放保留 `confidence`/`reason`/`redacted`/`truncated` 原值，不改写成 `EXACT`。
+
+### 9.2 `GET /api/v1/sessions/{sessionId}/requests`（S3 扩展，只读）
+
+```json
+{"sessionId":"s_s3demo","sdkActive":true,"requests":[
+ {"traceId":"1f2e3d4c5b6a79880a1b2c3d4e5f6071","rootSpanId":"1000000000000001","rootKind":"ui_event",
+  "nodeKey":"#btn-cancel","status":"OK","confidence":"EXACT","spanCount":7,"startedAtNs":1000000000,
+  "durNs":38000000,"hasError":false,"fetchCount":1,"hasFrontend":true,"hasBackend":true,"backendSpanCount":4},
+ {"traceId":"3a4b5c6d7e8f90a1b2c3d4e5f6071829","rootSpanId":"8000000000000008","rootKind":"ui_event",
+  "nodeKey":"#btn-save-b","status":"RETURNED_FALSE","confidence":"EXACT","spanCount":3,"startedAtNs":2000000000,
+  "durNs":4000000,"hasError":false,"fetchCount":0,"hasFrontend":true,"hasBackend":false,"backendSpanCount":0}]}
+```
+
+- **S2 字段全部保留、含义不变**（`traceId/rootSpanId/rootKind/nodeKey/status/confidence/spanCount/startedAtNs/durNs/hasError`），
+  新字段**追加**，不重命名、不去字段。
+- `sdkActive`（顶层，会话级）：会话内存在 `kind="ui_event"` 且 `flags` 含 `SDK_ACTIVE` 的事件时为 `true`；否则 `false`。
+  它回答“前端 runtime SDK 是否在线并产生过 click 根”，不是“本请求是否前端发起”。
+- `fetchCount`：该 trace 中 `kind="fetch"` 的事件数（0 表示本次点击因果链内没有 fetch/XHR）。
+- `hasFrontend`：存在 `ui_event`/`js_method`/`fetch`/`callback`/`render` 任一。
+- `hasBackend`：存在 `controller`/`service`/`mapper`/`sql`/`jdbc`/`async` 任一。
+- `backendSpanCount`：上述后端 kind 的事件条数；`hasBackend=false` 时恒为 0。
+- `status` 聚合优先级不变（S2）：`THREW > UNKNOWN > NOT_COLLECTED_POLICY > NOT_COLLECTED_LOST > NOT_COLLECTED_NO_DEBUG_INFO >
+  TRUNCATED > RETURNED_FALSE > OK`。案例 B 因此为 `RETURNED_FALSE`。
+
+**`confidence` 派生（S3 起优先于 S2“直接取根 span”）**
+
+| 条件 | `confidence` |
+|---|---|
+| 根为 `ui_event` 且 `confidence=EXACT`，且 `fetchCount=0` | `EXACT`（案例 B：没有可关联的请求） |
+| 根为 `ui_event` 且 `confidence=EXACT`，且存在 `controller.parentSpanId` 等于本 trace 某 `fetch.spanId` | `EXACT`（案例 A：`traceparent` 关联成功） |
+| 根为 `ui_event` 且 `confidence=EXACT`，`fetchCount>0` 但没有任何上述 controller 关联 | `LOST`（前端发了、后端没记录/失败，进入游离） |
+| 根为后端游离根（`controller` 等，`parentSpanId=null`）或无根 | `LOST`（S2 行为不变） |
+| 根为 `ui_event` 但根 `confidence` 不是 `EXACT`（手工/异常数据） | 沿用根 `confidence`；`null` 视作 `LOST` |
+
+- **未关联的单个 fetch 不降级整链**：案例 A 成功后 demo 刷新列表产生的 `GET /api/orders`（若有）只在该 fetch 节点标“后端未采集”，
+  只要 POST fetch 与 controller 精确相连，整条 trace 仍为 `EXACT`。
+- 示例中的 `spanCount=7`/`fetchCount=1` 是 fixture 值；运行时案例 A 若同一 click 窗口还捕获了刷新 `GET /api/orders`，`spanCount`/`fetchCount` 会更大，但“POST fetch ↔ controller”关联与其余字段规则不变。
+- `startedAtNs`/`durNs` 是事件原始值：S3 运行为 epoch-ns（`startedAtNs` 即该 trace 最小 `startNs`），fixture 的 `1000000000`/`2000000000` 仅示意。
+  排序仍按 `startedAtNs` 升序，不受显示归一化影响；客户端展示相对时间时减去所选会话/该 trace 的 `minStartNs`，不得假定与 fixture 数值相等。
+- `sdkActive=false` 时，UI 对任何 trace 都不得宣称“已确认没发请求”（见 §9.3）。
+- 排序、未知 session `404`、无分页、只读、空列表形状均按 S2 §8.1；S3 不新增空会话记录：未知 session 仍是 `404`，
+  已存在的空会话（本 collector 不会产生）才返回 `{"sessionId":"...","sdkActive":false,"requests":[]}`。
+
+### 9.3 案例 B 判定（工作台规则；API 只提供事实）
+
+| 证据组合 | 判定 | 界面文案（逐字） |
+|---|---|---|
+| `sdkActive=true` 且该 trace 根为 `ui_event`、`fetchCount=0` 且 `hasBackend=false`，click 根已入库且 flags 含 `OBSERVE_MS`（观察窗已关闭） | 确认没发（观察窗已关闭） | `已确认：本次点击因果链内没有网络请求` |
+| 会话 `sdkActive=false`（SDK 未接入/无 click 根） | 无法确认 | `无法确认：前端采集未接入` |
+| `fetchCount>0` 且 `hasBackend=false`（含 fetch 失败节点） | 发了但后端没记录/请求失败 | `前端已发请求但后端未采集（LOST）`；失败 fetch 节点单独标失败，不并入“没发” |
+| `fetchCount>0` 且存在关联的后端 | 关联成功 | 展示混合事实链，不写“没发请求” |
+
+- “确认没发”的三个必要条件缺一不可；`confidence=LOST` 不是状态，不得用 `status=LOST` 表达；`OK` 中的 `false` 不是异常。
+- 失败请求（CORS/断网/4xx/5xx）必须显示失败 fetch 节点，**不得**与“没发”混为一谈。
+- 案例 B 的 `validateForm` 节点详情只显示：控件身份、返回值 `false`、DOM 效果文本、事实
+  `JS 内部变量本次未采集（无构建插件/sourcemap）`；**不显示**行号/局部变量/源码片段（S5）。
+- 状态图例（颜色+文字，不靠颜色单独传达）：`OK` 常规/绿线；`RETURNED_FALSE` 琥珀“正常返回 false”；`THREW` 红/断线；
+  `NOT_COLLECTED_*` 灰虚线 + `reason`；`TRUNCATED` 条纹“已截断/已折叠”；`REDACTED` 锁形（S3 fixture 不使用但 UI 必须支持）；
+  `UNKNOWN` 问号；`confidence=LOST` 游离标注；`MANUAL` 虚线（S3 不产生）。
+
+### 9.4 `GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex>`（S3 语义补充）
+
+- 形状、11 个节点字段、`edges[{from,to,count}]`、排序、400/404/405、只读与两次一致**全部沿用 §8.2**，S3 **不新增字段**、不改形状。
+- 节点自然混合前端与后端：案例 A 的根是 `ui_event`（`parentSpanId=null`、`confidence=EXACT`），`fetch` 挂 click 根，
+  `controller.parentSpanId=fetch.spanId`，`service/mapper/sql` 依次挂父，`render` 挂 click 根（异步续体回落）；
+  案例 B 为 `ui_event → js_method → render`，无后端节点。
+- `rootEventId` 是真实 clickId（不是 `click_lost_<spanId>`）；S2 的游离后端根仍按 §8.2 处理（`confidence=LOST`）。
+- 不聚合（同 `nodeKey` 多次调用 → 多个节点）、`edges.count` 恒 1、不合并前后端重复节点。
+- graph 仍是**查询**，不是回放：不提供时间窗/虚拟时钟；时间轴只读窗口走 `replay`。
+
+### 9.5 `GET /api/v1/meta`（S3 取值）
+
+```json
+{"service":"traceboard-collector","version":"0.1.0-SNAPSHOT","apiVersion":"v1",
+ "schema":{"id":"urn:traceboard:schema:event:v1","version":"traceboard.event.v1","dialect":"2020-12"},
+ "capabilities":{"health":true,"meta":true,"ingestEvents":true,"realtime":false,"replay":true}}
+```
+
+- `capabilities` **仍恰好 5 键**；S3 只把 `replay` 由 `false` 改为 `true`（回放已落地），`realtime` 必须保持 `false`（无 SSE/WS）。
+- 未落地的能力不得写成 `true`；`replay=true` 不代表实时、不代表重跑、不代表写。
+
+### 9.6 S3 状态码汇总（新增部分；ingest 的 202/400/413/415 与 S2 查询错误不变）
+
+| 码 | 场景（S3） |
+|---|---|
+| `200` | replay 窗口成功（含空窗口）；requests/graph 派生成功 |
+| `400` | replay `fromNs/toNs` 非整数、负数、溢出、`fromNs>toNs`；graph 缺失/非法 `traceId` |
+| `404` | replay/requests/graph 未知 session；graph 会话内无该 trace；未注册的 RESERVED 路由 |
+| `405` | replay/requests/graph 收到非 GET 方法 |
+
+错误信封（`transport.v1.md` §4.3）：`{"error":"<code>","message":"<≤200 字符、不含内部路径/凭据>","apiVersion":"v1"}`。
+
+### 9.7 S3 明确未实现（仍 RESERVED / 不在 S3 范围）
+
+- `GET /api/v1/stream`（SSE）、`WS /ws/v1/events`、`POST .../links`：代码中不得注册路由；`capabilities.realtime=false`。
+- 无服务端推送/长连接/自动刷新；工作台只有手动刷新 + 低频轮询。
+- 无启动器/IDEA/JAR 接入向导/预览代理注入/CDP/浏览器扩展（S4）；无节点详情抽屉/×N/手工关联/时间窗 `INFERRED`（S4/S6）。
+- 无 sourcemap/构建插件/源码行号/JS 局部变量/`values[]`/字段 diff（S5）；SDK 只到 F0（显式 `wrapFn`）。
+- 无像素回放/截图/录像；「回放」仅指已存事件的只读时间窗。
+- collector 不落 DB/文件、无淘汰/采样/缓存/CORS/鉴权/429；回放不写、不重跑、不调 demo；`ingest` 仍是唯一写通路。
+- 无 Tomcat/React/cloud/MySQL 服务/上传/沙箱；不改 demo 后端、H2 seed 与案例 A 行为。
+
+### 9.8 S3 冒烟命令
+
+```bash
+curl -s "http://127.0.0.1:8601/api/v1/meta"                                   # capabilities.replay=true，仍 5 键
+curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" \
+  -H "Content-Type: application/x-ndjson; charset=utf-8" \
+  --data-binary @"fixtures/s3-frontend-facts/case-a-joined-chain/events.ndjson"  # 202 accepted=7
+curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" \
+  -H "Content-Type: application/x-ndjson; charset=utf-8" \
+  --data-binary @"fixtures/s3-frontend-facts/case-b-frontend-only/events.ndjson" # 202 accepted=3
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/requests"                # sdkActive=true，A EXACT/7/1/4，B RETURNED_FALSE/3/0/0
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/graph?traceId=1f2e3d4c5b6a79880a1b2c3d4e5f6071"
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/replay?fromNs=0&toNs=1034500000"  # 6 events
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/replay"                  # 默认窗口，A+B 全部 10 条
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/replay?fromNs=10&toNs=5"  # 400
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/replay?fromNs=-1"          # 400
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_missing/replay"                  # 404
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/replay"            # 405
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/stream"                                     # 404（未注册）
+```
+
+期望：A+B 同会话时默认 `toNs=2004000000`、`events` 共 10 条；每两次相同 GET 响应逐字一致；前后 `/events` 与 demo `GET /api/orders`
+（仍 `CREATED`）不变。以上 `Ns` 数值均为 fixture 作用域；运行时是 epoch-ns，客户端显示时归一化、请求仍用原始值。
+
 ## 附录 A：demo 应用 API（非 TraceBoard API，S0 历史）
 
 > **S2 起 demo 已改为 H2+MyBatis 并植入 0 行缺陷**：当前权威行为见**附录 B**；本附录保留 S0 内存版历史（不得据此实现 S2）。
@@ -625,3 +847,30 @@ graph 4 节点 3 边（按 `startNs` 排序、`return`/`sideEffects` 原样）/ 
   - **无 MySQL/外部数据库服务依赖**；H2 仅嵌入式；demo 后端 JDK8 独立构建，端口 8080。
 - 0 行必须是**运行时 DB/SQL 事实**：`fixtures/s2-zero-row-chain/**` 只用于确定性测试，禁止用它冒充运行时证据。
 - 已知文案瑕疵：demo 前端页头仍写 S0 口径“无缺陷”（S2 登记，S3 接 SDK 时统一修正）；不影响本附录行为口径。
+- **S3 补充**：demo 前端已接入 runtime SDK（横幅改为“runtime SDK · 无构建插件/sourcemap · 案例 A 缺陷 + 案例 B 纯前端校验”），
+  但本附录的**行为**不变：案例 A 仍只在 2xx 时显示“操作成功”并刷新列表，列表仍 `CREATED`；案例 B 见附录 C。
+
+## 附录 C：S3 demo 案例 B（纯前端校验，零请求；非 TraceBoard API）
+
+> 案例 B 是 **demo 前端**的纯前端校验路径（主计划 §6）。它**没有后端 API**：无论校验通过与否，都不应产生任何 `fetch`/XHR，
+> 也不触碰 H2。TraceBoard 只摆前端事实，不判定业务对错；`金额必须大于 0` 是 demo 的示例文案。
+
+| 控件/元素 | 选择器 | 行为 |
+|---|---|---|
+| 金额输入 | `#amount-b` | 用户输入；SDK **不采集**输入值/表单值（隐私） |
+| 保存按钮 | `#btn-save-b` | 点击后由 SDK 产生 `ui_event` 根（`SDK_ACTIVE`）；处理器调用 `validateForm` |
+| 校验函数 | `OrderEdit.vue#validateForm` | 经 `wrapFn` 包装；空/非数字/`<=0` → 返回 `false`（`RETURNED_FALSE`）；有效 → 返回 `true`（`OK`） |
+| 错误提示 | 金额输入下方 | 校验失败显示 `金额必须大于 0`，并调用 `uiEffect('金额必须大于 0')` 记录 `render` |
+| 成功提示 | 同一位置 | 校验通过显示 `校验通过（本案例不提交）`；**仍不提交/不发请求** |
+
+- **两个分支都零请求**：`fetchCount=0`、`hasBackend=false`、`backendSpanCount=0`；没有 `controller/service/mapper/sql` 事件。
+- 判定：`sdkActive=true` 且该 trace 根为 `ui_event`、`fetchCount=0` 且 `hasBackend=false`，click 根已在观察窗关闭后入库且 flags 含 `OBSERVE_MS` →
+  工作台显示 **`已确认：本次点击因果链内没有网络请求`**；SDK 未接入/无 click 根时只能显示 **`无法确认：前端采集未接入`**。
+- 已知限制（如实标注）：SDK 只到 F0——**无构建插件/sourcemap**，因此
+  - 能看到：控件身份、`validateForm` 包装结果 `false`、DOM 效果文本、请求数 0；
+  - 看不到：文件/行号、JS 局部变量/入参值/`amount` 的实际值（S5 的构建插件/sourcemap 才提供）。
+  节点详情必须写 `JS 内部变量本次未采集（无构建插件/sourcemap）`，**不得**显示行号/局部变量。
+- 案例 B 不能证明“后端正确”，只能证明“本次点击因果链内没有发出网络请求”；观察窗是 1.5s（`OBSERVE_MS=1500`），
+  窗口外的后台轮询在本阶段不采集，UI 文案只声明“本次点击因果链内”。
+- 期望 fixture：`fixtures/s3-frontend-facts/case-b-frontend-only/**`（3 行：click → validateForm `RETURNED_FALSE` → render；零 fetch）。
+  fixture 是契约形状，不是运行时证据；运行时“确认没发”必须来自浏览器 SDK 的真实事件。

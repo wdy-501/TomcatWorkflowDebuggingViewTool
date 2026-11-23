@@ -16,7 +16,11 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@traceboard/sdk": ["../../../frontend/sdk/src/index.ts"]
+    }
   },
   "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
 }

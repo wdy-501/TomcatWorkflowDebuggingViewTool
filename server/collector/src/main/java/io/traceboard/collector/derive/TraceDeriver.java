@@ -3,9 +3,11 @@ package io.traceboard.collector.derive;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +59,17 @@ public class TraceDeriver {
             "UNKNOWN",
             "THREW");
 
+    /** S3 frontend kinds (api.v1.md §9.2): any makes {@code hasFrontend} true. */
+    private static final Set<String> FRONTEND_KINDS =
+            Set.of("ui_event", "js_method", "fetch", "callback", "render");
+
+    /** S3 backend kinds (api.v1.md §9.2): any makes {@code hasBackend} true. */
+    private static final Set<String> BACKEND_KINDS =
+            Set.of("controller", "service", "mapper", "sql", "jdbc", "async");
+
+    /** Click-root marker emitted by the runtime SDK (event-model.v1.md §12). */
+    private static final String SDK_ACTIVE_FLAG = "SDK_ACTIVE";
+
     private final ObjectMapper objectMapper;
 
     public TraceDeriver(ObjectMapper objectMapper) {
@@ -64,18 +77,23 @@ public class TraceDeriver {
     }
 
     /**
-     * Group stored events by {@code traceId} (api.v1.md §8.1).
+     * Group stored events by {@code traceId} (api.v1.md §8.1 + §9.2).
      *
      * <p>Sorted by {@code startedAtNs} ascending, ties by {@code traceId}. Empty sessions and
      * rootless traces are represented honestly (empty list / {@code null} root fields +
-     * {@code confidence="LOST"}), never dropped.</p>
+     * {@code confidence="LOST"}), never dropped. {@code sdkActive} and the per-request S3
+     * counts are derived from the same read-time snapshot; confidence follows the S3 rules
+     * below and never downgrades a linked EXACT chain because of unrelated fetch events.</p>
      */
     public RequestsResponse requests(String sessionId, List<StoredEvent> events) {
         Map<String, List<SpanFacts>> byTrace = new LinkedHashMap<>();
+        boolean sdkActive = false;
         for (StoredEvent event : events) {
             SpanFacts span = parse(event);
             if (span != null) {
                 byTrace.computeIfAbsent(span.traceId(), key -> new ArrayList<>()).add(span);
+                sdkActive = sdkActive
+                        || ("ui_event".equals(span.kind()) && hasFlag(span.flags(), SDK_ACTIVE_FLAG));
             }
         }
 
@@ -87,11 +105,35 @@ public class TraceDeriver {
             long endedAtNs = Long.MIN_VALUE;
             String status = "OK";
             boolean hasError = false;
+            int fetchCount = 0;
+            int backendSpanCount = 0;
+            boolean hasFrontend = false;
+            boolean hasBackend = false;
+            Set<String> fetchSpanIds = new HashSet<>();
             for (SpanFacts span : spans) {
                 startedAtNs = Math.min(startedAtNs, span.startNs());
                 endedAtNs = Math.max(endedAtNs, span.startNs() + span.durNs());
                 status = moreSevere(status, span.status());
                 hasError = hasError || "THREW".equals(span.status());
+                if ("fetch".equals(span.kind())) {
+                    fetchCount++;
+                    fetchSpanIds.add(span.spanId());
+                }
+                if (FRONTEND_KINDS.contains(span.kind())) {
+                    hasFrontend = true;
+                }
+                if (BACKEND_KINDS.contains(span.kind())) {
+                    hasBackend = true;
+                    backendSpanCount++;
+                }
+            }
+            boolean controllerLinkedToFetch = false;
+            for (SpanFacts span : spans) {
+                if ("controller".equals(span.kind()) && span.parentSpanId() != null
+                        && fetchSpanIds.contains(span.parentSpanId())) {
+                    controllerLinkedToFetch = true;
+                    break;
+                }
             }
             summaries.add(new RequestSummary(
                     entry.getKey(),
@@ -99,15 +141,19 @@ public class TraceDeriver {
                     root == null ? null : root.kind(),
                     root == null ? null : root.nodeKey(),
                     status,
-                    root == null || root.confidence() == null ? "LOST" : root.confidence(),
+                    derivedConfidence(root, fetchCount, hasBackend, controllerLinkedToFetch),
                     spans.size(),
                     startedAtNs,
                     Math.max(0L, endedAtNs - startedAtNs),
-                    hasError));
+                    hasError,
+                    fetchCount,
+                    hasFrontend,
+                    hasBackend,
+                    backendSpanCount));
         }
         summaries.sort(Comparator.comparingLong(RequestSummary::startedAtNs)
                 .thenComparing(RequestSummary::traceId));
-        return new RequestsResponse(sessionId, summaries);
+        return new RequestsResponse(sessionId, sdkActive, summaries);
     }
 
     /**
@@ -170,6 +216,52 @@ public class TraceDeriver {
             }
         }
         return best;
+    }
+
+    /**
+     * S3 confidence derivation (api.v1.md §9.2), replacing the S2 "take the root span" rule.
+     *
+     * <ul>
+     *   <li>rootless trace or backend-only root -> {@code LOST} (S2 behavior unchanged);</li>
+     *   <li>root {@code ui_event} with {@code EXACT}: no fetch and no backend -> {@code EXACT}
+     *       (case B: no request to correlate), no fetch but backend evidence -> {@code LOST}
+     *       (N6), any {@code controller.parentSpanId} pointing at one of this trace's fetch
+     *       spans -> {@code EXACT} (case A), otherwise -> {@code LOST};</li>
+     *   <li>root {@code ui_event} with a non-EXACT confidence -> echo it ({@code null} ->
+     *       {@code LOST}).</li>
+     * </ul>
+     *
+     * <p>An unlinked extra fetch (e.g. the runtime list refresh {@code GET /api/orders}) never
+     * downgrades a chain whose controller is linked to another fetch.</p>
+     */
+    private static String derivedConfidence(SpanFacts root, int fetchCount, boolean hasBackend,
+                                            boolean controllerLinkedToFetch) {
+        if (root == null) {
+            return "LOST";
+        }
+        String rootConfidence = root.confidence() == null ? "LOST" : root.confidence();
+        if (BACKEND_KINDS.contains(root.kind())) {
+            return "LOST";
+        }
+        if (!"ui_event".equals(root.kind()) || !"EXACT".equals(rootConfidence)) {
+            return rootConfidence;
+        }
+        if (fetchCount == 0) {
+            return hasBackend ? "LOST" : "EXACT";
+        }
+        return controllerLinkedToFetch ? "EXACT" : "LOST";
+    }
+
+    private static boolean hasFlag(JsonNode flags, String flag) {
+        if (flags == null || !flags.isArray()) {
+            return false;
+        }
+        for (JsonNode entry : flags) {
+            if (flag.equals(entry.asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String moreSevere(String current, String candidate) {

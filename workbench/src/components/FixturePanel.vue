@@ -33,7 +33,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="fixture-panel" aria-labelledby="fixture-panel-title">
+  <section id="fixture-panel" class="fixture-panel" aria-labelledby="fixture-panel-title">
     <header class="fixture-panel__header">
       <h2 id="fixture-panel-title" class="fixture-panel__title">Fixture 事实摘要</h2>
       <span class="fixture-panel__badge">case-a-zero-rows · 只读</span>

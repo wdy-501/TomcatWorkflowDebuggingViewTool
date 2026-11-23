@@ -3,16 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "BuggyShop demo frontend (S0: no defect, no SDK, no collection)",
+  "description": "BuggyShop demo frontend (S3: runtime SDK, case A intentional defect, case B pure-front-end validation)",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@traceboard/sdk": "file:../../../frontend/sdk",
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "~5.7.3",
     "vite": "^6.1.0",

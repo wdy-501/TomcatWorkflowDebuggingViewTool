@@ -1,6 +1,6 @@
 # 事件模型 v1（event-model.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23｜作者：plan-writer（S0）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S3 增补：2026-11-24）｜作者：plan-writer（S0）
 > 变更记录：**2026-11-23 S1 增补（G1 第 1 轮返工）**——§2/§5/§7/§9/§11 记录“游离后端根（isolated backend request）”这一**唯一例外**
 >   （`parentSpanId=null` + `kind=controller` + `confidence=LOST` + 合成 `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）。
 >   **仅文档修订：schema 与 fixture 字节未变。**
@@ -8,6 +8,12 @@
 >   ②controller 的 HTTP 状态码可写入 `return`（`{type:"org.springframework.http.ResponseEntity","value":200}` / 404），前端 `fetch` 仍按 §4.3 用 `{type:"http",value:200}`；
 >   ③§5 第 2 条“游离后端根”在 S2 是一棵**同 trace 的子链**（根 `parentSpanId=null`，子 span 指向父、继承 `confidence=LOST` 与 `rootEventId`，`LOST_BACKEND` 只写根）。
 >   **schema 字节不变**（G1 冻结面零漂移）。
+>   **2026-11-24 S3 增补（仅语义，无字段/枚举/约束变更）**：新增 §12——runtime SDK 的 `ui_event/js_method/fetch/render` 事件、click 根身份、
+>   `SDK_ACTIVE`/`S3_RUNTIME_SDK`/`OBSERVE_MS=<n>` flags、`traceparent`/`X-TraceBoard-Click` 头与 controller EXACT 关联、纯前端零请求链、
+>   DOM 效果语义、区间/异步回落规则、LOST 回退与无 PII。**schema 字节不变**；`status-semantics.md` 不改（S3 不新增状态语义）。
+>   **2026-11-24 S3 G1 前补丁（时钟模型，仅语义，无字段/枚举/约束变更）**：`startNs` 由“相对会话/SDK init”统一为**本机 epoch 纳秒**；
+>   新增 §12.10（SDK/agent 公式、collector 原样存储、工作台显示归一化、fixture 示意值、NTP/墙钟跳变风险、V1 仅单机）。
+>   **schema 字节不变**：`startNs` 仍是 `integer ≥ 0`；schema 内 `description` 文字不改（其“since session start”按 §12.10 解释）。
 > 机器可校验版本：`schema/traceboard.event.v1.json`（JSON Schema 2020-12，`$id=urn:traceboard:schema:event:v1`）
 > 语义来源：主计划 §13.4 / §2.3 / §8.3 / §9.2；分发书 §4.1。本文与 schema 冲突时以 schema 为机器事实、以本文为语义解释。
 
@@ -33,7 +39,7 @@
 | `nodeKey` | string | 是 | 稳定节点键，1–512 字符；后端建议 `FQCN#method`，前端建议 `源文件#函数` |
 | `source` | object | 否 | `{file:string\|null, line:int\|null}`；见 §4.1 |
 | `thread` | object | 否 | `{id:int≥0, name:string}`；见 §4.2 |
-| `startNs` | integer | 是 | ≥0；相对会话起点的单调纳秒 |
+| `startNs` | integer | 是 | ≥0；**S3 起为本机 epoch 纳秒**（SDK/agent 同机同源墙钟，公式与限制见 §12.10）；不再表示“相对会话起点” |
 | `durNs` | integer | 是 | ≥0；纳秒 |
 | `status` | string | 是 | 8 值枚举，见 §3.2 / `status-semantics.md` |
 | `reason` | string | 条件必填 | 非空，1–512 字符；`NOT_COLLECTED*` 时必填（if/then 强制） |
@@ -163,8 +169,11 @@
 3. 同一 `traceId` 内的所有事件共用同一 `rootEventId`；前端点击生成，后端通过 traceparent + clickId 继承。
    **唯一例外**是第 2 条的游离后端根：其 `rootEventId` 由本端合成占位 `click_lost_<该 span 的 spanId>`
    （仍满足 `^click_[A-Za-z0-9_-]{8,}$`），表示“这条链没有前端点击”；不得写成真实 clickId，也不得与任何前端 `rootEventId` 相同。
-4. 文件顺序按 `startNs` 非降序；子 span 的 `[startNs, startNs+durNs]` 落在父 span 区间内。**唯一例外**：`kind=callback`（响应回调）允许在其 `fetch` 父 span 结束后启动，但其区间必须落在其所在根 span（`parentSpanId=null` 的祖先）区间内。
-5. `startNs`/`durNs` 是整数纳秒；禁止浮点、禁止负数、禁止回退。
+4. 文件顺序按 `startNs` 非降序（对 fixture 与单来源文件成立；S3 混合前端/后端批次的**入库顺序不承诺**，读取端一律按 `startNs` 排序，见 §12.10）；子 span 的 `[startNs, startNs+durNs]` 落在父 span 区间内。**唯一例外**：`kind=callback`（响应回调）允许在其 `fetch` 父 span 结束后启动，但其区间必须落在其所在根 span（`parentSpanId=null` 的祖先）区间内。
+   **S3 解释**：`kind=render` 的 UI 效果与 `callback` 同属“父请求结束后才发生的 UI 效果”；当它的父是 `fetch` 时按同一例外处理（结束于父之后、但必须落在 click 根内）；
+   当它的父是 click 根或 `js_method` 时按普通包含规则。S3 fixture 的 `render` 分别挂 click 根（案例 A）与 `validateForm`（案例 B），因此不额外放宽区间规则。
+5. `startNs`/`durNs` 是整数纳秒；禁止浮点、禁止负数、禁止回退。S3 起 `startNs` 是 epoch 纳秒（同一 emitter 内不倒退），
+   `durNs` 始终由单调时钟差值得到（SDK `performance.now()`、agent `System.nanoTime()`），墙钟跳变风险见 §12.10。
 6. `status` 与 `confidence` 正交：`EXACT` 不等于 `OK`；`LOST` 是置信度而非状态。
 7. `NOT_COLLECTED*` 必须有非空 `reason`（schema if/then 强制）。
 8. 事件内不得出现真实客户数据/secret（见 §8）。
@@ -186,6 +195,9 @@
 | `L2` | 该 span 走深度档采集 | 预留（v1 可写） |
 | `SKELETON` / `S1_ONE_METHOD` / `S1_WALKING_SKELETON` | S1 walking skeleton 的**阶段标记**（只说明采集范围/来源，不承载关联语义） | 本阶段使用 |
 | `S2_ZERO_ROW_CHAIN` | S2 0 行事实链的**阶段标记**（controller/service/mapper/sql 四点采集；只说明采集范围/来源，不承载关联语义） | 本阶段使用（S2 起由 agent 写入全部 4 个 span） |
+| `SDK_ACTIVE` | 该事件由 runtime SDK 采集（click 根与同 operation 的前端事件）；只说明来源，不承载关联语义 | S3 使用（SDK 写入） |
+| `S3_RUNTIME_SDK` | S3 runtime SDK 的**阶段标记**（F0、无构建插件/sourcemap）；advisory | S3 使用（SDK 写入 click 根） |
+| `OBSERVE_MS=<n>` | click 根实际的观察窗毫秒数（正常 1500；`pagehide` 提前关闭时为实际值）；只说明窗口，不是 `durNs` | S3 使用（SDK 写 click 根） |
 
 - flag 是**提示**，不改变 `status`；未知 flag 读取方必须忽略而非报错（但 schema 只允许上述字符集）。
 - `SKELETON`/`S1_ONE_METHOD`/`S1_WALKING_SKELETON` 是本阶段标记：读取方一律按“未知 flag 忽略”规则处理，不得据此推断关联或能力。
@@ -207,12 +219,14 @@
 | `valueRef` 内容寻址 | 大对象去重预留；v1 只放摘要 |
 | 事件类型扩展 | `session_start`/`graph_patch` 等未定义 |
 | 异步上下文/跨服务字段 | `async` kind 已留，上下文传播字段未定义 |
-| 关联规则表/游离区结构 | S1 起允许 §5 第 2 条的**游离后端根形状**（`parentSpanId=null` + `kind=controller` + `confidence=LOST` + `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）；关联规则表、时间窗推断、游离区合并/手工关联（`MANUAL`）仍属后续检查点 |
+| 关联规则表/游离区结构 | S1 起允许 §5 第 2 条的**游离后端根形状**（`parentSpanId=null` + `kind=controller` + `confidence=LOST` + `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）；关联规则表、时间窗推断、游离区合并/手工关联（`MANUAL`）仍属后续检查点。**S3**：`traceparent`/`X-TraceBoard-Click` 的**确定性头关联**已实现（§12.4），但不是“关联规则表/推断”：头缺失仍走 `LOST`，`INFERRED/MANUAL` 仍不实现 |
 
 **S0 边界**：S0 的样例只证明“可校验的契约 + fixture 样例”，不代表已具备采集/关联能力。
 **S1 边界**：S1 只有 §5 第 2 条例外描述的最小后端根采集（单方法 agent，`confidence=LOST`）；仍无任何关联/合并/推断能力。
 **S2 边界**：S2 采集 4 个后端 span（`controller/service/mapper/sql` 的 `confidence=LOST` 游离后端请求链）与 SQL `rowsAffected`；
 仍无前端 SDK/`traceparent`/clickId 传播、无关联/合并/推断、无 `values`/异常 payload、无回放/实时。0 行只是返回事实，不是错误状态。
+**S3 边界**：S3 采集前端 `ui_event/js_method/fetch/render`（F0 runtime SDK，显式 `wrapFn`）与后端 4 span 的 **EXACT 头关联**；
+纯前端零请求链可被证明；仍无构建插件/sourcemap/行号/局部变量、无 `values`/异常 payload、无 `INFERRED/MANUAL`、无 S4/S5 接入或实时。
 
 ## 10. 变更流程
 
@@ -231,4 +245,162 @@
 - **S2 0 行事实链样例（4 行，单 trace，全 `OK`/`LOST`）**：`fixtures/s2-zero-row-chain/events.ndjson`
   （controller 根 + service + mapper + sql 子链；SQL `rowsAffected=0`/`transaction=UNKNOWN`；flags `S2_ZERO_ROW_CHAIN`，根另含 `LOST_BACKEND`）。
   期望事实：`fixtures/s2-zero-row-chain/expected-facts.json`（6 条 fact + `globalAssertions`）。
-- 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0/S1 门禁；S2 由 tester 扩展 S2-A..S2-L）。
+- **S3 案例 A EXACT 关联样例（7 行，单 trace，全 `EXACT`/`OK`）**：`fixtures/s3-frontend-facts/case-a-joined-chain/events.ndjson`
+  （click 根 → fetch → controller[parent=fetch span] → service → mapper → sql[rows 0/UNKNOWN] → render；flags `SDK_ACTIVE`/`S3_RUNTIME_SDK`/`OBSERVE_MS=1500`）；
+  期望事实：同目录 `expected-facts.json`（8 条 fact + `apiExpectations` + `replayWindows`）。
+- **S3 案例 B 纯前端零请求样例（3 行，单 trace，全 `EXACT`）**：`fixtures/s3-frontend-facts/case-b-frontend-only/events.ndjson`
+  （click 根 → `OrderEdit.vue#validateForm` `RETURNED_FALSE` → render `金额必须大于 0`；零 fetch/后端）；
+  期望事实：同目录 `expected-facts.json`（6 条 fact + `caseBVerdict` + `replayWindows`）。
+- 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0/S1/S2 门禁；S3 由 tester 扩展 S3-A..S3-J）。
+## 12. S3 runtime SDK 事件与头关联（仅语义；schema 字节不变）
+
+> S3 只到 **F0**：一个页面内 runtime SDK 显式捕获点击、包装 `fetch`/XHR、显式 `wrapFn`/`uiEffect`。
+> **没有**构建插件、sourcemap、源码行号、函数内部局部变量、`values[]`、字段 diff（S5）；也**没有** S4 的启动器/预览注入/CDP。
+> 本节不新增 `kind`、不新增 `status`、不新增字段；所有描述都用既有 v1 字段表达。
+
+### 12.1 SDK 本阶段产生的 kind（4 种；`callback` 不使用）
+
+| kind | 何时产生 | 本阶段 |
+|---|---|---|
+| `ui_event` | `document` 捕获阶段点击；每次点击一个操作根 | 使用 |
+| `js_method` | demo 显式 `wrapFn(name, fn)` 的同步/Promise 函数 | 使用 |
+| `fetch` | SDK 包装的 `window.fetch` / `XMLHttpRequest` 请求-响应 | 使用 |
+| `render` | demo 显式 `uiEffect(text)` 的 DOM 效果记录 | 使用 |
+| `callback` | 只有在**直接包装用户回调**时才允许 | S3 demo 不产生，**不得伪造** |
+
+- 无 `async`/`jdbc` 等后端 kind；S3 不产生 `THREW` 以外的新状态。
+- 线程固定 `{"id":0,"name":"browser-main"}`；`startNs` 是 **epoch 纳秒** `round((performance.timeOrigin + performance.now()) * 1e6)`（≥0），
+  `durNs` 用 `performance.now()` 差值；见 §12.10（不再“相对 SDK init”）。
+- SDK 事件**不写** `source`（无 sourcemap/插件；不猜文件/行号），不写 `values`/`reason`/异常 message/栈。
+
+### 12.2 事件字段（唯一前端事实形状；以 dispatch §4.2 为基础，差异见 `s3-plan.md` D3）
+
+| kind | `nodeKey` | `parentSpanId` | `status` | `return` | `flags` |
+|---|---|---|---|---|---|
+| `ui_event` | 元素身份：`#id` → `[data-tb-name=...]` → `tag[role=...]` → 截断文本 → DOM 路径；≤200 字符 | `null`（click 根） | `OK` | `null` | `["SDK_ACTIVE","S3_RUNTIME_SDK","OBSERVE_MS=<实际毫秒>"]` |
+| `js_method` | `<appName>#<name>`（案例 B 为 `OrderEdit.vue#validateForm`） | 当前同步 `wrapFn` 栈顶；无则为 click 根 | `OK` / `RETURNED_FALSE` / `THREW` | `false` → `{"type":"boolean","value":false}`；其它值 `null`（不记录任意返回值） | `["SDK_ACTIVE"]` |
+| `fetch` | `<METHOD> <pathname>`（去 query/hash；≤200） | 栈顶或 click 根 | `OK`（收到响应）/`THREW`（网络错误） | `{"type":"http","value":<status>}` / `null` | `["SDK_ACTIVE"]` |
+| `render` | `ui_effect:<text>`（≤200） | 栈顶或 click 根 | `OK` | `{"type":"ui_effect","value":<text>}` | `["SDK_ACTIVE"]` |
+
+- `S3_RUNTIME_SDK` 是**阶段标记**（只说明“runtime SDK 采集，非构建插件”），与 `S2_ZERO_ROW_CHAIN` 同类；读取方对未知 flag 一律忽略。
+  dispatch §4.2 的 click flags 只列 `SDK_ACTIVE`/`OBSERVE_MS`，本契约**增加**该阶段标记（advisory，不承载关联语义；s3-plan D3）。
+- 同一操作共用 `traceId` 与 `rootEventId=clickId`；click 根 `confidence=EXACT`，其余前端事件继承 `EXACT`。
+- 不采集：请求/响应体、表单值、cookie、查询串/hash、任意返回值、异常 payload、PII。
+
+### 12.3 click 根身份与观察窗
+
+1. 每次点击生成新 `traceId`（32 hex）、`clickId=click_` + 16 hex、根 `spanId`（16 hex）；`rootEventId=clickId`。
+2. 一次点击开一个 operation；`OBSERVE_MS=1500` 后关闭并入库 click 根；`pagehide` 提前关闭并在 flag 记录**实际毫秒**。
+3. 新点击开始即关闭上一个 operation（提前关闭，记录实际毫秒），各自独立 trace/根，不因时间近而合并（主计划 §8.2）。
+4. click 根 `durNs` = 窗口内**最后一个因果事件结束** − click 开始（≥0），不是 1500ms 的固定值；因此根区间包含窗口内全部子事件。
+5. 只有 click 窗口内的因果事件入库；窗口外的后台请求/轮询本阶段**不采集**，UI 文案只能声明“本次点击因果链内”。
+6. `parentSpanId=null` 只出现在 click 根；同一 trace 只有一个根；`rootEventId` 不得是 `click_lost_<spanId>`（那是 S2 的无头回退）。
+
+### 12.4 `traceparent` / `X-TraceBoard-Click` 与 controller EXACT 关联
+
+**SDK 发送头（仅同源、相对路径、非 ingest 请求）**
+
+```text
+traceparent: 00-<traceId 32hex>-<fetchSpanId 16hex>-01
+X-TraceBoard-Click: <clickId>          # 必须等于该 click 的 rootEventId
+```
+
+- `traceparent` 的 parent-id **必须是该 fetch 事件自己的 `spanId`**；不是 click 根、不是 controller 的 spanId。
+- 跨域请求原样放行、**不加头**；ingest 上报（`POST /ingest/v1/events`）**不加这两个头**，避免自采集递归。
+- 头值不得写日志/事件；不采请求体/查询串。
+
+**agent 读取与关联（只读，无编译期 Spring 依赖）**
+
+- controller 进入时用 JDK8 反射读当前请求头：`RequestContextHolder#getRequestAttributes` → `ServletRequestAttributes#getRequest` → `getHeader`；
+  反射不可读按“头缺失”处理，fail-open。
+- 严格校验：`traceparent` 匹配 `^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$` 且两 id 非全 0；
+  `X-TraceBoard-Click` 匹配 `^click_[A-Za-z0-9_-]{8,}$`。两者都合法才关联。
+- 合法时 controller：`traceId=<头 traceId>`、`parentSpanId=<头 parent-id>`、`rootEventId=<clickId>`、`confidence=EXACT`、
+  **不带 `LOST_BACKEND`**（它不是游离后端根）；service/mapper/sql 继承同一 trace/root/EXACT 与父子链。
+- 头缺失/非法/反射不可读：**完全沿用 S2**——随机 `traceId`、`rootEventId=click_lost_<根spanId>`、`confidence=LOST`、根带 `LOST_BACKEND`，
+  stderr 计数 `header_unreadable=<n>`；不猜、不合成 EXACT。4 个插桩点与 flags（`S2_ZERO_ROW_CHAIN`）不变。
+- 只发头的 curl 没有 click/fetch 事件，trace 无根：controller 事件仍可 `EXACT`，但 `requests` 按无根规则显示 `LOST`；
+  `requests.confidence=EXACT` 需要真实 fetch 事件（浏览器，或测试时先注入 click+fetch 前缀）。
+
+### 12.5 纯前端零请求链（案例 B）
+
+```text
+ui_event(#btn-save-b, SDK_ACTIVE, OBSERVE_MS=1500)
+  └─ js_method(OrderEdit.vue#validateForm, RETURNED_FALSE, return=false)
+       └─ render(ui_effect:金额必须大于 0)
+```
+
+- 零 `fetch`、零 `controller/service/mapper/sql/jdbc/async`；全 `EXACT`（浏览器直接观测），不是 `LOST`。
+- `RETURNED_FALSE` 是“正常返回 false”，不是异常；`false` 写入 `return={type:"boolean",value:false}`。
+- “已确认没发请求”需要同时满足：①存在该 click 的 `ui_event` 根且带 `SDK_ACTIVE`；②根在观察窗关闭后入库（`OBSERVE_MS` 已记录）；
+  ③该 trace `fetchCount=0` 且 `hasBackend=false`。缺 SDK（`sdkActive=false`）只能“无法确认”；有 fetch 但后端未采集应标 `LOST`/失败，不并入“没发”。
+- 案例 B 不证明后端正确；只证明“本次点击因果链内没有网络请求”。无构建插件/sourcemap 时，详情必须写
+  `JS 内部变量本次未采集（无构建插件/sourcemap）`，不得显示行号/局部变量。
+
+### 12.6 DOM 效果（`render`）语义
+
+- `render` 只表示 demo **显式调用 `uiEffect(text)`** 记录的用户可见效果摘要；`return.type="ui_effect"`、`value` 是文案。
+- SDK **不读写 DOM**、不做 DOM diff、不截图/录像；`uiEffect` 调用本身不改变页面。
+- 页面真实变化（toast/错误文本/刷新）仍由 demo 原有逻辑产生；`render` 是对它的**声明式事实**，不是像素回放。
+- `render` 允许在 `fetch` 结束后启动（与 `callback` 同类的 UI 效果），但必须落在 click 根区间内；父为 click 根/`js_method` 时按普通包含。
+
+### 12.7 区间、异步与置信度
+
+- 同 trace 内子事件区间落在父区间内；`render`/`callback` 的例外见 §5 第 4 条与 §12.6。
+- 异步续体（`await`/`.then`/`setTimeout`）**不传播** `wrapFn` 栈；续体中的 fetch/render 父为 click 根（S6 才做异步上下文）。
+- `confidence`：SDK 事件 `EXACT`；agent 有合法头 `EXACT`、无头 `LOST`；S3 不产生 `INFERRED`/`MANUAL`。
+- `requests` 的派生 confidence 规则（`ui_event`+EXACT+`fetchCount=0` → EXACT；controller 挂到 fetch → EXACT；有 fetch 无后端 → LOST；
+  后端游离根/无根 → LOST）见 `api.v1.md` §9.2；`LOST` 不是 `status`。
+- 未关联的单个 fetch 只在该节点标“后端未采集”，不把整条 EXACT 链降级（案例 A 的刷新 GET 属此类）。
+
+### 12.8 隐私、预算与 schema 冻结
+
+- SDK 只产生上述 4 种 kind 的既有字段；不新增 `kind`/`status`/字段，不改枚举/约束；`schema/traceboard.event.v1.json` **字节不变**。
+- 单行仍 ≤64KB、批 ≤100 行/≤4MB、末字节 `\n`、`application/x-ndjson`；SDK 用初始化时捕获的**原生 fetch**上报，避免递归。
+- 不采 PII；`nodeKey`/`ui_effect` 文本只放用户可见标识/文案；不写 cookie/表单值/查询串/请求体/异常栈。
+- 事件仍是唯一事实源；`requests`/`graph`/`replay` 都是读时派生，不写第二事实源。
+
+### 12.9 S3 明确不做（事件模型层）
+
+- 无构建插件/sourcemap/行号/局部变量/`values[]`/字段 diff（S5）；无 S4 详情抽屉/×N/手工关联/预览注入。
+- 无异步上下文传播、无跨线程/跨服务、无 `INFERRED` 时间窗推断、无后台轮询车道（S6/S4）。
+- 无实时推送、无持久化、无采样/淘汰；回放只读窗口不产生新事件。
+
+### 12.10 时钟模型（S3 单机 epoch-ns；G1 前补）
+
+> 动机：S3 把前端 SDK 事件与后端 agent span 放进同一个图/时间轴/回放。若两端 `startNs` 原点不同（SDK init vs JVM 启动），
+> 时间顺序与回放窗口都会算错。S3 因此统一为**同一台机器上的 epoch 纳秒**。
+
+**取值公式（本阶段唯一口径）**
+
+| emitter | `startNs` | `durNs` |
+|---|---|---|
+| 前端 SDK | `round((performance.timeOrigin + performance.now()) * 1e6)`（epoch-ns） | `performance.now()` 差值 ×1e6（单调） |
+| 后端 agent | `System.currentTimeMillis() * 1e6 + (System.nanoTime() % 1_000_000)`（span 开始时取一次） | `System.nanoTime()` 差值（单调，不用墙钟） |
+
+- 两者都是 epoch-ns、同一机器；`startNs` 的墙钟部分可能受 NTP/手动改时影响，`durNs` 不受影响（单调时钟差值）。
+- JavaScript `Number` 对 ~1.76e18 的 epoch-ns 只有约 256ns 分辨率（>2^53）；对 ms 级墙钟与 UI 展示足够，**不引入 BigInt**（schema 仍 `integer`）。
+- **V1 只支持单机**：不跨机器对齐、不做时钟同步/偏移校正/NTP 补偿；跨机器场景不在 S3 承诺内。
+- 跨 emitter 的关联只依赖 `traceparent`/`X-TraceBoard-Click` 头（§12.4），**不依赖时间窗**；时间只用于展示与区间校验。
+
+**存储（collector）**
+
+- collector 原样存储 `startNs`/`durNs`，**不做归一化/偏移/改写**；`requests`/`graph`/`replay` 的输出均为原始值。
+
+**显示归一化（workbench / replay UI）**
+
+- 选定范围（单 trace 图或整个回放会话）取 `minStartNs = min(startNs)`，显示 `relNs = startNs − minStartNs`（≥0）。
+- 滑块、刻度与标签用 `relNs`；**API 参数 `fromNs`/`toNs` 仍是原始 epoch-ns**，UI 在请求前换算回原始值（`minStartNs + rel`）。
+- 归一化只发生在客户端展示层；不得把相对值写回事件、存储或 API 响应。
+
+**fixture 与 S2**
+
+- S2 的后端-only 相对样例值（如 1.0s 起步）与 S3 fixture 的 `startNs/durNs` 都只是**示意/契约形状**，不是绝对 epoch-ns；
+  客户端与测试**不得假定与运行时绝对相等**，只断言顺序、区间包含与时长关系。schema 字节不变。
+
+**已知风险（S3 不修复，如实标注）**
+
+- 墙钟跳变（NTP 校时/手动改时）可让相邻事件的 `startNs` 非单调，回放顺序在跳变点附近可能失真；`durNs` 与父子链仍可信。
+- 单机假设不覆盖多浏览器/多 JVM/容器时钟漂移；S4+ 若跨机器再引入偏移/同步设计（需契约变更）。
+- 时间容差仅用于测试断言（建议 ≤1s），不是契约字段；运行时头关联成功不要求时间窗吻合。混合链（fetch→controller）的区间包含在测试中按同一容差校验；
+  EXACT 的唯一依据是 `traceparent`/`X-TraceBoard-Click`（§12.4），不是时间吻合。

@@ -4,15 +4,19 @@
  * S1: ingest a fake click/fetch batch and read the stored events back.
  * S2: read the per-trace request list and the derived single-trace graph
  *     (api.v1.md §8.1/§8.2) — both read-only.
+ * S3: requests gain `sdkActive` + per-trace `fetchCount/hasFrontend/hasBackend/
+ *     backendSpanCount`; the read-only window endpoint is `GET .../replay`
+ *     (api.v1.md §9.1/§9.2). Replay is a GET of stored events — never a POST,
+ *     never a demo call, never a write.
  *
  * Rules enforced here:
  * - Relative paths only: /ingest and /api are proxied by the Vite dev server to
  *   http://127.0.0.1:8601 (see vite.config.ts). No direct collector URL, no CORS.
- * - Query reads are bounded, explicit reads (api.v1.md §7.2, §8), not replay
- *   and not a subscription. No push channel lives in this file.
+ * - Query reads are bounded, explicit reads (api.v1.md §7.2, §8, §9), not a
+ *   subscription. No push channel lives in this file.
  * - Types mirror the frozen contracts: event v1 body, query wrapper
  *   {"seq":N,"event":{...}}, sessions list, ingest result, request summaries,
- *   derived graph, error envelope.
+ *   derived graph, replay window, error envelope.
  */
 
 export type Confidence = "EXACT" | "INFERRED" | "LOST" | "MANUAL";
@@ -309,8 +313,10 @@ export async function fetchEventsPage(
 // ---------------------------------------------------------------------------
 
 /**
- * One trace grouped by the collector. `confidence` is the root span's
- * confidence; an orphan trace (no root) reports "LOST", never a guessed value.
+ * One trace grouped by the collector. S2 fields are unchanged; S3 appends
+ * `fetchCount/hasFrontend/hasBackend/backendSpanCount` (api.v1.md §9.2).
+ * `confidence` is derived by the collector (EXACT for a pure click chain with
+ * zero fetch, EXACT for a joined fetch↔controller chain, LOST otherwise).
  */
 export interface RequestSummary {
   traceId: string;
@@ -323,10 +329,16 @@ export interface RequestSummary {
   startedAtNs: number;
   durNs: number;
   hasError: boolean;
+  fetchCount: number;
+  hasFrontend: boolean;
+  hasBackend: boolean;
+  backendSpanCount: number;
 }
 
 export interface RequestsResponse {
   sessionId: string;
+  /** Session-level: at least one ui_event carried SDK_ACTIVE (S3 §9.2). */
+  sdkActive: boolean;
   requests: RequestSummary[];
 }
 
@@ -385,6 +397,10 @@ function toRequestSummary(value: unknown): RequestSummary {
     startedAtNs: asNumber(record.startedAtNs, 0),
     durNs: asNumber(record.durNs, 0),
     hasError: record.hasError === true,
+    fetchCount: asNumber(record.fetchCount, 0),
+    hasFrontend: record.hasFrontend === true,
+    hasBackend: record.hasBackend === true,
+    backendSpanCount: asNumber(record.backendSpanCount, 0),
   };
 }
 
@@ -436,7 +452,9 @@ function toGraphEdge(value: unknown): GraphEdge {
 
 /**
  * GET /api/v1/sessions/{sessionId}/requests — per-trace summaries, already
- * sorted by `startedAtNs` (collector contract). Read-only; no pagination (S2).
+ * sorted by `startedAtNs` (collector contract). Read-only; no pagination.
+ * `sdkActive` is session-level and answers "did the runtime SDK ever record a
+ * click root", not "was this trace frontend-initiated".
  */
 export async function fetchRequests(sessionId: string): Promise<RequestsResponse> {
   const path = `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/requests`;
@@ -445,6 +463,7 @@ export async function fetchRequests(sessionId: string): Promise<RequestsResponse
   const raw = Array.isArray(record.requests) ? record.requests : [];
   return {
     sessionId: asString(record.sessionId, sessionId),
+    sdkActive: record.sdkActive === true,
     requests: raw.filter(isRecord).map(toRequestSummary),
   };
 }
@@ -468,5 +487,57 @@ export async function fetchGraph(sessionId: string, traceId: string): Promise<Gr
     confidence: asString(record.confidence, ""),
     nodes: rawNodes.filter(isRecord).map(toGraphNode),
     edges: rawEdges.filter(isRecord).map(toGraphEdge),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// S3: read-only replay window (api.v1.md §9.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET .../replay?fromNs=&toNs=` response. `fromNs`/`toNs` are the effective
+ * raw epoch-ns window (never relative values); `events[]` is the stored window
+ * ordered by the collector. `readOnly` is a contract field, not a permission —
+ * this client only ever issues GET for replay.
+ */
+export interface ReplayResponse {
+  mode: string;
+  readOnly: boolean;
+  sessionId: string;
+  fromNs: number;
+  toNs: number;
+  events: StoredEvent[];
+}
+
+/**
+ * GET /api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>
+ *
+ * Read-only window over already-stored events (0 writes, no seq consumption,
+ * no demo call). The caller passes raw epoch-ns values; display normalisation
+ * to relNs happens in the UI only.
+ */
+export async function fetchReplay(
+  sessionId: string,
+  fromNs: number,
+  toNs: number
+): Promise<ReplayResponse> {
+  const params = new URLSearchParams({
+    fromNs: String(Math.max(0, Math.floor(fromNs))),
+    toNs: String(Math.max(0, Math.ceil(toNs))),
+  });
+  const path = `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/replay?${params.toString()}`;
+  const payload = await requestJson(path);
+  const record = isRecord(payload) ? payload : {};
+  const raw = Array.isArray(record.events) ? record.events : [];
+  return {
+    mode: asString(record.mode, "replay"),
+    readOnly: record.readOnly === true,
+    sessionId: asString(record.sessionId, sessionId),
+    fromNs: asNumber(record.fromNs, fromNs),
+    toNs: asNumber(record.toNs, toNs),
+    events: raw.filter(isRecord).map((item) => ({
+      seq: asNumber(item.seq, 0),
+      event: toEventBody(item.event),
+    })),
   };
 }

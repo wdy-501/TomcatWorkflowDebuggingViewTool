@@ -6,14 +6,17 @@ import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Per-thread span stack for the S2 four-point chain (s2-plan.md 7.2/7.3).
+ * Per-thread span stack for the S2/S3 four-point chain (s2-plan.md 7.2/7.3, s3-plan.md §8).
  *
  * <p>Exactly four entry points are wired to this class: controller, service, MyBatis
  * {@code MapperProxy#invoke} (filtered to {@code OrderMapper#cancelById}) and MyBatis
  * {@code PreparedStatementHandler#update} (filtered to the {@code OrderMapper.cancelById} mapped
- * statement). The controller creates the isolated-backend root; children inherit
- * trace/root/confidence and point at the stack top. Every method is fail-open: any
- * {@code Throwable} is swallowed and the host application is never affected.</p>
+ * statement). S3: the controller reads {@code traceparent}/{@code X-TraceBoard-Click} through
+ * reflection; valid headers make it an EXACT child of the SDK fetch ({@code parentSpanId=<header
+ * parent-id>}, {@code rootEventId=<clickId>}, no {@code LOST_BACKEND}), while missing/invalid
+ * headers keep the verbatim S2 isolated LOST root. Children inherit trace/root/confidence and
+ * point at the stack top. Span start times are epoch nanoseconds (§12.10). Every method is
+ * fail-open: any {@code Throwable} is swallowed and the host application is never affected.</p>
  */
 public final class SpanContext {
 
@@ -21,6 +24,9 @@ public final class SpanContext {
     static final String KIND_SERVICE = "service";
     static final String KIND_MAPPER = "mapper";
     static final String KIND_SQL = "sql";
+
+    static final String CONFIDENCE_EXACT = "EXACT";
+    static final String CONFIDENCE_LOST = "LOST";
 
     static final String CONTROLLER_CLASS = "com.example.shop.controller.OrderController";
     static final String SERVICE_CLASS = "com.example.shop.service.OrderService";
@@ -62,10 +68,15 @@ public final class SpanContext {
         final String rootEventId;
         final String parentSpanId;
         final long startNs;
+        /** S2 isolated-backend root (LOST + {@code LOST_BACKEND}); never true for an EXACT link. */
         final boolean root;
+        /** {@link #CONFIDENCE_EXACT} (valid S3 headers / SDK children) or {@link #CONFIDENCE_LOST}. */
+        final String confidence;
+        /** True only on the controller frame that joined a real frontend fetch via headers. */
+        final boolean exactLink;
 
         Frame(String kind, String nodeKey, String spanId, String traceId, String rootEventId,
-              String parentSpanId, long startNs, boolean root) {
+              String parentSpanId, long startNs, boolean root, String confidence, boolean exactLink) {
             this.kind = kind;
             this.nodeKey = nodeKey;
             this.spanId = spanId;
@@ -74,13 +85,27 @@ public final class SpanContext {
             this.parentSpanId = parentSpanId;
             this.startNs = startNs;
             this.root = root;
+            this.confidence = confidence;
+            this.exactLink = exactLink;
         }
     }
 
     // ---------------------------------------------------------------- controller
 
+    /**
+     * S3: reads {@code traceparent} / {@code X-TraceBoard-Click} from the current HTTP request
+     * (reflection only). Valid headers join the SDK fetch span (EXACT); anything else keeps the
+     * verbatim S2 LOST root. The local stack is still started on the controller frame so children
+     * inherit trace/root/confidence.
+     */
     public static void enterController(long enterNs) {
-        enter(KIND_CONTROLLER, CONTROLLER_NODE_KEY, enterNs);
+        RequestHeaders.Link link = null;
+        try {
+            link = RequestHeaders.current();
+        } catch (Throwable ignored) {
+            // fail-open: treat as missing headers (S2 LOST)
+        }
+        enter(KIND_CONTROLLER, CONTROLLER_NODE_KEY, link);
     }
 
     public static void exitController(long enterNs, Object returned, Throwable thrown) {
@@ -115,7 +140,7 @@ public final class SpanContext {
     // ---------------------------------------------------------------- service
 
     public static void enterService(long enterNs) {
-        enter(KIND_SERVICE, SERVICE_NODE_KEY, enterNs);
+        enter(KIND_SERVICE, SERVICE_NODE_KEY);
     }
 
     public static void exitService(long enterNs, boolean returned, Throwable thrown) {
@@ -166,7 +191,7 @@ public final class SpanContext {
     }
 
     public static void enterMapper(long enterNs) {
-        enter(KIND_MAPPER, MAPPER_NODE_KEY, enterNs);
+        enter(KIND_MAPPER, MAPPER_NODE_KEY);
     }
 
     public static void exitMapper(long enterNs, Object returned, Throwable thrown) {
@@ -210,7 +235,7 @@ public final class SpanContext {
     }
 
     public static void enterSql(long enterNs) {
-        enter(KIND_SQL, SQL_NODE_KEY, enterNs);
+        enter(KIND_SQL, SQL_NODE_KEY);
     }
 
     public static void exitSql(long enterNs, int rowsAffected, Throwable thrown) {
@@ -235,7 +260,11 @@ public final class SpanContext {
 
     // ---------------------------------------------------------------- stack
 
-    private static void enter(String kind, String nodeKey, long enterNs) {
+    private static void enter(String kind, String nodeKey) {
+        enter(kind, nodeKey, null);
+    }
+
+    private static void enter(String kind, String nodeKey, RequestHeaders.Link link) {
         try {
             if (!SpanEmitter.isEnabled()) {
                 return;
@@ -245,26 +274,33 @@ public final class SpanContext {
                 stack.clear();
                 TraceAgent.log("stack_reset=" + RESET.incrementAndGet() + " reason=depth");
             }
-            long startNs = enterNs - SpanEmitter.premainNanos();
-            if (startNs < 0L) {
-                startNs = 0L;
-            }
+            // S3 clock (event-model.v1.md §12.10 intent): epoch-ns taken once at span start;
+            // durations still use the monotonic System.nanoTime delta captured by the advice.
+            long startNs = SpanEmitter.epochNanos();
             Frame parent = stack.peek();
             Frame frame;
             if (parent == null) {
                 if (KIND_CONTROLLER.equals(kind)) {
-                    String spanId = SpanEmitter.randomHex(8);
-                    String fixedTraceId = SpanEmitter.fixedTraceId();
-                    String traceId = (fixedTraceId != null) ? fixedTraceId : SpanEmitter.randomHex(16);
-                    frame = new Frame(kind, nodeKey, spanId, traceId, "click_lost_" + spanId,
-                            null, startNs, true);
+                    if (link != null) {
+                        // Joined a real frontend fetch: not a free-standing backend root.
+                        frame = new Frame(kind, nodeKey, SpanEmitter.randomHex(8), link.traceId,
+                                link.clickId, link.parentSpanId, startNs, false,
+                                CONFIDENCE_EXACT, true);
+                    } else {
+                        String spanId = SpanEmitter.randomHex(8);
+                        String fixedTraceId = SpanEmitter.fixedTraceId();
+                        String traceId = (fixedTraceId != null) ? fixedTraceId : SpanEmitter.randomHex(16);
+                        frame = new Frame(kind, nodeKey, spanId, traceId, "click_lost_" + spanId,
+                                null, startNs, true, CONFIDENCE_LOST, false);
+                    }
                 } else {
                     // No controller root on this thread: keep the stack balanced but never fake a root.
-                    frame = new Frame(kind, nodeKey, null, null, null, null, startNs, false);
+                    frame = new Frame(kind, nodeKey, null, null, null, null, startNs, false,
+                            CONFIDENCE_LOST, false);
                 }
             } else {
                 frame = new Frame(kind, nodeKey, SpanEmitter.randomHex(8), parent.traceId,
-                        parent.rootEventId, parent.spanId, startNs, false);
+                        parent.rootEventId, parent.spanId, startNs, false, parent.confidence, false);
             }
             stack.push(frame);
         } catch (Throwable ignored) {

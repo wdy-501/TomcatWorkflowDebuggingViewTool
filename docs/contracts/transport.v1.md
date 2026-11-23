@@ -1,11 +1,14 @@
 # 传输契约 v1（transport.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24）
 > 变更记录：**2026-11-23 S1 增补**——通路 A（ingest）与通路 C 的**只读会话查询**转为已实现；
 >   实时推送（通路 B：SSE/WebSocket）与回放仍为预留，S1 代码中不存在。S0 的“501 骨架”行为按原样保留为 `S0` 历史注记。
 >   **2026-11-23 G1 第 1 轮**：§4.5 增第 8 条，记录 S1 agent 事件的“游离后端根”语义（`event-model.v1.md` §5 第 2 条例外；仅文档，schema/fixture 未变）。
 >   **2026-11-24 S2 增补（最小）**：通路 C 新增两个**只读派生**查询 `GET .../requests` 与 `GET .../graph?traceId=`（§6.3，形状见 `api.v1.md` §8）；
 >   通路 A（ingest）**零改动**；通路 B（SSE/WebSocket）仍不实现，回放仍预留。无新增写入通路、无新端口、无 CORS。
+>   **2026-11-24 S3 增补**：通路 C 的 **`GET .../replay` 转为已实现（只读窗口，0 写）**（§6.4，形状见 `api.v1.md` §9.1）；
+>   demo 前端新增 runtime SDK 与 `/ingest` 代理（只上报事件，不新增 collector 写通路）；通路 B（SSE/WebSocket）**仍不实现**，
+>   `capabilities.realtime=false`、`replay=true`。ingest 线上格式零改动；无 CORS、无持久化、无新端口。
 > 范围：collector 与 agent/SDK/工作台之间的数据通路。**S0 只实现骨架**：ingest 返回 501，实时与回放全部预留。
 > 关联契约：`event-model.v1.md`（事件语义）、`api.v1.md`（HTTP 端点清单、S1 实现矩阵 §2.1 与 S1 定义 §7）。
 
@@ -26,6 +29,10 @@
   因此浏览器只发同源相对路径；collector 仍不加 CORS 头。
 - **S2**：collector 在同一 `127.0.0.1:8601` 上新增 `requests`/`graph` 两个只读查询（工作台经同一条 `/api` 代理读取）；
   demo 后端仍 `localhost:8080`（JDK8，H2 嵌入式）、workbench 5173、demo 前端 5174 均不变；无新端口、无新代理规则。
+- **S3**：demo 前端（5174）新增 Vite 代理 `/ingest` → `http://127.0.0.1:8601`（dev + preview），保留 `/api` → demo 8080；
+  runtime SDK 用**初始化时捕获的原生 fetch**把 NDJSON 发到 `${ingestUrl}/v1/events`（即 `/ingest/v1/events`），
+  不直连 8601、不加 CORS、不采集 ingest 自身请求。collector 仍只绑 `127.0.0.1:8601`，新增 `replay` 只读查询（§6.4）；
+  workbench 仍 5173 经 `/api` 读 collector。无新端口、无 SSE/WS、无持久化。
 
 ## 2. 三条通路（职责分离）
 
@@ -33,7 +40,7 @@
 |---|---|---|---|
 | A. 批量 ingest | agent/SDK → collector | `POST /ingest/v1/events`，NDJSON | **S1 已实现**（S0 曾返回 501） |
 | B. 实时推送 | collector → workbench | SSE 或 WebSocket（二选一或并存） | **预留，S1 未实现**（代码中不存在） |
-| C. 只读查询 / 回放 | workbench → collector | HTTP GET | **S1：只读会话/事件查询已实现**；**S2：新增 requests/graph 只读派生查询**；**回放仍预留** |
+| C. 只读查询 / 回放 | workbench → collector | HTTP GET | **S1：只读会话/事件查询已实现**；**S2：新增 requests/graph 只读派生查询**；**S3：replay 只读窗口已实现（0 写）** |
 
 - 唯一事实源是 append-only 事件流；B/C 都是派生读取，不得改写事件。
 - S0 的 demo 应用、demo 前端、workbench 与 collector **彼此不通信**（分发书 §2.2）；S1 只放开
@@ -151,7 +158,7 @@ data: {"schema":"traceboard.event.v1",...}
 约束（预留但需提前遵守）：实时只推送**已接收事件**，不推送“计划执行”的假事件；连接断开不影响 ingest；
 推送失败不得丢弃事件（客户端可从回放接口补齐）。
 
-## 6. 通路 C：只读会话查询（S1 已实现）与回放（预留）
+## 6. 通路 C：只读会话查询（S1 已实现）、requests/graph（S2）与回放（S3 已实现，只读）
 
 ### 6.1 S1 只读查询（已实现；**查询不是回放**）
 
@@ -169,14 +176,17 @@ GET /api/v1/sessions/s_wb_demo/events?afterSeq=0&limit=200
 - **`seq` 是传输/存储元数据，位于 `event` 对象之外**（`{"seq":n,"event":{...}}`）：`event` 逐字返回、仍是合法的 v1 事件，
   可直接过冻结 schema；ingest 侧仍拒收带 `seq` 的事件（`additionalProperties:false`）。
 - 纯读：不做重排/合并/改写，不重新执行程序，不调用 demo 后端，不发写请求，不触发 SQL，不建立派生图，不提供虚拟时钟。
-- **术语纪律**：这些端点必须称为“会话查询 / 只读读取”，**不得称为回放**；`capabilities.replay` 保持 `false`。
-  存在性：`/graph`、`/replay`、`/stream`、`/ws/v1/events`、`/links` 未注册路由（请求 404）。
+- **术语纪律**：这些端点必须称为“会话查询 / 只读读取”，**不得称为回放**；`capabilities.replay` 在 S1 保持 `false`。
+  存在性（S1 历史）：`/graph`、`/replay`、`/stream`、`/ws/v1/events`、`/links` 未注册路由（请求 404）。
+  **S3 起**：`/replay` 已注册（只读窗口，§6.4）；`/stream`、`/ws/v1/events`、`/links` 仍未注册（404）。
 
-### 6.2 回放（仍预留，S1 不实现）
+### 6.2 回放（S3 已实现，只读；S1/S2 历史为预留）
 
-- 典型形状（DRAFT，见 `api.v1.md` §4.1）：`GET /api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>`。
+- 形状（DRAFT → S3 权威见 `api.v1.md` §9.1）：`GET /api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>`。
 - 回放语义：输入是已有事件流，**不重新执行程序**；不调用 demo 后端、不发 HTTP 写请求、不触发 SQL。
 - 回放响应不得包含凭据/原始敏感值；脱敏与截断标记原样保留。
+- **S3 起该端点已实现**（只读窗口，0 写），传输层约束见 §6.4；`capabilities.replay=true`，但 `realtime` 仍 `false`。
+  S1/S2 的“未注册 → 404”只作为历史回归注记，不再是当前行为。
 
 ### 6.3 S2 只读请求/图查询（已实现；仍是查询，不是回放）
 
@@ -192,22 +202,49 @@ GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex>
   - **读时派生**：每次请求从内存事件快照现算，无缓存、无持久化、无后台任务；两次相同 GET 结果一致，事件数/`seq`/存储不变。
   - `graph` 的 `traceId` 是**必填**查询参数（`^[0-9a-f]{32}$`），缺失/非法 → `400`；未知 session 或 session 内无该 trace → `404`。
   - 只有 `GET`；写动词 → `405`；无 CORS、无分页、无 `429`；错误用统一信封（§4.3）。
-  - **不是回放**：不重新执行程序、不调用 demo 后端、不发写请求、不触发 SQL、不提供虚拟时钟；`capabilities.replay` 保持 `false`。
+  - **不是回放**：不重新执行程序、不调用 demo 后端、不发写请求、不触发 SQL、不提供虚拟时钟；`capabilities.replay` 在 S2 保持 `false`。
   - **不是实时**：没有 SSE/WebSocket/长连接；工作台的刷新是客户端手动按钮 + 低频轮询（非服务端推送）。
-  - 未注册路由保持 404：`/replay`、`/stream`、`/ws/v1/events`、`/links`。
+  - 未注册路由（S2 历史）：`/replay`、`/stream`、`/ws/v1/events`、`/links` 均 404；**S3 起 `/replay` 已注册**（§6.4）。
 - S2 的 agent 事件仍是 §4.5 第 8 条的游离后端根，并在同一 `traceId` 内带 `service/mapper/sql` 子链（`event-model.v1.md` §5 第 2 条 S2 补充）；
   `requests` 对这类 trace 返回 `confidence="LOST"`，UI 必须标为游离/未归属，不得画成点击链的一环。
+
+### 6.4 S3 回放：已实现、只读、0 写（权威形状见 `api.v1.md` §9.1）
+
+```http
+GET /api/v1/sessions/{sessionId}/replay?fromNs=<int>&toNs=<int>
+→ 200 {"mode":"replay","readOnly":true,"sessionId":"s_...","fromNs":N,"toNs":M,
+       "events":[{"seq":1,"event":{<event-v1>}}]}
+```
+
+- **只读窗口**：`fromNs` 缺省 0；`toNs` 缺省 `max(startNs+durNs)`（空会话 0）；过滤 `fromNs <= startNs <= toNs`；
+  按 `startNs` 升序、同值 `spanId` 字典序；元素与 `/events` 相同（`seq` 在事件之外）。
+- **0 写（硬约束）**：
+  1. 不写事件、不追加存储、不消耗 `seq`、不改写/重排事件、不缓存、不落 DB/文件；
+  2. 不重新执行程序、不调用 demo 后端、不发 HTTP 写请求、不触发 SQL、不建立派生图；
+  3. 回放前后 `sessions`/`events`/`seq` 与 demo H2（订单仍 `CREATED`）不变；回放期间 0 新事件、0 SQL 写；
+  4. 两次相同 GET 响应逐字一致；`mode`/`readOnly` 是契约字段，不授权任何写操作。
+- **参数/错误**：`fromNs`/`toNs` 必须匹配 `^[0-9]+$`、可解析为 64 位有符号整数且 `fromNs<=toNs`，否则 `400 bad_request`；
+  未知 session `404 not_found`；非 GET `405`。判定顺序 400 → 404 → 200（空窗口也是 200 + `events:[]`）。
+- **不是实时**：没有 SSE/WebSocket/长连接、没有服务端播放引擎；工作台时间轴只是客户端按 `toNs` 隐藏未来事件。
+- **不是重跑/重发**：replay 只读已存事件，不产生任何 HTTP 写、SQL 写或新事件；UI 必须常驻“回放不会重发请求/不写数据库”。
+- **不是 S4/S5**：无像素回放、无截图/录像、无详情抽屉/×N、无 sourcemap/局部变量。
+- meta：`capabilities.replay=true`、`realtime=false`、`ingestEvents=true`（键仍 5 个）；`stream`/`ws`/`links` 仍 404。
 
 ## 7. 安全与合规
 
 - 只监听 `127.0.0.1`；无外网访问；无遥测；不上传工作区外数据。
 - 事件内禁止真实客户数据/secret；脱敏在产生端完成（见 `event-model.v1.md` §8）。
 - 错误响应不得回显请求体原文（避免把敏感值写进日志/UI）。
-- S0/S1 均不引入鉴权，也不伪造“已鉴权”；本地 token（短时随机、只存本机）属后续检查点。
+- S0/S1/S2 均不引入鉴权，也不伪造“已鉴权”；本地 token（短时随机、只存本机）属后续检查点。
+- **S3 SDK**：只采集控件身份、URL pathname（去 query/hash）、HTTP 状态码与显式 `uiEffect` 文本；
+  不采集请求/响应体、表单值、cookie、查询串、异常 message/栈；`traceparent`/`X-TraceBoard-Click` 只对同源且非 ingest 请求添加，
+  不写日志原文；ingest 上报自身不携带这两个头。SDK 全部 fail-open，页面行为不因采集失败而改变。
 
 ## 8. 版本化
 
 - 路径带主版本（`/ingest/v1/`、`/api/v1/`）；事件带 `schema=traceboard.event.v1`。
 - 兼容性原则：新增可选字段需契约变更；语义变更必须升主版本并保留旧路径一个检查点。
-- S0/S1/S2 的所有“预留”端点不得以“已实现”名义写进 README/报告；状态以 `api.v1.md` §2.2（S2 当前）、§2.1（S1 历史）与 §2（S0 历史）为准。
-- S1/S2 的“会话查询 / 请求摘要 / 派生图”≠“回放”：README/报告/UI 不得把 `GET /api/v1/sessions*` 描述为回放。
+- S0/S1/S2/S3 的所有“预留”端点不得以“已实现”名义写进 README/报告；状态以 `api.v1.md` §2.3（S3 当前）、§2.2（S2 历史）、
+  §2.1（S1 历史）与 §2（S0 历史）为准。
+- “会话查询 / 请求摘要 / 派生图”**≠ 回放**：README/报告/UI 不得把 `GET /api/v1/sessions*` 描述为回放。
+  **S3 起** `GET .../replay` 才是回放，但它仍是**只读窗口**，不是实时、不是重跑、不是写；`capabilities.realtime` 必须保持 `false`。

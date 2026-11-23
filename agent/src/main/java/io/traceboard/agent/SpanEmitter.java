@@ -6,20 +6,22 @@ import java.util.Locale;
 /**
  * Builds ONE schema-valid span event per instrumented call and hands it to the async sender.
  *
- * <p>Field contract: s2-plan.md 7.3/7.4 and fixtures/s2-zero-row-chain/events.ndjson.
- * Runtime chain (S2): controller root (isolated backend request: {@code parentSpanId=null},
- * {@code confidence=LOST}, {@code rootEventId=click_lost_<spanId>}, flags
- * {@code S2_ZERO_ROW_CHAIN} + {@code LOST_BACKEND}) with service/mapper/sql children that inherit
- * the trace, root event and {@code LOST} confidence. No secrets, no argument values, no exception
- * payload, no {@code values[]}.</p>
+ * <p>Field contract: s2-plan.md 7.3/7.4, event-model.v1.md §12.4 and
+ * fixtures/s3-frontend-facts/case-a-joined-chain/events.ndjson. Runtime chain (S3): when the
+ * controller reads valid {@code traceparent}/{@code X-TraceBoard-Click} headers it adopts the
+ * frontend trace ({@code traceId}/{@code parentSpanId}/rootEventId=clickId}, {@code confidence=EXACT},
+ * flag {@code S3_EXACT_LINK}, no {@code LOST_BACKEND}); without headers the S2 isolated backend root
+ * is emitted verbatim ({@code parentSpanId=null}, {@code confidence=LOST}, {@code rootEventId=click_lost_<spanId>},
+ * flags {@code S2_ZERO_ROW_CHAIN} + {@code LOST_BACKEND}). Children inherit trace/root/confidence.
+ * No secrets, no argument values, no exception payload, no {@code values[]}.</p>
  */
 public final class SpanEmitter {
 
     static final String SCHEMA = "traceboard.event.v1";
     static final String FLAG_CHAIN = "S2_ZERO_ROW_CHAIN";
     static final String FLAG_LOST_BACKEND = "LOST_BACKEND";
+    static final String FLAG_EXACT_LINK = "S3_EXACT_LINK";
 
-    private static final String CONFIDENCE_LOST = "LOST";
     private static final int MAX_RETURN_TYPE_CHARS = 64;
 
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -27,8 +29,14 @@ public final class SpanEmitter {
     private static volatile boolean enabled;
     private static String sessionId = AgentConfig.DEFAULT_SESSION_ID;
     private static String fixedTraceId;
-    private static long premainNanos;
     private static EventSender sender;
+
+    /**
+     * Clock anchor (see {@link #epochNanos()}). Captured once at premain; wall-clock milliseconds
+     * plus the monotonic {@code System.nanoTime()} delta.
+     */
+    private static volatile long clockBaseMillis;
+    private static volatile long clockBaseNanos;
 
     private SpanEmitter() {
     }
@@ -37,7 +45,8 @@ public final class SpanEmitter {
      * Called once from premain. Any failure keeps the emitter disabled (fail-open).
      */
     static void init(AgentConfig config) {
-        premainNanos = System.nanoTime();
+        clockBaseNanos = System.nanoTime();
+        clockBaseMillis = System.currentTimeMillis();
         sessionId = config.sessionId();
         fixedTraceId = config.traceId();
         sender = new EventSender(config.ingestUrl());
@@ -48,8 +57,32 @@ public final class SpanEmitter {
         return enabled;
     }
 
-    static long premainNanos() {
-        return premainNanos;
+    /**
+     * S3 clock (event-model.v1.md §12.10 intent: epoch nanoseconds on one machine, monotonic
+     * within the process, durations from the monotonic delta).
+     *
+     * <p>Deviation recorded for S3: the literal formula
+     * {@code currentTimeMillis()*1e6 + nanoTime()%1e6} is not monotonic on JDK8/Windows because
+     * {@code currentTimeMillis()} only advances every ~2 ms here while the nanosecond remainder
+     * wraps every 1 ms (measured: a mapper start landed 434 us before its controller start).
+     * The anchor keeps the same wall-clock epoch and the same monotonic sub-millisecond part but
+     * derives the latter from the elapsed {@code nanoTime} delta, so parent/child ordering and
+     * interval containment hold. No NTP/offset correction; single machine only.</p>
+     */
+    static long epochNanos() {
+        long baseMillis = clockBaseMillis;
+        long baseNanos = clockBaseNanos;
+        if (baseMillis == 0L || baseNanos == 0L) {
+            synchronized (SpanEmitter.class) {
+                if (clockBaseMillis == 0L || clockBaseNanos == 0L) {
+                    clockBaseNanos = System.nanoTime();
+                    clockBaseMillis = System.currentTimeMillis();
+                }
+                baseMillis = clockBaseMillis;
+                baseNanos = clockBaseNanos;
+            }
+        }
+        return baseMillis * 1_000_000L + (System.nanoTime() - baseNanos);
     }
 
     static String fixedTraceId() {
@@ -113,8 +146,14 @@ public final class SpanEmitter {
                 json.append("\"sideEffects\":").append(sideEffectsJson).append(',');
             }
 
-            appendStringField(json, "confidence", CONFIDENCE_LOST).append(',');
+            String confidence = (frame.confidence != null)
+                    ? frame.confidence : SpanContext.CONFIDENCE_LOST;
+            appendStringField(json, "confidence", confidence).append(',');
             json.append("\"flags\":[");
+            if (frame.exactLink) {
+                appendQuoted(json, FLAG_EXACT_LINK);
+                json.append(',');
+            }
             appendQuoted(json, FLAG_CHAIN);
             if (frame.root) {
                 json.append(',');
