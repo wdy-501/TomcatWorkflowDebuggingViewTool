@@ -187,8 +187,9 @@ node.exe 32832（父 36384）/ 50100（父 32832）——均为 IDE node 的子�
 
 | 项 | 值 |
 |---|---|
-| 基线 commit | `chore(S0): baseline — contracts, skeleton, fixture, tests`（哈希见下方追加行） |
-| tag | `s0-baseline`（annotated 关闭，lightweight） |
+| 基线 commit | `chore(S0): baseline — contracts, skeleton, fixture, tests` |
+| 基线 commit 哈希 | `041899370a07624a7a35880fce43d233ccbbb2dd`（`s0-baseline` 指向同一 commit） |
+| tag | `s0-baseline`（lightweight，指向 `0418993`；G2 已验证 `git cat-file -t` = commit） |
 | 后续 commit | `docs(S0): record baseline commit`（仅 `acceptance.md`、`progress.md`，不改历史、不 amend） |
 | push | 未执行（无 remote，禁止 push/force/rebase） |
 | git 身份 | 仅本次提交用 `-c user.name="TraceBoard" -c user.email="traceboard@localhost"`，未改任何 git config |

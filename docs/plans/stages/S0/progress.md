@@ -14,7 +14,7 @@ EVIDENCE:
 - 冒烟：collector 8601 health=UP / meta schema id 正确 / ingest=501；demo 8080 orders=200（CREATED）/ cancel={"data":true} / 未知 id=404；停后端口无残留
 - agent：major version 52，Premain-Class=io.traceboard.agent.TraceAgent（noop premain）
 - 浏览器证据：evidence/workbench-s0.png（10:40）、evidence/demo-s0.png（10:41），orchestrator 浏览器会话 2026-11-23；G2 已查验：workbench 9 事件 + 5 条事实卡 + S1 占位；demo 原始 JSON + 操作成功
-- 基线：commit "chore(S0): baseline — contracts, skeleton, fixture, tests" + tag s0-baseline（哈希见下方追加行）
+- 基线：commit "chore(S0): baseline — contracts, skeleton, fixture, tests" = 0418993 + tag s0-baseline（完整哈希见下方“基线记录”）
 
 CHANGED:
 - 新增（本检查点全量）：根 pom.xml reactor（agent + server/collector）、agent noop 骨架、collector 骨架（health/meta/ingest 501）、demo buggy-shop-boot-vue（Boot 2.7.18/JDK8 + Vue3 前端）、workbench AppShell（Vue3+TS+Vite+Pinia）、schema v1、四份契约、case A fixture、tools/verify、S0 计划/评审/测试报告
@@ -35,6 +35,5 @@ NEXT: S1（walking skeleton）——需新的分发书授权；本进度包不�
 
 ## 基线记录
 
-- 基线 commit：见 `acceptance.md` §8 与下方追加行。
-- tag：`s0-baseline`
-- 归档：`docs/plans/archive/stage-S0-2026-11-23/`（MANIFEST.md + SUMMARY.md）
+- 基线 commit：`041899370a07624a7a35880fce43d233ccbbb2dd`（`chore(S0): baseline — contracts, skeleton, fixture, tests`），tag `s0-baseline` 指向同一 commit。
+- 归档：`docs/plans/archive/stage-S0-2026-11-23/`（MANIFEST.md + SUMMARY.md；归档为提交前快照，不含上述哈希行）
