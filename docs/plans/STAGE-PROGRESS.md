@@ -1,7 +1,7 @@
 # TraceBoard 阶段进度看板（S0–S10）
 
 > 更新时间：2026-11-23｜最新已验收：S4（`s4-baseline`）｜S5：🟡 收尾中
-> 最近门禁：S0–S5 全量 **70 PASS / 0 FAIL**（source-cache 优化前）；source-cache 后 perf 复测 ratio **1.29**（仍 >1.25 WARN），全量需复跑
+> 最近门禁：S0–S5 全量 **70 PASS / 0 FAIL**（source-cache 后已复跑，`S5 TEST (full S0–S5): PASS`）；perf ratio **1.29**（>1.25 WARN）
 > 权威计划：[SOLO-PLAN.md](SOLO-PLAN.md)、[00-master-plan.md](00-master-plan.md)
 > 用途：目标暂停/恢复/换账号后，以本文件 + git tag/阶段备份为准，不依赖聊天上下文。
 > 当前分支：`master`｜最新已验收 tag：`s4-baseline`｜当前阶段：S5（38 个改动未提交）
@@ -15,7 +15,7 @@
 | **S2** | 0 行事实链：H2/MyBatis 真实缺陷 + 4 span agent + requests/graph + 请求切换 | ✅ 已验收 | tag `s2-baseline`；`docs/plans/stages/S2/`；archive `stage-S2-2026-11-23/` |
 | **S3** | 前端事实与回放：runtime SDK + 案例 B 确认没发 + traceparent EXACT + 只读回放 | ✅ 已验收 | tag `s3-baseline`；`docs/plans/stages/S3/`；archive `stage-S3-2026-11-23/` |
 | **S4** | 本地接入与详情：launcher IDEA/JAR、preview/SDK 注入、握手诊断、节点详情/×N/缺口 | ✅ 已验收 | tag `s4-baseline`；`docs/plans/stages/S4/`；archive `stage-S4-2026-11-23/`；61/61 PASS；flake 修复 8/8；浏览器详情/×3/缺口 + preview 注入 |
-| **S5** | L1 与前端浅层：参数/字段、脱敏/截断、sourcemap、Vite/Vue 浅层、性能基线 | 🟡 收尾中 | G1 PASS；L1 values 100→0/redacted/truncated、graph 15 字段、manifest/sourcemap、perf 脚本已完成；S0–S5 全量 70/70（缓存优化前）；source-cache 后 perf 1.29 WARN，全量复跑 + 浏览器 + G2 + 备份/tag 待做 |
+| **S5** | L1 与前端浅层：参数/字段、脱敏/截断、sourcemap、Vite/Vue 浅层、性能基线 | 🟡 收尾中 | G1 PASS；L1 values 100→0/redacted/truncated、graph 15 字段、manifest/sourcemap、perf 脚本完成；**70/70（source-cache 后复跑）**；perf 1.29 WARN；待浏览器 + G2 + 备份/tag |
 | **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | ⬜ 未开始 | 任务 #30；V1 |
 | **S7** | 第二栈：Tomcat WAR/SSM 或 React/Webpack 二选一 | ⬜ 未开始 | 任务 #31；扩展 |
 | **S8** | 第三栈/矩阵：另一栈 + 本地矩阵/兼容报告 | ⬜ 未开始 | 任务 #32；扩展 |
@@ -31,11 +31,11 @@
 | S2 | ✅ | ✅ | ✅ | ✅ demo/agent + collector + workbench | ✅ 42/42 | ✅（S2-AMD-01） | ✅ tag `s2-baseline` |
 | S3 | ✅ | ✅ | ✅ | ✅ SDK/demo + agent + collector + workbench | ✅ 51/51 | ✅ | ✅ tag `s3-baseline` |
 | S4 | ✅ | ✅ | ✅（2 轮 + 终验） | ✅ launcher + handshake/collector + SDK + workbench | ✅ **61/61** | ✅ | ✅ tag `s4-baseline` |
-| S5 | ✅ | ✅ | ✅（1 轮返工） | ✅ L1 demo/agent + 前端 manifest + collector/workbench values | 🟡 70/70（缓存前）；复跑中 | ⏳ | ⏳ |
+| S5 | ✅ | ✅ | ✅（1 轮返工） | ✅ L1 demo/agent + 前端 manifest + collector/workbench values | ✅ **70/70**（缓存后复跑） | ⏳ | ⏳ |
 
 ## 3. 当前验证与质量门
 
-- 一条命令：`cd "tools/verify" && npm ci && node verify.mjs` → 最近全量 **70 PASS / 0 FAIL**（S0–S5，source-cache 优化前；需复跑）。
+- 一条命令：`cd "tools/verify" && npm ci && node verify.mjs` → 全量 **70 PASS / 0 FAIL**（S0–S5，source-cache 优化后已复跑）。
 - S5 已覆盖：demo preview-discount 200/data 0/DB 100；agent values 5（100/[REDACTED len=6]/2048 截断/amount 100→0/return 0）、L1；graph 15 字段；manifest/sourcemap；perf 报告；S0–S4 回归。
 - 性能：`node tools/perf/l1-overhead.mjs` → base p50 ~0.985ms/p95 ~1.818ms，agent p50 ~1.271ms/p95 ~2.143ms，**ratio 1.29**（>1.25 目标，WARN；已加 source 缓存，仍如实记录）。
 - 已修复缺陷：S4 agent span 冷启动嵌套竞态（8/8）；S5 增加 findSource 方法级缓存（行为不变，perf 仍 WARN）。
@@ -44,7 +44,7 @@
 
 ## 4. S5 剩余动作（下一步）
 
-1. ⏳ source-cache 后复跑全量 `node verify.mjs`，确认仍 70/70（含 S5-A..H）。
+1. ✅ source-cache 后复跑全量 `node verify.mjs`：**70/70 PASS**。
 2. ⏳ 浏览器实测：点击 `#btn-discount` → workbench Values 100→0/已脱敏/已截断/L1；案例 B validateForm 的 `App.vue` 行号/source；截图存 `docs/plans/stages/S5/evidence/`。
 3. ⏳ G2：更新 README 为 S5，写 `acceptance.md`/`progress.md`，生成 `docs/plans/archive/stage-S5-2026-11-23/`（MANIFEST/SUMMARY）。
 4. ⏳ 提交 S5 + tag `s5-baseline`；更新本看板；随后 S6（L2/异步；需新分发书）。
