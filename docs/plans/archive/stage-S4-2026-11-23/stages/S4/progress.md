@@ -39,7 +39,7 @@ NEXT: S5（L1 参数/字段、脱敏/截断、sourcemap、Vite/Vue 浅层、性�
 
 ## 基线记录
 
-- 提交：`feat(S4): local onboarding and details — launcher, preview injection, handshake, node details/×N/gaps`
+- 提交：`9d2a507` `feat(S4): local onboarding and details — launcher, preview injection, handshake, node details/×N/gaps`
 - tag：`s4-baseline`
 - 备份：`docs/plans/archive/stage-S4-2026-11-23/`（MANIFEST + SUMMARY）
-- 完整提交哈希：见本文档所在提交后的 `docs(S4): record baseline commit` 与 `git log`。
+- 文档收口提交：见 `docs(S4): record baseline commit` 与 `git log`。

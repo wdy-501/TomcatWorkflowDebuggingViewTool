@@ -54,6 +54,6 @@ S4 在 S0–S3 之上交付了**本地接入**与**节点详情**，且未越过
 
 ## 5. 基线记录
 
-- 提交：`feat(S4): local onboarding and details — launcher, preview injection, handshake, node details/×N/gaps`（哈希见 `progress.md`/git log）。
+- 提交：`9d2a507` `feat(S4): local onboarding and details — launcher, preview injection, handshake, node details/×N/gaps`。
 - tag：`s4-baseline`｜阶段备份：`docs/plans/archive/stage-S4-2026-11-23/`（MANIFEST + SUMMARY）。
 - 下一步：S5（L1 参数/字段、脱敏/截断、sourcemap、Vite/Vue 浅层、性能基线）。
