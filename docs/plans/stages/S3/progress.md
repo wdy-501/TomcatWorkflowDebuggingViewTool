@@ -83,7 +83,7 @@ NEXT: S4（本地启动器 / IDEA / JAR 接入 / 节点详情 / ×N 等）— �
 
 ## 基线记录
 
-- 基线 commit：`（提交后由 G2 追加）`（`feat(S3): frontend facts and read-only replay — SDK, case B, traceparent join, timeline`；tag `s3-baseline` 指向同一 commit）
+- 基线 commit：`5ddb68876eb76f72c44297338da7968a408eaa5f`（`feat(S3): frontend facts and read-only replay — SDK, case B, traceparent join, timeline`；tag `s3-baseline` 指向同一 commit）
 - tag：`s3-baseline`（指向同一 commit）
 - 后续 commit：`docs(S3): record baseline commit`（仅 `acceptance.md`、`progress.md`）
 - 归档：`docs/plans/archive/stage-S3-2026-11-23/`（提交前快照；SHA256 与恢复方法见其 `MANIFEST.md`）

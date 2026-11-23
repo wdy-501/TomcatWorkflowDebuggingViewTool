@@ -230,7 +230,7 @@ G2 收尾：继续无 java/无监听；提交前工作区仅 S3 产品/测试/�
 | 项 | 值 |
 |---|---|
 | 基线 commit | `feat(S3): frontend facts and read-only replay — SDK, case B, traceparent join, timeline` |
-| 基线 commit 哈希 | `（提交后由 G2 追加）` |
+| 基线 commit 哈希 | `5ddb68876eb76f72c44297338da7968a408eaa5f`（`s3-baseline` 指向同一 commit） |
 | tag | `s3-baseline`（lightweight，指向基线 commit） |
 | 后续 commit | `docs(S3): record baseline commit`（仅 `acceptance.md`、`progress.md`；不 amend） |
 | 归档 | `docs/plans/archive/stage-S3-2026-11-23/`（提交前快照；MANIFEST 记 SHA256 与恢复方法） |
