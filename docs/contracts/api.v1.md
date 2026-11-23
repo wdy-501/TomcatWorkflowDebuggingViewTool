@@ -1,6 +1,6 @@
 # HTTP API 契约 v1（api.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24；S4 增补：2026-11-24；S4-AMD-01：2026-11-26，日期笔误按 2026-11-23 生效；S5 增补：2026-11-27）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24；S3 增补：2026-11-24；S4 增补：2026-11-24；S4-AMD-01：2026-11-26，日期笔误按 2026-11-23 生效；S5 增补：2026-11-27；S6a 增补：2026-11-23）
 > 变更记录：**2026-11-23 S1 增补**——ingest 与两个只读查询转为 IMPLEMENTED，meta `capabilities.ingestEvents=true`；
 >   S0 的矩阵/端点章节按原样保留为历史（§2、§3、§4、§6），S1 当时权威定义在 **§7**。graph/replay/stream/links 当时仍为 RESERVED。
 >   **2026-11-23 G1 第 1 轮**：§7.5 补一句“agent controller span 为游离后端根”，指向 `event-model.v1.md` §5 第 2 条例外（仅文档）。
@@ -29,6 +29,14 @@
 >   demo 侧新增 `POST /api/orders/{id}/preview-discount`（**demo 应用 API**，非 collector 路由，附录 D）与其 L1 事实；
 >   前端 manifest/`source`/`SOURCE_MAPPED` 的浏览器侧形状见**附录 E** 与 `docs/guides/frontend-shallow-plugin.md`。
 >   **schema 字节不变**（`values` 自 v1 起就是可选字段，见 `event-model.v1.md` §4.4）；S0–S4 fixture 字节不变。
+>   **2026-11-23 S6a 增补（加性、只读；历史 §2–§10 与附录 A–E 全部保留不改写）**：demo 应用 API 新增
+>   `POST /api/orders/{id}/reconcile`（**附录 F**；任何 id → `200 {"data":[100.0,0.0,100.0]}`，纯计算、无 DB），
+>   demo 前端新增 `#btn-reconcile`；agent 新增 `L2DemoService#reconcileAmount` 的**行级局部变量** L2 采集
+>   （`values` 中 `kind=local` + 1-based `line` + 逐次 `invocation`），一次请求 3 个同 nodeKey service span（×3）。
+>   collector **零改动**：graph 仍固定 **15 字段**（`values` 原样数组，不重算/不排序）、`events/seq/requests/replay`/
+>   meta 5 键/路由数/错误码不变；**schema 字节不变**（`local`/`line`/`invocation` 自 v1 起即合法，见 `event-model.v1.md` §4.4.7）；
+>   S0–S5 fixture 字节不变。S6a **仅** `L2DemoService#reconcileAmount` 一个方法有 L2；异步/无调试信息/循环折叠/
+>   预算/开销属 **S6b**，S6 仍为 partial（不得据此宣称 S6 完成）。
 > 范围：collector HTTP API + demo 应用 API（附录）。**S3 的写入面仍只有 `POST /ingest/v1/events`**，其余 collector 端点全部只读。
 > 关联：`transport.v1.md`（ingest 线上格式与 202/400/413/415、查询通路 C）、`event-model.v1.md`（事件体）。
 
@@ -175,6 +183,29 @@ S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不
 - `values` 的数据来源是**已存事件原值**（采集端已完成脱敏/截断/预算）；collector 不重算、不合并、不裁剪、不排序、不改写（§10.9）。
 - demo 的 `POST /api/orders/{id}/preview-discount` 是 **demo 应用 API**（附录 D），不是 collector 路由；它不改变 collector 契约面，也不新增 collector 能力键。
 - **没有** L2/`kind=local`/对象深采/异步续体/运行时 ×3/SSE/WS/持久化/sourcemap 解码/图库（S6+，见 §11 与附录 E 的“浅层”口径）。
+
+### 2.6 S6a 实现矩阵（当前权威；S0–S5 矩阵保留为历史）
+
+| 方法 | 路径 | S6a 状态 | 说明 |
+|---|---|---|---|
+| GET | `/actuator/health` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/meta` | **IMPLEMENTED** | `capabilities` 仍**恰好 5 键**、取值与 S5 逐字相同（`replay=true`、`realtime=false`）；L2 不是能力开关 |
+| POST | `/ingest/v1/events` | **IMPLEMENTED** | 不变；`values`（含 S6a 的 `kind=local`/`line`/`invocation`）仍只做 schema 校验，不做 L2 语义校验 |
+| POST | `/ingest/v1/agent-hello` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/sessions` | **IMPLEMENTED** | 不变（事件计数仍按行计，不含 `values` 项数） |
+| GET | `/api/v1/sessions/{sessionId}/events` | **IMPLEMENTED** | 不变；`event` 逐字回显（可能含 L2 `values`） |
+| GET | `/api/v1/sessions/{sessionId}/requests` | **IMPLEMENTED** | 不变；reconcile 链 `backendSpanCount=4`（controller + 3 service），S5 链不变 |
+| GET | `/api/v1/sessions/{sessionId}/graph?traceId=<32hex>` | **IMPLEMENTED** | **形状零改动**：节点仍固定 **15 字段**（末尾 `values` 原样数组，§8.2/§10.9/§10.10）；同 nodeKey 3 个 service 仍是 3 个节点 |
+| GET | `/api/v1/sessions/{sessionId}/replay?fromNs=&toNs=` | **IMPLEMENTED** | 不变（窗口内事件里的 L2 `values` 原样回显） |
+| GET | `/api/v1/sessions/{sessionId}/agent` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/stream` | RESERVED | SSE 不实现（404） |
+| WS | `/ws/v1/events` | RESERVED | WebSocket 不实现（404） |
+| POST | `/api/v1/sessions/{sessionId}/links` | RESERVED | 手工关联不实现（S6，404） |
+
+- **S6a 不新增 collector 路由**：业务路由仍 **9 条**（meta、ingest、hello、sessions、events、requests、graph、replay、agent），含 `/actuator/health` 共 **10 条**；路径/参数/状态码/错误信封零改动。
+- `events`/`seq`/`requests`/`replay`/meta 与 S5 **逐字一致**；graph 的 15 字段/顺序/排序/边/节点数全部不变，唯一变化是 `values` 数组里可能出现 `kind=local`（采集端完成，collector 原样透传；§10.10）。
+- demo 的 `POST /api/orders/{id}/reconcile` 是 **demo 应用 API**（附录 F），不是 collector 路由；它不改变 collector 契约面，也不新增 collector 能力键。
+- **仍无**：异步续体/线程池/`@Async` 上下文、`NOT_COLLECTED_NO_DEBUG_INFO` 事件/reason/UI、无 LVT 的降级事件、行级字段写入（`kind=field` + 行号）、对象深采、多方法 L2、循环折叠/采样/丢弃预算、L2 开销门槛、SSE/WS/持久化/CORS/鉴权（S6b/S7+，越界即失败）。
 
 ## 3. S0 已实现端点（S0 历史；S1 现状见 §7）
 
@@ -623,6 +654,7 @@ Host: 127.0.0.1:8601
 - S4 加性字段的顺序固定为节点字段末尾：`spanId, parentSpanId, kind, nodeKey, status, return, sideEffects, startNs, durNs, thread, flags, reason, source, confidence`（14 项，每项恒出现）。
 - **S5 起**顺序固定为 `spanId, parentSpanId, kind, nodeKey, status, return, sideEffects, startNs, durNs, thread, flags, reason, source, confidence, values`（**15 项**，每项恒出现；`values` 是唯一新项）。
 - `values` 只描述“该节点对应事件采集到的值级事实”，**不等于** L2：S5 只允许 `param|field|return`，`kind=local`/行级变量属 S6 且 S5 不产生（§10.9）。
+- **S6a（加性、无形状变更）**：`values` 仍是第 15 字段原样数组；S6a 采集端可在 `L2DemoService#reconcileAmount` 的 service 节点上写 `kind=local`（`line` 为 **1-based** 源行、`invocation` 为 1..3），collector 不重算/不合并/不排序/不补默认值（§10.10、`event-model.v1.md` §4.4.7）。
 - `flags` 是**既有**字段（S2 起 11 字段之一），S4 **不改其语义**；`reason/source/confidence` 只来自该节点对应事件，不聚合、不跨节点继承。
 
 **`edges[]`**
@@ -1119,6 +1151,43 @@ thread, flags, reason, source, confidence, values        （15 项，顺序固�
 - `events`/`seq`/`requests`/`replay` 响应形状与字节；400/404/405、ingest 202/400/413/415、hello 200/400/413/415、只读与两次一致；
 - schema 字节、S0–S4 fixture 字节、`transport.v1.md`/`status-semantics.md` 字节（S5 不改传输与状态语义）。
 
+### 10.10 S6a 注记：`values` 中的行级 `local`（加性、只读；形状不变）
+
+> 这是**语义增补**，不是 schema/形状变更：`kind=local`、`line`、`invocation` 自 v1 起就是 `values` 的合法成员
+> （`event-model.v1.md` §4.4；`schema/traceboard.event.v1.json` 未改一个字节）；graph 节点仍固定 15 字段（§8.2），
+> `events`/`seq`/`requests`/`replay`、ingest、hello、meta/路由/错误码全部零改动。
+
+**采集口径（S6a 唯一范围）**
+
+1. 只对 `com.example.shop.service.L2DemoService#reconcileAmount` 一个方法做 LVT 行级探针：方法 enter 开帧；读取 `LocalVariableTable` 的 `local:D`，活性区间按 **inclusive start** 判定（`lvtStart <= offset < lvtStart + lvtLength`，不得跳过调试信息）；在**行边界**（下一行真实指令起点/return 前）插 `recordLocal` 探针，以 jump/return/switch 等跳转结束的源行不插（帧内去重兜底），因此 demo 方法恰 2 个探针（初始化行、`local = 0` 行）；初始化行探针偏移等于 LVT start，必须采到首个 `local` 值（100）；return 前 exit、异常 catch-all 后 `THREW`（`event-model.v1.md` §4.4.7、`s6a-plan.md` §5.4）。
+2. 值项只允许 `kind=local`（`name="local"`、`line` 为 1-based 源行、`from`=帧内上一值（首次 `null`）、`to`=本次值、`invocation`=1..3）；**不出现** `param`/`field`/`return` 值项；方法返回值走事件 `return` 字段。
+3. 一次请求恰 3 个同 nodeKey 的 service span（`parentSpanId`=controller spanId、`startNs` 严格递增）；第 1/3 次各 1 项（`null→100`），第 2 次 2 项（初始化 `null→100` 与坏行 `100→0`）；3 个 span `flags` 含 `L2`（无 `L1`）。
+4. `previous` 只在帧内有效（按 `(frame,name)` 记上一值），同值探针不追加；因此每次调用首项 `from=null`，且**首次观测（`from=null`）不是“值变化”**，仅为后续比较的基线。
+5. 未插桩方法（含 `reconcileBatch`）**不产生** L2 span/值；类/方法/LVT 缺失时 fail-open、不猜、不发假事件（完整无调试信息语义属 S6b）。
+
+**collector 读取口径（只读）**
+
+- 节点 `values` = 事件 `values` 逐字（§10.9 规则 1–8 继续有效）；不重算、不补齐 `line`/`invocation`、不按 `nodeKey` 合并 3 个 span。
+- 同 nodeKey 的 3 个节点仍是 3 个节点；×3 是工作台对已采集 span 的前端聚合，collector 不聚合。
+- `requests.backendSpanCount` 对 reconcile 链为 **4**（1 controller + 3 service）；S5 链不变。
+
+**工作台读取口径（前端只读派生）**
+
+- `#s6-l2-badge` 仅在节点 `flags` 含 `L2` 时显示 `L2`；非 L2 节点不显示、不宣称 L2。
+- L2 节点 `#s5-values` 内 local 行显示 `行号 N` 与 `from → to`（`100 → 0` 高亮）、页脚 `第 2/3 次`；
+  `invocation` 来自 `values[].invocation`，×N 组序号来自同 nodeKey 的已采集 span 分组（两者不混用，S5 规则不变）。
+- ×3 组中的“值变化”判定：`kind ∈ {local, field}` 且 `from !== null && from !== undefined && from !== to`（**首次观测 `from=null` 不算值变化**）；仅第 2 次调用（首个非空 `from` 的 `100 → 0` 项）为真并加 `data-invocation-diff="true"` 与可见 `值变化`，第 1/3 次为假、不加。此条件性由运行时 `values`（第 2 次 2 项）与浏览器 DOM 断言证明，不以 dist 静态字面量代替（`s6a-plan.md` §7/§8 S6A-D）。
+- 文案（逐字）：banner `S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b`；
+  L2 说明 `S6a L2：行级局部变量来自 LVT 探针（样例第 2 次调用 local 100 → 0）；异步/无调试信息/循环折叠/开销属 S6b`；
+  ×N 注记 `×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3`。
+- 非 L2 节点保留 S5 的 `#s5-values` 文案与空态措辞；S5 选择器/徽标/`100 → 0`/`行号未采集` 断言全部保留。
+
+**不变项（S6a 回归清单）**
+
+- graph 15 字段及顺序、`nodes` 排序（`startNs` 升序、同值 `spanId`）、`edges`（`count` 恒 1）、节点数、`rootEventId`、顶层 `confidence`；
+- `events`/`seq`/`requests`/`replay` 响应形状与字节；400/404/405、ingest 202/400/413/415、hello 200/400/413/415、只读与两次一致；
+- schema 字节、S0–S5 fixture 字节、`transport.v1.md`/`status-semantics.md` 字节（S6a 不改传输与状态语义）。
+
 ## 附录 A：demo 应用 API（非 TraceBoard API，S0 历史）
 
 > **S2 起 demo 已改为 H2+MyBatis 并植入 0 行缺陷**：当前权威行为见**附录 B**；本附录保留 S0 内存版历史（不得据此实现 S2）。
@@ -1268,3 +1337,27 @@ curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/graph?traceId=<32hex>"  
 - 这是 **F1/F2 浅层**（函数/文件/行号）：**没有**局部变量、没有行级变量表、没有对象深采（L2/S6）；不改 schema、不新增事件类型/枚举。
 - `build.sourcemap=true` 只让 demo 构建产出 `dist/*.map` 供浏览器 devtools；**不提交、不上传、不解析**，SDK 不读。
 - 详细设计、扫描规则、限制与排障见 `docs/guides/frontend-shallow-plugin.md`。
+
+## 附录 F：S6a demo L2（`reconcile`；非 TraceBoard API）
+
+> 这是 demo 应用为 S6a 新增的**演示端点**，不是 collector 路由，也不改变 collector 契约面。
+> dispatch-s6a §5.1 将本附录写作“附录 E”，但 E 已被 S5 前端浅层占用（历史不改写）；S6a 的 demo 附录编号为 **F**，内容与 dispatch §3/§4 一致（计划偏离 D1，见 `s6a-plan.md` §13）。
+> 它故意用 `invocation == 2` 把局部变量 `local` 从 100 写成 0，用来演示 L2 行级 `100 → 0` 与逐次 ×3（主计划 §2.3/§8.5/§9.1/§16 T6）。
+
+| 方法 | 路径 | 响应 | 行为 |
+|---|---|---|---|
+| POST | `/api/orders/{id}/reconcile` | `200 {"data":[100.0,0.0,100.0]}` | `L2DemoService#reconcileBatch(id)` 循环 3 次调用 `reconcileAmount(id, 100.0, i)`；id 不查库、无日志 |
+| POST | `/api/orders/{id}/reconcile`（未知 id，如 `999`） | `200 {"data":[100.0,0.0,100.0]}` | 纯计算：id 不参与业务，形状与已知 id 完全相同 |
+
+- **精确口径（不得按“直觉 REST”改）**：任何 id 都 `200` 且 body 恰为 `{"data":[100.0,0.0,100.0]}`（`data` 为 3 个浮点数，Jackson 输出 `100.0`/`0.0`）；
+  **不返回 404 / `{"data":-1}` / `null`**；纯计算、**无 DB 读写**（不 `SELECT`/`UPDATE`）。
+- **不新增其它 API**：`GET /api/orders`、`POST /api/orders/{id}/cancel`、`POST /api/orders/{id}/preview-discount` 的方法/状态码/事实一字不改（附录 B/D 继续有效）；不新增其它 demo 端点。
+- 服务实现（`com.example.shop.service.L2DemoService`，**独立于 `OrderService`**，见 `s6a-plan.md` §4）：
+  `double reconcileAmount(long id, double amount, int invocation)`：`local = amount`；`invocation == 2` 时 `local = 0.0d`；`return local`（id 不使用、无日志、无 DB）；
+  `List<Double> reconcileBatch(long id)`：`i=1..3` 调 `reconcileAmount(id, 100.0d, i)`，返回 `[100.0,0.0,100.0]`；**`reconcileBatch` 不插桩**，不产生 span。
+- 前端：固定值按钮 `#btn-reconcile`（普通 click 处理函数，**不用 `wrapFn`**）→ `POST /api/orders/1/reconcile`，页面展示响应原文；
+  **不调用** `loadOrders`，不改变案例 A/B/L1 的 DOM/函数/请求。
+- 运行时 L2 事实（S6A-C 断言口径；离线 fixture 形状见 `fixtures/s6-l2-lines/`）：一次请求恰 3 个 `L2DemoService#reconcileAmount` service span
+  （同 nodeKey、parent=controller、`startNs` 严格递增、`return` 100/0/100、flags 含 `L2`）；第 1/3 次各 1 项 local（`null→100`），第 2 次 2 项（`null→100` 与坏行 `100→0`）；
+  `values` 行号由测试从 `L2DemoService.java` 源码重算，不硬编码；agent 的 LVT 探针/帧设计见 `s6a-plan.md` §5。
+- **不是 S6b**：本附录不承诺异步续体、无调试信息降级事件、行级字段写入、对象深采、多方法 L2、循环折叠/采样/预算或 L2 开销门槛。

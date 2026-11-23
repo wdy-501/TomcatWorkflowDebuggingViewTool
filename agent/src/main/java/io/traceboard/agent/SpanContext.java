@@ -17,8 +17,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * reflection; valid headers make it an EXACT child of the SDK fetch ({@code parentSpanId=<header
  * parent-id>}, {@code rootEventId=<clickId>}, no {@code LOST_BACKEND}), while missing/invalid
  * headers keep the verbatim S2 isolated LOST root. Children inherit trace/root/confidence and
- * point at the stack top. Span start times are epoch nanoseconds (§12.10). Every method is
- * fail-open: any {@code Throwable} is swallowed and the host application is never affected.</p>
+ * point at the stack top. Span start times are epoch nanoseconds (§12.10).</p>
+ *
+ * <p>S6a adds ONE line-level entry point: the dedicated ASM transformer (not Byte Buddy) injects
+ * {@link #enterL2(long)}, {@link #recordLocal(int, String, double)} and {@link #exitL2(long, double)}
+ * around {@code L2DemoService#reconcileAmount}, and {@link #enterReconcileController(long)} opens
+ * the reconcile controller span.</p>
+ *
+ * <p>Every method is fail-open: any {@code Throwable} is swallowed and the host application is
+ * never affected.</p>
  */
 public final class SpanContext {
 
@@ -52,6 +59,13 @@ public final class SpanContext {
     static final String PREVIEW_SERVICE_METHOD = "previewDiscount";
     static final String MYBATIS_PACKAGE_PREFIX = "org.apache.ibatis";
 
+    /** S6a: the single L2-instrumented class/method (ASM transformer, never Byte Buddy). */
+    static final String L2_CLASS = "com.example.shop.service.L2DemoService";
+    static final String L2_METHOD = "reconcileAmount";
+    static final String L2_SERVICE_NODE_KEY = L2_CLASS + "#" + L2_METHOD;
+    /** S6a: the reconcile controller span (Byte Buddy advice, EXACT header join like S3/S5). */
+    static final String RECONCILE_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#reconcile";
+
     private static final int MAX_DEPTH = 64;
     private static final String MAPPED_STATEMENT_FIELD = "mappedStatement";
 
@@ -66,6 +80,8 @@ public final class SpanContext {
     private static final AtomicLong RESET = new AtomicLong();
     private static final AtomicLong HTTP_UNREADABLE = new AtomicLong();
     private static final AtomicLong SQL_FILTER_UNREADABLE = new AtomicLong();
+    private static final AtomicLong L2_NO_PARENT = new AtomicLong();
+    private static final AtomicLong L2_ORPHAN = new AtomicLong();
 
     private SpanContext() {
     }
@@ -91,6 +107,16 @@ public final class SpanContext {
         final java.util.List<String> extraFlags = new java.util.ArrayList<String>();
         /** S5: value facts skipped as non-scalar/unreadable, reported as {@code L1_SKIPPED=<n>}. */
         int skipped;
+        /** S6a: true only on the L2 service frame opened by {@link #enterL2(long)}. */
+        boolean l2;
+        /** S6a: 1..3 call index inside the parent controller frame (reset per request). */
+        int invocationIndex;
+        /** S6a: frame-local previous value per local name (never {@code (frame,line,name)}). */
+        final java.util.Map<String, Double> l2Previous = new java.util.HashMap<String, Double>();
+        /** S6a: line-level facts (line + invocation), emitted only on an L2 span. */
+        final java.util.List<L2Values.Item> l2Values = new java.util.ArrayList<L2Values.Item>();
+        /** S6a: per-nodeKey call counter owned by a controller frame (the ×3 index source). */
+        final java.util.Map<String, Integer> childCallCounts = new java.util.HashMap<String, Integer>();
 
         Frame(String kind, String nodeKey, String spanId, String traceId, String rootEventId,
               String parentSpanId, long startNs, boolean root, String confidence, boolean exactLink) {
@@ -329,6 +355,154 @@ public final class SpanContext {
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    // ---------------------------------------------------------------- L2 service (S6a)
+
+    /**
+     * S6a {@code L2DemoService#reconcileAmount}: opens the L2 service frame under the CURRENT
+     * controller frame and assigns the 1..3 invocation index from that parent frame (so the index
+     * resets per request and never depends on a global counter). No controller parent, no frame:
+     * the call is counted as {@code l2_no_parent} and no span is fabricated.
+     *
+     * <p>Called from ASM-injected bytecode, therefore {@code public static}.</p>
+     */
+    public static void enterL2(long enterNs) {
+        try {
+            if (!SpanEmitter.isEnabled()) {
+                return;
+            }
+            ArrayDeque<Frame> stack = STACK.get();
+            Frame parent = stack.peek();
+            if (parent == null || !KIND_CONTROLLER.equals(parent.kind) || parent.traceId == null) {
+                countL2NoParent();
+                return;
+            }
+            int index = 1;
+            Integer seen = parent.childCallCounts.get(L2_SERVICE_NODE_KEY);
+            if (seen != null) {
+                index = seen.intValue() + 1;
+            }
+            parent.childCallCounts.put(L2_SERVICE_NODE_KEY, Integer.valueOf(index));
+            Frame frame = new Frame(KIND_SERVICE, L2_SERVICE_NODE_KEY, SpanEmitter.randomHex(8),
+                    parent.traceId, parent.rootEventId, parent.spanId,
+                    SpanEmitter.epochNanosFrom(enterNs), false, parent.confidence, false);
+            frame.l2 = true;
+            frame.invocationIndex = index;
+            frame.extraFlags.add(SpanEmitter.FLAG_L2);
+            stack.push(frame);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /**
+     * Boxed probe entry injected by the ASM transformer (local value already boxed by
+     * {@code Double.valueOf}). Delegates to {@link #recordLocal(int, String, double)}.
+     */
+    public static void recordLocal(int line, String name, Object value) {
+        try {
+            if (!(value instanceof Number)) {
+                return;
+            }
+            recordLocal(line, name, ((Number) value).doubleValue());
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /**
+     * S6a line probe. Only the top L2 frame is touched. {@code previous} is kept per
+     * {@code (frame,name)}: the first observation appends {@code from=null} and an unchanged value
+     * appends nothing (so the init line probe of invocations 1/3 yields exactly one item).
+     */
+    public static void recordLocal(int line, String name, double value) {
+        try {
+            if (!SpanEmitter.isEnabled() || line <= 0 || name == null || !L1Values.isFinite(value)) {
+                return;
+            }
+            ArrayDeque<Frame> stack = STACK.get();
+            Frame top = stack.peek();
+            if (top == null || !top.l2) {
+                return;
+            }
+            Double previous = top.l2Previous.get(name);
+            if (previous != null && Double.compare(previous.doubleValue(), value) == 0) {
+                return;
+            }
+            top.l2Values.add(new L2Values.Item(name, L2Values.KIND_LOCAL, line,
+                    (previous == null) ? null : L1Values.formatDouble(previous.doubleValue()),
+                    L1Values.formatDouble(value), top.invocationIndex));
+            top.l2Previous.put(name, Double.valueOf(value));
+        } catch (Throwable ignored) {
+            // fail-open: a probe must never affect the demo request
+        }
+    }
+
+    /** S6a normal exit: pops the top L2 frame and emits {@code OK} with the real returned value. */
+    public static void exitL2(long enterNs, double returned) {
+        try {
+            Frame frame = popL2Frame();
+            if (frame == null) {
+                return;
+            }
+            String valuesJson = L2Values.toValuesJson(frame);
+            SpanEmitter.emit(frame, duration(enterNs), "OK", "double",
+                    L1Values.formatDouble(returned), null,
+                    findSource(L2_CLASS, frame.nodeKey), valuesJson);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /** S6a exceptional exit: {@code THREW} with no fabricated return, collected values kept. */
+    public static void exitL2Threw(long enterNs) {
+        try {
+            Frame frame = popL2Frame();
+            if (frame == null) {
+                return;
+            }
+            String valuesJson = L2Values.toValuesJson(frame);
+            SpanEmitter.emit(frame, duration(enterNs), "THREW", null, null, null,
+                    findSource(L2_CLASS, frame.nodeKey), valuesJson);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /**
+     * Pops only when the stack top really is the L2 frame (peek before poll), so a missing parent
+     * frame can never pop the controller.
+     */
+    private static Frame popL2Frame() {
+        if (!SpanEmitter.isEnabled()) {
+            return null;
+        }
+        ArrayDeque<Frame> stack = STACK.get();
+        Frame top = stack.peek();
+        if (top == null) {
+            countL2Orphan("empty");
+            return null;
+        }
+        if (!top.l2) {
+            countL2Orphan(top.kind);
+            return null;
+        }
+        stack.poll();
+        if (stack.isEmpty()) {
+            STACK.remove();
+        }
+        return top.traceId == null ? null : top;
+    }
+
+    /** S6a {@code OrderController#reconcile} controller span (same header join rules as S3/S5). */
+    public static void enterReconcileController(long enterNs) {
+        enterController(enterNs, RECONCILE_CONTROLLER_NODE_KEY);
+    }
+
+    /** S6a reconcile controller exit: {@code ResponseEntity} 200, no {@code values}. */
+    public static void exitReconcileController(long enterNs, Object returned, Throwable thrown) {
+        exitController(enterNs, returned, thrown);
     }
 
     // ---------------------------------------------------------------- mapper
@@ -589,6 +763,22 @@ public final class SpanContext {
         long n = SQL_FILTER_UNREADABLE.incrementAndGet();
         if (n == 1L || n % 100L == 0L) {
             TraceAgent.log("sql_statement_unreadable=" + n);
+        }
+    }
+
+    /** S6a: a call without a controller parent is skipped (never a fabricated LOST child span). */
+    private static void countL2NoParent() {
+        long n = L2_NO_PARENT.incrementAndGet();
+        if (n == 1L || n % 100L == 0L) {
+            TraceAgent.log("l2_no_parent=" + n);
+        }
+    }
+
+    /** S6a: an unmatched L2 exit is counted and emits nothing (stack stays consistent). */
+    private static void countL2Orphan(String detail) {
+        long n = L2_ORPHAN.incrementAndGet();
+        if (n == 1L || n % 100L == 0L) {
+            TraceAgent.log("l2_orphan=" + n + " top=" + detail);
         }
     }
 }

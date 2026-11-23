@@ -1,6 +1,6 @@
 # 事件模型 v1（event-model.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S3 增补：2026-11-24；S4 增补：2026-11-24；S5 增补：2026-11-27）｜作者：plan-writer（S0）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S3 增补：2026-11-24；S4 增补：2026-11-24；S5 增补：2026-11-27；S6a 增补：2026-11-23）｜作者：plan-writer（S0）
 > 变更记录：**2026-11-23 S1 增补（G1 第 1 轮返工）**——§2/§5/§7/§9/§11 记录“游离后端根（isolated backend request）”这一**唯一例外**
 >   （`parentSpanId=null` + `kind=controller` + `confidence=LOST` + 合成 `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）。
 >   **仅文档修订：schema 与 fixture 字节未变。**
@@ -18,6 +18,12 @@
 >   并新增 flag `L1`/`SOURCE_MAPPED`/`VALUES_CAPPED=<n>`/`L1_SKIPPED=<n>`（§7）、脱敏/截断/预算口径（§4.4/§8）、
 >   前端 manifest 的 `source` 语义（§12.11，**不是** `.map` 解码）。**`kind=local`、行级变量、对象深采、异步续体、运行时 ×3 仍属 S6，S5 不产生。**
 >   **schema 字节不变**（`values` 自 v1 起就是可选字段，`items` 已含 `param|field|return`；S5 未新增任何字段/枚举/约束）。
+>   **2026-11-23 S6a 增补（仅语义，无字段/枚举/约束变更）**：`values[]` 首次使用 `kind=local`——S6a 只对
+>   `com.example.shop.service.L2DemoService#reconcileAmount` 一个方法做 LVT 行级探针（§4.4.7）：`line` 为 **1-based 源行**、
+>   `from`→`to` 为帧内上一值→本次值（每次调用首项 `from=null`）、`invocation` 为父 controller 帧内逐次序号（1..3，每请求重置）；
+>   新增 flag `L2`（仅该 service span；§7）。**`kind=local` 不得出现在任何未插桩方法上**；异步续体/线程池/`CompletableFuture`/`@Async`、
+>   `NOT_COLLECTED_NO_DEBUG_INFO` 事件/reason/UI、无 LVT 的降级事件、行级字段写入、对象深采、多方法选择、循环折叠/采样/丢弃预算、
+>   L2 开销门槛仍属 **S6b**，S6a 不产生也不宣称。**schema 字节不变**（`local`/`line`/`invocation` 自 v1 起即合法）。
 > 机器可校验版本：`schema/traceboard.event.v1.json`（JSON Schema 2020-12，`$id=urn:traceboard:schema:event:v1`）
 > 语义来源：主计划 §13.4 / §2.3 / §8.3 / §9.2；分发书 §4.1。本文与 schema 冲突时以 schema 为机器事实、以本文为语义解释。
 
@@ -212,6 +218,46 @@
 - SQL 文本与 SQL 参数（§4.5 不变）。
 - 请求/响应体、HTTP 头、cookie、表单值、查询串。
 
+#### 4.4.7 S6a 语义：`kind=local` 行级局部变量（唯一方法：`L2DemoService#reconcileAmount`）
+
+| 项 | S6a 精确口径 |
+|---|---|
+| 范围 | 仅 `com.example.shop.service.L2DemoService#reconcileAmount(long,double,int)` 一个方法（LVT 探针）；其它方法（含 `reconcileBatch`）无 L2、无值项 |
+| `name` | 恒 `local`（LVT 中名为 `local`、描述符 `D` 的变量；找不到即整类不插桩、fail-open，不猜名） |
+| 探针 | 读 `LocalVariableTable`（不得跳过调试信息），活性区间 **含 start**（`lvtStart <= offset < lvtStart + lvtLength`）；在行边界（下一行真实指令起点/return 前）插探针，以 jump/return/switch 结束的行不插，帧内去重兜底；初始化行探针偏移 = LVT start，必须采到首个值（100）；demo 方法恰 2 个探针（初始化行与 `local = 0` 行）；行号示例 22/24 仅为示意，测试重算 |
+| `kind` | 恒 `local`；L2 span **不出现** `param`/`field`/`return` 值项（方法返回值走事件 `return` 字段；入参不采；S6a 不采行级字段写入） |
+| `line` | **1-based 源行号**（探针执行所在行；来自 LVT/行表，不是 `source.line`）；第 1/3 次为初始化行，第 2 次第二项为 `local = 0` 行 |
+| `from` | 帧内**上一值**；每次调用首项恒 `null`；坏行项为 `100` |
+| `to` | 探针读到的当前值；第 1/3 次 `100`，第 2 次第二项 `0` |
+| `invocation` | 1..3，父 controller 帧内同 nodeKey 的调用序号（每请求重置）；S6a 恒出现 |
+| 去重 | `previous` 按 `(frame,name)` 保存：**帧内首次探针或值变化才追加**；同值重复探针不追加（逐行探针不会逐行刷值）。首次观测 `from=null` 只是基线，**不是值变化**（值变化判定用于 UI：`from` 非空且 `from !== to`） |
+| 顺序 | 同一 span 内按探针执行顺序；键序 `name,kind,line,from,to,truncated,redacted,invocation`（项内/事件内键序不属契约） |
+| 标记 | `truncated=false`、`redacted=false`（数字标量、无敏感名）；`L2` 是 span 级 flag（§7），不是值项字段 |
+| 预算 | S6a demo 每 span ≤2 项，不触发 `VALUES_CAPPED`/`L1_SKIPPED`；循环折叠/采样/丢弃预算属 S6b |
+
+**S6a 精确形状（三次调用，同一 nodeKey；示例行号 22/24 为 demo 源码示意）**
+
+```json
+[
+ {"name":"local","kind":"local","line":22,"from":null,"to":100,"truncated":false,"redacted":false,"invocation":1}
+]
+[
+ {"name":"local","kind":"local","line":22,"from":null,"to":100,"truncated":false,"redacted":false,"invocation":2},
+ {"name":"local","kind":"local","line":24,"from":100,"to":0,"truncated":false,"redacted":false,"invocation":2}
+]
+[
+ {"name":"local","kind":"local","line":22,"from":null,"to":100,"truncated":false,"redacted":false,"invocation":3}
+]
+```
+
+- 行号 22/24 只是示意；运行/测试以 `L2DemoService.java` 重新计算的两行（初始化行、`local = 0` 行）为准，禁止硬编码。
+- span 级：`kind=service`、`nodeKey=com.example.shop.service.L2DemoService#reconcileAmount`、`return={"type":"double","value":100|0}`、
+  `status=OK`（THREW 时不编造 return）、`flags` 含 `S2_ZERO_ROW_CHAIN` + `L2`（无 `L1`；service 子 span 不带 `S3_EXACT_LINK`）、
+  `confidence` 继承 controller（有合法头 `EXACT`；无 controller 父帧不 emit，不伪造 LOST 子 span）、`source` 来自 JVM 栈（`L2DemoService.java:<line>`）。
+- **不猜**：类/方法/LVT 缺失 → 原始字节（不插桩）、无事件、无假值，日志计数 `l2_no_method`/`l2_no_lvt` 并记录静态 `l2Reason=NO_LVT` 供 S6b；
+  S6a **不**产生 `NOT_COLLECTED_NO_DEBUG_INFO` 事件/reason/UI（S6b）。
+- L2 span 上的 `param`/`field`/`return` 值项、行级字段写入、对象深采、多方法 L2、异步续体、循环折叠、采样/丢弃预算与 L2 开销门槛**均属 S6b**，S6a 出现即越界。
+
 ### 4.5 `sideEffects[]`（v1 仅 SQL）
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -265,7 +311,7 @@
 | `DROP_COUNT=<n>` | 会话累计丢弃事件数；`0` 表示未丢弃 | v1 使用，case A 每行携带 |
 | `LOST_BACKEND` | 该 span 是只有后端一端的**游离后端根**（`parentSpanId=null`、`confidence=LOST`、`rootEventId=click_lost_<spanId>`，见 §5 第 2 条例外） | v1 使用（S1 起由 agent 写入） |
 | `SAMPLED` | 本 span 经过采样 | 预留（v1 可写） |
-| `L2` | 该 span 走深度档采集 | 预留（v1 可写） |
+| `L2` | 该 span 走**L2** 行级采集（S6a：仅 `L2DemoService#reconcileAmount` 的 service span；`values` 含行级 `local`，见 §4.4.7） | S6a 使用（agent 写 reconcileAmount service span） |
 | `SKELETON` / `S1_ONE_METHOD` / `S1_WALKING_SKELETON` | S1 walking skeleton 的**阶段标记**（只说明采集范围/来源，不承载关联语义） | 本阶段使用 |
 | `S2_ZERO_ROW_CHAIN` | S2 0 行事实链的**阶段标记**（controller/service/mapper/sql 四点采集；只说明采集范围/来源，不承载关联语义） | 本阶段使用（S2 起由 agent 写入全部 4 个 span） |
 | `SDK_ACTIVE` | 该事件由 runtime SDK 采集（click 根与同 operation 的前端事件）；只说明来源，不承载关联语义 | S3 使用（SDK 写入） |
@@ -277,7 +323,8 @@
 | `L1_SKIPPED=<n>` | 该 span 有 `n` 个非标量/不可读参数或返回值被跳过（未采集） | S5 使用（demo 不触发） |
 
 - flag 是**提示**，不改变 `status`；未知 flag 读取方必须忽略而非报错（但 schema 只允许上述字符集）。
-- `L2` 仍是**预留**：S5 不写 `L2`，也不因写了 `L1` 就暗示 L2 可用（S6）。
+- `L2` 不再是纯预留：S6a 起只写**真实做了** LVT 行级采集的 span（当前仅 `L2DemoService#reconcileAmount`）；
+  未插桩方法不得带 `L2`，也不得因写了 `L1` 就暗示 L2 可用（异步/无调试/折叠/预算由 S6b 扩展）。
 - `SOURCE_MAPPED`/`values` 只在**该事件自身**上说明来源；不从父节点继承，也不按 `nodeKey` 传播。
 - `SKELETON`/`S1_ONE_METHOD`/`S1_WALKING_SKELETON` 是本阶段标记：读取方一律按“未知 flag 忽略”规则处理，不得据此推断关联或能力。
 - 静默丢弃不可接受：任何丢弃都必须以 `DROP_COUNT` 或 `NOT_COLLECTED_LOST + reason` 出现（主计划 §9.2）。
@@ -310,7 +357,10 @@
 纯前端零请求链可被证明；仍无构建插件/sourcemap/行号/局部变量、无 `values`/异常 payload、无 `INFERRED/MANUAL`、无 S4/S5 接入或实时。
 **S4 边界**：S4 只加诊断握手与只读连接状态；事件模型**零改动**（无新事件类型/字段/枚举；`values` 仍不使用）。
 **S5 边界**：S5 起 `values[]` 首次使用（只 `param|field|return`，§4.4），`source` 可由构建 manifest 提供（§12.11）；
-**仍无** L2/`kind=local`/行级变量/对象深采/异常 payload/异步续体/运行时 ×3/`INFERRED`/实时/持久化；schema 字节不变。
+**仍无** L2/`kind=local`/行级变量/对象深采/异常 payload/异步续体/运行时 ×3/`INFERRED`/实时/持久化；schema 字节不变（S5 当时口径）。
+**S6a 边界**：S6a 起 `values[]` 可在**仅** `L2DemoService#reconcileAmount` 的 service span 上使用 `kind=local`（§4.4.7，flag `L2`），
+逐次 `invocation` 1..3；**仍无**异步续体/线程池、`NOT_COLLECTED_NO_DEBUG_INFO` 事件/reason/UI、无 LVT 的降级事件、行级字段写入、
+对象深采、多方法 L2、循环折叠/采样/丢弃预算、L2 开销门槛、其他方法的 L2/×3（S6b）；schema 字节不变。
 
 ## 10. 变更流程
 
@@ -338,6 +388,11 @@
 - **S5 L1 值样例（4 行，单 trace，全 `EXACT`/`OK`）**：`fixtures/s5-l1-values/events.ndjson`
   （click `#btn-discount`[`source`+`SOURCE_MAPPED`] → fetch → controller[无 values] → service[`values` 5 项、flags `L1`]）；
   期望事实：同目录 `expected-facts.json`（100→0 / 脱敏 / 截断 / return 0 / graph 15 字段）。
+- **S6a L2 行级样例（6 行，单 trace，全 `EXACT`/`OK`，测试数据非运行时证据）**：`fixtures/s6-l2-lines/events.ndjson`
+  （click `#btn-reconcile` → fetch `POST /api/orders/1/reconcile` → controller[无 values] → 3 个同 nodeKey service span
+  [`values` 仅 `kind=local`：1/2/1 项、第 2 次坏行 `100→0`、`invocation` 1/2/3、flags `S2_ZERO_ROW_CHAIN`+`L2`]）；
+  期望事实：同目录 `expected-facts.json`（×3 / 逐次值/行号 / 第二次坏 / graph 6 节点 5 边 / 工作台选择器与文案）。
+  行号为示意，测试从 `L2DemoService.java` 重算；运行时证据必须来自 demo+ASM agent（S6A-C），不得引用本目录冒充。
 - 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0/S1/S2 门禁；S3 由 tester 扩展 S3-A..S3-J）。
 ## 12. S3 runtime SDK 事件与头关联（仅语义；schema 字节不变）
 

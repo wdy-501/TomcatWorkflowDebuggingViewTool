@@ -11,8 +11,9 @@ import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
 
 /**
- * S5 java agent: instruments the S2 four-point chain plus three S5 advice points (7 advice /
- * 5 types) and emits L1 {@code values} for the demo preview-discount path.
+ * S6a java agent: instruments the S2 four-point chain, the three S5 advice points and the S6a
+ * reconcile controller (8 advice / 5 Byte Buddy types) plus ONE dedicated ASM transformer for
+ * line-level probes in {@code L2DemoService#reconcileAmount}.
  *
  * <pre>
  * controller  com.example.shop.controller.OrderController#cancel(long)               -> root span
@@ -23,7 +24,12 @@ import net.bytebuddy.utility.JavaModule;
  * controller  com.example.shop.controller.OrderController#previewDiscount(long,double,String,String) -> span (S5, no values)
  * service     com.example.shop.service.OrderService#previewDiscount(long,double,String,String)       -> span (S5, 5 values, flag L1)
  * field       com.example.shop.model.Order#setAmount(double)                          -> no span (S5, appends amount 100->0)
+ * controller  com.example.shop.controller.OrderController#reconcile(long)             -> span (S6a, no values)
+ * service     com.example.shop.service.L2DemoService#reconcileAmount(long,double,int)  -> span (S6a ASM, line-level values, flag L2)
  * </pre>
+ *
+ * <p>The last type is instrumented by {@link L2ClassFileTransformer} (ASM, exact class match) and
+ * is explicitly ignored by Byte Buddy, so no class is ever touched by both.</p>
  *
  * <p>Nothing else is instrumented. The agent is fail-open: every {@code Throwable} is swallowed and
  * the host application is never blocked or broken.</p>
@@ -39,6 +45,8 @@ public final class TraceAgent {
     static final String MAPPER_PROXY_TYPE = "org.apache.ibatis.binding.MapperProxy";
     static final String STATEMENT_HANDLER_TYPE = "org.apache.ibatis.executor.statement.PreparedStatementHandler";
     static final String ORDER_TYPE = "com.example.shop.model.Order";
+    /** S6a: the single class handled by the dedicated ASM transformer; Byte Buddy ignores it. */
+    static final String L2_SERVICE_TYPE = "com.example.shop.service.L2DemoService";
 
     private TraceAgent() {
         // utility class, never instantiated
@@ -58,22 +66,30 @@ public final class TraceAgent {
             install(inst);
             // S4 handshake: daemon thread, <=3 attempts, 1s timeouts, fail-open (never blocks).
             AgentHello.start(config);
-            log("premain installed: targets=" + CONTROLLER_TYPE + "#cancel(long)/#previewDiscount(long,double,String,String), "
+            log("premain installed: targets=" + CONTROLLER_TYPE + "#cancel(long)/#previewDiscount(long,double,String,String)/#reconcile(long), "
                     + SERVICE_TYPE + "#cancel(long)/#previewDiscount(long,double,String,String), "
                     + MAPPER_PROXY_TYPE + "#invoke, " + STATEMENT_HANDLER_TYPE + "#update, "
-                    + ORDER_TYPE + "#setAmount(double); ingestUrl=" + config.ingestUrl()
-                    + ", sessionId=" + config.sessionId());
+                    + ORDER_TYPE + "#setAmount(double), " + L2_SERVICE_TYPE + "#reconcileAmount (ASM); ingestUrl="
+                    + config.ingestUrl() + ", sessionId=" + config.sessionId());
         } catch (Throwable t) {
             log("premain failed, continuing without instrumentation (fail-open): " + t);
         }
     }
 
     private static void install(Instrumentation inst) {
+        // S6a: dedicated, exact-class transformer for the line-level L2 probes. Byte Buddy never
+        // touches this type (explicit ignore below), so the two transformers cannot take over the
+        // same class. Errors return the original bytes (fail-open).
+        try {
+            inst.addTransformer(new L2ClassFileTransformer(), false);
+        } catch (Throwable t) {
+            log("l2_transformer_register_failed (fail-open): " + t.getClass().getName());
+        }
         AgentBuilder builder = new AgentBuilder.Default()
                 .disableClassFormatChanges()
                 .with(AgentBuilder.RedefinitionStrategy.DISABLED)
                 // org.apache.ibatis.* MUST stay instrumentable (mapper + sql points); only JDK,
-                // Spring, Byte Buddy and the agent itself are excluded.
+                // Spring, Byte Buddy, the agent itself and the ASM-only L2 type are excluded.
                 .ignore(ElementMatchers.nameStartsWith("java.")
                         .or(ElementMatchers.nameStartsWith("jdk."))
                         .or(ElementMatchers.nameStartsWith("sun."))
@@ -81,6 +97,7 @@ public final class TraceAgent {
                         .or(ElementMatchers.nameStartsWith("org.springframework."))
                         .or(ElementMatchers.nameStartsWith("net.bytebuddy."))
                         .or(ElementMatchers.nameStartsWith("io.traceboard.agent."))
+                        .or(ElementMatchers.named(L2_SERVICE_TYPE))
                         .or(ElementMatchers.isSynthetic()))
                 .type(ElementMatchers.named(CONTROLLER_TYPE))
                 .transform(advice(ControllerAdvice.class,
@@ -88,6 +105,8 @@ public final class TraceAgent {
                 .transform(advice(PreviewControllerAdvice.class,
                         ElementMatchers.named("previewDiscount").and(ElementMatchers.takesArguments(
                                 long.class, double.class, String.class, String.class))))
+                .transform(advice(ReconcileControllerAdvice.class,
+                        ElementMatchers.named("reconcile").and(ElementMatchers.takesArguments(long.class))))
                 .type(ElementMatchers.named(SERVICE_TYPE))
                 .transform(advice(ServiceAdvice.class,
                         ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))

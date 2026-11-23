@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.shop.model.Order;
+import com.example.shop.service.L2DemoService;
 import com.example.shop.service.OrderService;
 
 /**
@@ -27,9 +28,11 @@ import com.example.shop.service.OrderService;
 public class OrderController {
 
     private final OrderService orderService;
+    private final L2DemoService l2DemoService;
 
-    public OrderController(OrderService orderService) {
+    public OrderController(OrderService orderService, L2DemoService l2DemoService) {
         this.orderService = orderService;
+        this.l2DemoService = l2DemoService;
     }
 
     @GetMapping
@@ -66,6 +69,20 @@ public class OrderController {
         orderService.previewDiscount(id, requestedAmount, demoSecret, note);
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("data", Integer.valueOf(0));
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * S6a L2 demo (api.v1.md Appendix F): pure computation, any id returns
+     * {@code 200 {"data":[100.0,0.0,100.0]}} - no DB read/write, no 404, no null. The third call
+     * ({@code invocation == 2}) writes the "bad" local 0, which the agent collects as the L2
+     * {@code 100 -> 0} fact.
+     */
+    @PostMapping("/{id}/reconcile")
+    public ResponseEntity<Map<String, Object>> reconcile(@PathVariable long id) {
+        List<Double> amounts = l2DemoService.reconcileBatch(id);
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("data", amounts);
         return ResponseEntity.ok(body);
     }
 }

@@ -15,6 +15,7 @@ import {
 import { useS3Store, type S3Error, type S3Tab } from "../stores/s3";
 import S4DetailPanel from "./S4DetailPanel.vue";
 import { groupNodesByNodeKey } from "../s4/derive";
+import { S6A_BANNER } from "../s6/l2";
 
 const s3 = useS3Store();
 
@@ -1035,7 +1036,7 @@ function rawTimeTitle(node: GraphNode): string {
         <p class="s3-panel__note">
           点击/控件/请求/DOM 事实来自 collector 的 requests / graph 只读查询；状态语义区分
           OK / RETURNED_FALSE / THREW / NOT_COLLECTED_* / TRUNCATED / REDACTED。
-          S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）· 非实时（无 SSE/WS）。
+          {{ S6A_BANNER }} · 非实时（无 SSE/WS）。
         </p>
       </div>
       <span class="s3-panel__badge">S3 · GET requests / graph / replay</span>
@@ -1271,7 +1272,7 @@ function rawTimeTitle(node: GraphNode): string {
                     <span
                       v-if="groupCount(row.node.nodeKey) >= 2"
                       class="s4-xn"
-                      :title="`该 nodeKey 在所选 trace 内已采集 ${groupCount(row.node.nodeKey)} 次（前端 ×N 聚合；运行时 ×3 属 S6）`"
+                      :title="`该 nodeKey 在所选 trace 内已采集 ${groupCount(row.node.nodeKey)} 次（前端 ×N 聚合；运行时 ×3 见 L2DemoService#reconcileAmount）`"
                     >×{{ groupCount(row.node.nodeKey) }}</span>
                     <span v-if="selectedSpanId === row.node.spanId" class="s4-node-selected">节点详情已打开</span>
                     <span v-if="statusHint(row.node.status)" class="s3-node__hint">
@@ -1461,8 +1462,8 @@ function rawTimeTitle(node: GraphNode): string {
     <p class="s3-panel__footnote">
       本板只读：GET requests / graph / replay。回放不会重发请求、不写数据库、不调用 demo、不执行程序；
       时间轴按所选 trace 的 min(startNs) 归一化显示，API 参数仍是原始 epoch-ns。
-      S4 节点详情 / ×N 分组 / 缺口清单均为已采集 graph 的只读前端派生（运行时 ×3 属 S6）；
-      S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）、无异步/×3/图库/SSE/WS。S0/S1/S2 面板保留在下方折叠区。
+      S4 节点详情 / ×N 分组 / 缺口清单均为已采集 graph 的只读前端派生；
+      {{ S6A_BANNER }}、无图库/SSE/WS。S0/S1/S2 面板保留在下方折叠区。
     </p>
   </section>
 </template>

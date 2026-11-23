@@ -32,6 +32,13 @@ const discountStatus = ref<string | null>(null);
 const discountError = ref<string | null>(null);
 const discountPending = ref(false);
 
+// S6a L2 demo: fixed URL, plain click handler (no wrapFn). The agent (not the SDK) collects the
+// line-level local of L2DemoService#reconcileAmount; the button never refreshes the order list.
+const reconcileRaw = ref("");
+const reconcileStatus = ref<string | null>(null);
+const reconcileError = ref<string | null>(null);
+const reconcilePending = ref(false);
+
 async function loadOrders(): Promise<void> {
   try {
     const response = await fetch("/api/orders");
@@ -127,15 +134,37 @@ async function previewDiscount(): Promise<void> {
 
 const previewDiscountWrapped = traceboard.wrapFn("previewDiscount", previewDiscount);
 
+// Case S6a: fixed-URL reconcile. Plain click handling (NOT wrapped by the SDK): the line-level L2
+// facts come from the agent's probes inside L2DemoService#reconcileAmount. No loadOrders(), no DB.
+async function reconcile(): Promise<void> {
+  reconcilePending.value = true;
+  reconcileError.value = null;
+  try {
+    const response = await fetch("/api/orders/1/reconcile", { method: "POST" });
+    const text = await response.text();
+    reconcileRaw.value = text;
+    reconcileStatus.value = `HTTP ${response.status}`;
+    if (!response.ok) {
+      reconcileError.value = `HTTP ${response.status} ${response.statusText}`;
+      return;
+    }
+    reconcileError.value = null;
+  } catch (cause) {
+    reconcileError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    reconcilePending.value = false;
+  }
+}
+
 onMounted(loadOrders);
 </script>
 
 <template>
   <div class="page">
     <header class="header">
-      <h1>BuggyShop · S5 案例 A / 案例 B / L1</h1>
+      <h1>BuggyShop · S5 案例 A / 案例 B / L1 · S6a L2</h1>
       <p class="subtitle">
-        S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）·
+        S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b ·
         案例 A 故意缺陷：取消返回 200，但数据库 UPDATE 0 行，订单仍为 CREATED ·
         案例 B 纯前端校验：无论通过与否都不发请求 ·
         案例 L1：折扣预览按钮由 agent 采集参数/字段写入/返回（仅内存，DB 金额不变）
@@ -203,7 +232,7 @@ onMounted(loadOrders);
       <p class="hint">
         固定请求 <code>POST /api/orders/1/preview-discount</code>：requestedAmount=100、demoSecret=s3cr3t（演示假值，事件中脱敏为占位符）、
         note=3000 个 x（事件中截断到 2KB）。按钮只调用 previewDiscount，不刷新订单列表：仅内存返回 0、数据库金额未改。
-        SDK 的 click/js_method 事件带 manifest 映射的函数/文件/行号（不采集局部变量，L2 属 S6）。
+        SDK 的 click/js_method 事件带 manifest 映射的函数/文件/行号（SDK 不采集局部变量；L2 仅由 agent 在 L2DemoService#reconcileAmount 采集）。
       </p>
       <div class="actions">
         <button
@@ -219,6 +248,23 @@ onMounted(loadOrders);
       <p v-if="discountStatus" id="discount-status" class="hint">状态：{{ discountStatus }}</p>
       <pre id="discount-json">{{ discountRaw || "（尚未发送折扣预览请求）" }}</pre>
       <p v-if="discountError" id="discount-error" class="error">{{ discountError }}</p>
+    </section>
+
+    <section id="case-s6a" class="card">
+      <h2>案例 S6a · 逐次对账（行级局部变量 L2）</h2>
+      <p class="hint">
+        固定请求 <code>POST /api/orders/1/reconcile</code>：L2DemoService#reconcileBatch 循环 3 次调用 reconcileAmount，
+        逐次调用 100/0/100（第 2 次为坏值）。agent 仅对 L2DemoService#reconcileAmount 做行级局部变量探针，
+        第 2 次调用可看到 local 100 → 0；reconcileBatch 不插桩。纯计算、无 DB 写入，按钮不刷新订单列表。
+      </p>
+      <div class="actions">
+        <button id="btn-reconcile" type="button" :disabled="reconcilePending" @click="reconcile">
+          {{ reconcilePending ? "请求中…" : "逐次对账" }}
+        </button>
+      </div>
+      <p v-if="reconcileStatus" id="reconcile-status" class="hint">状态：{{ reconcileStatus }}</p>
+      <pre id="reconcile-json">{{ reconcileRaw || "（尚未发送对账请求）" }}</pre>
+      <p v-if="reconcileError" id="reconcile-error" class="error">{{ reconcileError }}</p>
     </section>
   </div>
 </template>

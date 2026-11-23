@@ -1,0 +1,383 @@
+{
+  "schema": "traceboard.expected-facts.v1",
+  "caseId": "s6-l2-lines",
+  "stage": "S6a",
+  "pathSyntax": "dot-separated segments; a numeric segment indexes an array; the leaf value is compared with deep JSON equality",
+  "factSelector": "a fact selects the chain event by spanId when present; otherwise by kind+nodeKey+status (S5 convention). Derived '#trace.*' facts need no selector.",
+  "derivedPathSyntax": "paths starting with '#trace.' are computed over the whole source before fact lookup: spanCount, kindCount (spans per kind, object), fetchCount, backendSpanCount, hasFrontend, hasBackend, serviceSpanCount, valuesSpanCount (spans that carry a values array), valueCount (total value items), localValueCount (value items with kind=local), l2FlagSpanCount (spans whose flags contain L2), invocationIndexes, invocationValueCounts (value items per reconcileAmount span ordered by startNs), serviceReturnValues, graphNodeKeyCount",
+  "note": "S6a L2 fixture ONLY. This file is deterministic contract shape, NOT runtime evidence: the real 100 -> 0 on the second invocation, the line numbers and the three same-nodeKey spans must come from demo L2DemoService + the javaagent ASM LVT transformer E2E (dispatch S6A-C). Never cite this directory as proof of that runtime, and never as proof of async, NOT_COLLECTED_NO_DEBUG_INFO, loop folding, sampling or L2 overhead (S6b). serviceSource.line and every values[].line are illustrative; tests recompute the init/assign lines from L2DemoService.java.",
+  "sources": {
+    "chain": {
+      "file": "fixtures/s6-l2-lines/events.ndjson",
+      "format": "ndjson",
+      "lineCount": 6,
+      "eventCount": 6
+    }
+  },
+  "eventCount": 6,
+  "runtimeProbeExpectations": {
+    "lvtInclusiveStart": "live range is lvtStart <= insertOffset && insertOffset < lvtStart + lvtLength; with javac 1.8.0_221 the init probe offset equals LVT Start (example Start 3, Length 12, Slot 6)",
+    "probeCount": 2,
+    "probeLines": "init line and the 'local = 0' line, recomputed from L2DemoService.java; fixture 22/24 are illustrative",
+    "skipEndingInJumpReturnSwitch": true,
+    "log": "l2_probes_installed method=reconcileAmount offsets=<init>,<assign> lines=<init>,<assign>; l2_probe_missing / l2_no_lvt must be absent",
+    "previousKey": "(frame,name) — NOT (frame,line,name); the assign probe coincides with the if jump target and also runs on the non-2 path"
+  },
+  "globalAssertions": {
+    "chain": {
+      "sessionId": "s_s6l2a",
+      "eventCount": 6,
+      "traceId": "6b7c8d9e0f1a2b3c4d5e6f708192a3b4",
+      "rootSpanId": "b000000000000001",
+      "rootEventId": "click_6a5b4c3d2e1f0a9b",
+      "rootEventIdIsClickId": true,
+      "rootEventIdNotClickLost": true,
+      "singleRoot": true,
+      "rootKind": "ui_event",
+      "rootParentSpanId": null,
+      "rootConfidence": "EXACT",
+      "confidenceAllExact": true,
+      "statusAllOk": true,
+      "statuses": ["OK", "OK", "OK", "OK", "OK", "OK"],
+      "noExceptions": true,
+      "noThrewStatus": true,
+      "noReason": true,
+      "noLostBackendFlag": true,
+      "noL1Flag": true,
+      "parentBySpanId": {
+        "b000000000000001": null,
+        "b000000000000002": "b000000000000001",
+        "b000000000000003": "b000000000000002",
+        "b000000000000004": "b000000000000003",
+        "b000000000000005": "b000000000000003",
+        "b000000000000006": "b000000000000003"
+      },
+      "kindChain": ["ui_event", "fetch", "controller", "service", "service", "service"],
+      "startNsNonDecreasing": true,
+      "intervalContainment": true,
+      "intervalNested": true,
+      "rootIntervalContainsAll": true,
+      "clickWindow": { "startNs": 8000000000, "endNs": 8060000000 },
+      "threadFrontendAllEqual": "browser-main",
+      "threadBackendAllEqual": "http-nio-8080-exec-1",
+      "controllerParentIsFetchSpan": true,
+      "fetchSpanIdIsTraceparentParentId": "b000000000000002",
+      "clickIdIsTraceBoardClickHeader": "click_6a5b4c3d2e1f0a9b",
+      "controllerSpanId": "b000000000000003",
+      "flagsClick": ["SDK_ACTIVE", "OBSERVE_MS=1500"],
+      "flagsFetch": ["SDK_ACTIVE"],
+      "flagsController": ["S2_ZERO_ROW_CHAIN"],
+      "flagsService": ["S2_ZERO_ROW_CHAIN", "L2"],
+      "flagsAreContainsOnly": true,
+      "flagsRuntimeAssertion": "runtime flags may append advisory flags (DROP_COUNT=<n>, S3_RUNTIME_SDK); assert includes('L2') on every reconcileAmount span and absence of L1 / LOST_BACKEND / VALUES_CAPPED / L1_SKIPPED; never compare these arrays to runtime with deep equality",
+      "controllerReturn": { "type": "org.springframework.http.ResponseEntity", "value": 200 },
+      "serviceReturnValues": [100, 0, 100],
+      "serviceSpanCount": 3,
+      "serviceSpanIds": ["b000000000000004", "b000000000000005", "b000000000000006"],
+      "serviceSameNodeKey": true,
+      "serviceNodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "serviceParentAllController": true,
+      "serviceStartNsStrictlyIncreasing": true,
+      "invocationIndexes": [1, 2, 3],
+      "invocationValueCounts": [1, 2, 1],
+      "valuesSpanCount": 3,
+      "valuesOnlyOnServiceSpans": true,
+      "valueCount": 4,
+      "localValueCount": 4,
+      "l2FlagSpanCount": 3,
+      "valueKindsAllLocal": true,
+      "noParamFieldReturnKinds": true,
+      "controllerValuesAbsent": true,
+      "noValuesOnKinds": ["ui_event", "fetch", "controller"],
+      "valuesFieldOmittedOnOtherSpans": true,
+      "valueKeyOrder": ["name", "kind", "line", "from", "to", "truncated", "redacted", "invocation"],
+      "valueKeyOrderIsContractual": false,
+      "valueKeyOrderNote": "array order is contractual (probe execution order); key order inside each value item and inside the event object is NOT contractual, compare by JSON semantics",
+      "firstValue": {
+        "spanId": "b000000000000004",
+        "itemCount": 1,
+        "items": [
+          { "name": "local", "kind": "local", "line": 22, "from": null, "to": 100, "truncated": false, "redacted": false, "invocation": 1 }
+        ]
+      },
+      "secondValues": {
+        "spanId": "b000000000000005",
+        "itemCount": 2,
+        "items": [
+          { "name": "local", "kind": "local", "line": 22, "from": null, "to": 100, "truncated": false, "redacted": false, "invocation": 2 },
+          { "name": "local", "kind": "local", "line": 24, "from": 100, "to": 0, "truncated": false, "redacted": false, "invocation": 2 }
+        ]
+      },
+      "thirdValue": {
+        "spanId": "b000000000000006",
+        "itemCount": 1,
+        "items": [
+          { "name": "local", "kind": "local", "line": 22, "from": null, "to": 100, "truncated": false, "redacted": false, "invocation": 3 }
+        ]
+      },
+      "secondBadLineDiffersFromInitLine": true,
+      "initLine": 22,
+      "badLine": 24,
+      "linesAreIllustrative": true,
+      "serviceSourceFile": "L2DemoService.java",
+      "serviceSourceLine": 22,
+      "serviceSourceLineIsIndicative": true,
+      "controllerSource": { "file": "OrderController.java", "line": 73 },
+      "controllerSourceLineIsIndicative": true,
+      "noReconcileBatchSpan": true,
+      "backendSpanCount": 4,
+      "graphNodeKeyCount": 15,
+      "graphNodeKeysOrdered": [
+        "spanId", "parentSpanId", "kind", "nodeKey", "status", "return", "sideEffects",
+        "startNs", "durNs", "thread", "flags", "reason", "source", "confidence", "values"
+      ]
+    }
+  },
+  "facts": [
+    {
+      "id": "F1",
+      "source": "chain",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "#trace.serviceSpanCount", "value": 3 },
+      "summary": "逐次 ×3：一次请求内同 nodeKey 的 reconcileAmount service span 恰 3 个（同一 controller 下）"
+    },
+    {
+      "id": "F2",
+      "source": "chain",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "#trace.invocationIndexes", "value": [1, 2, 3] },
+      "summary": "invocation 按 startNs 排序为 1/2/3（父 controller 帧内计数，每请求重置；不是全局序号）"
+    },
+    {
+      "id": "F3",
+      "source": "chain",
+      "spanId": "b000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "values.0.to", "value": 100 },
+      "summary": "第 1 次调用的 local 值：恰 1 项，初始化行 from=null -> to=100，invocation=1"
+    },
+    {
+      "id": "F4",
+      "source": "chain",
+      "spanId": "b000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "values.0.from", "value": null },
+      "summary": "previous 只在帧内有效：每次调用首项 from=null（不是上一帧的残留值）"
+    },
+    {
+      "id": "F5",
+      "source": "chain",
+      "spanId": "b000000000000005",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "values.1.to", "value": 0 },
+      "summary": "第 2 次调用第 2 项 to=0，from=100：坏行（local = 0）的 100 -> 0 是 S6a 的关键事实"
+    },
+    {
+      "id": "F6",
+      "source": "chain",
+      "spanId": "b000000000000005",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "values.1.from", "value": 100 },
+      "summary": "坏行的旧值来自同帧上一探针（初始化行 100），不是 Hard-code / 不是字段值"
+    },
+    {
+      "id": "F7",
+      "source": "chain",
+      "spanId": "b000000000000005",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "values.1.line", "value": 24 },
+      "summary": "坏行行号与初始化行号不同（fixture 22/24 仅示意；测试从 L2DemoService.java 重算两行）"
+    },
+    {
+      "id": "F8",
+      "source": "chain",
+      "spanId": "b000000000000005",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "#trace.invocationValueCounts.1", "value": 2 },
+      "summary": "第 2 次调用恰 2 项（初始化 null->100 与坏行 100->0）；同值探针（if/return 行）不追加"
+    },
+    {
+      "id": "F9",
+      "source": "chain",
+      "spanId": "b000000000000006",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "values.0.invocation", "value": 3 },
+      "summary": "第 3 次调用：1 项、from=null、to=100、invocation=3（同第 1 次形状）"
+    },
+    {
+      "id": "F10",
+      "source": "chain",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "#trace.l2FlagSpanCount", "value": 3 },
+      "summary": "3 个 service span 均带 L2 阶段标记；controller/click/fetch 不带 L2，也不带 L1"
+    },
+    {
+      "id": "F11",
+      "source": "chain",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "#trace.noParamFieldReturnKinds", "value": true },
+      "summary": "L2 span 的 values 只有 kind=local：不出现 param/field/return 值项（返回值在事件 return 字段，不在 values）"
+    },
+    {
+      "id": "F12",
+      "source": "chain",
+      "kind": "controller",
+      "nodeKey": "com.example.shop.controller.OrderController#reconcile",
+      "status": "OK",
+      "assert": { "path": "#trace.valuesSpanCount", "value": 3 },
+      "summary": "只有 3 个 service span 携带 values：controller/click/fetch 省略该键（graph 呈现 null），controller 不采任何值"
+    },
+    {
+      "id": "F13",
+      "source": "chain",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileAmount",
+      "status": "OK",
+      "assert": { "path": "#trace.serviceReturnValues", "value": [100, 0, 100] },
+      "summary": "三次 return 依次 100/0/100（与 reconcileBatch 的 [100.0,0.0,100.0] 对应；THREW 不编造）"
+    }
+  ],
+  "apiExpectations": {
+    "requests": {
+      "sdkActive": true,
+      "row": {
+        "traceId": "6b7c8d9e0f1a2b3c4d5e6f708192a3b4",
+        "rootSpanId": "b000000000000001",
+        "rootKind": "ui_event",
+        "nodeKey": "#btn-reconcile",
+        "status": "OK",
+        "confidence": "EXACT",
+        "spanCount": 6,
+        "startedAtNs": 8000000000,
+        "durNs": 60000000,
+        "hasError": false,
+        "fetchCount": 1,
+        "hasFrontend": true,
+        "hasBackend": true,
+        "backendSpanCount": 4
+      },
+      "confidenceRule": "root ui_event EXACT + controller.parentSpanId == fetch.spanId -> EXACT"
+    },
+    "graph": {
+      "sessionId": "s_s6l2a",
+      "traceId": "6b7c8d9e0f1a2b3c4d5e6f708192a3b4",
+      "rootEventId": "click_6a5b4c3d2e1f0a9b",
+      "confidence": "EXACT",
+      "nodeCount": 6,
+      "edgeCount": 5,
+      "nodeKeyCount": 15,
+      "nodeOrder": ["b000000000000001", "b000000000000002", "b000000000000003", "b000000000000004", "b000000000000005", "b000000000000006"],
+      "kindOrder": ["ui_event", "fetch", "controller", "service", "service", "service"],
+      "edges": [
+        { "from": "b000000000000001", "to": "b000000000000002", "count": 1 },
+        { "from": "b000000000000002", "to": "b000000000000003", "count": 1 },
+        { "from": "b000000000000003", "to": "b000000000000004", "count": 1 },
+        { "from": "b000000000000003", "to": "b000000000000005", "count": 1 },
+        { "from": "b000000000000003", "to": "b000000000000006", "count": 1 }
+      ],
+      "valuesNullSpanIds": ["b000000000000001", "b000000000000002", "b000000000000003"],
+      "valuesSpanIds": ["b000000000000004", "b000000000000005", "b000000000000006"],
+      "valuesValueCounts": [1, 2, 1],
+      "valuesVerbatim": true,
+      "sortRule": "nodes: startNs ascending, ties by spanId; edges: parent node order then child node order"
+    }
+  },
+  "workbenchExpectations": {
+    "l2BadgeSelector": "#s6-l2-badge",
+    "l2BadgeText": "L2",
+    "valuesPanelSelector": "#s5-values",
+    "l2NoteSelector": "#s6-l2-note",
+    "rowSelector": "[data-value-kind=\"local\"]",
+    "bannerText": "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
+    "l2NoteText": "S6a L2：行级局部变量来自 LVT 探针（样例第 2 次调用 local 100 → 0）；异步/无调试信息/循环折叠/开销属 S6b",
+    "xnNoteText": "×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3",
+    "perSpan": {
+      "b000000000000004": {
+        "rowCount": 1,
+        "valueTexts": ["100"],
+        "footers": ["行号 22 · 第 1/3 次"],
+        "diff": false
+      },
+      "b000000000000005": {
+        "rowCount": 2,
+        "valueTexts": ["100", "100 → 0"],
+        "footers": ["行号 22 · 第 2/3 次", "行号 24 · 第 2/3 次"],
+        "diff": true
+      },
+      "b000000000000006": {
+        "rowCount": 1,
+        "valueTexts": ["100"],
+        "footers": ["行号 22 · 第 3/3 次"],
+        "diff": false
+      }
+    },
+    "groupSelector": "#s4-group-badge",
+    "groupRowTexts": ["第 1/3 次", "第 2/3 次", "第 3/3 次"],
+    "diffAttribute": "data-invocation-diff",
+    "diffText": "值变化",
+    "diffOnlyOnSpanId": "b000000000000005",
+    "diffRule": "kind in {local, field} && from !== null && from !== undefined && from !== to; the first observation (from=null) is NOT a change",
+    "firstObservationIsNotAChange": true,
+    "perSpanDiff": {
+      "b000000000000004": false,
+      "b000000000000005": true,
+      "b000000000000006": false
+    },
+    "diffConditionalityProof": "proved by S6A-C runtime values (2nd invocation has 2 items incl. 100->0) + orchestrator browser DOM/stub assertion recorded in s6a-acceptance.md; dist static tokens alone never prove conditionality",
+    "staticDistTokens": [
+      "s6-l2-badge", "s6-l2-note", "data-value-kind", "data-invocation-diff",
+      "行号 ", "100 → 0", "值变化", "s5-values", "s5-l1-badge", "s5-source", "s5-values-empty",
+      "s3-panel", "s4-detail", "s4-group-badge"
+    ],
+    "dynamicDomOnly": [
+      "[data-value-kind=\"local\"]", "data-invocation-diff=\"true\"", "第 2/3 次"
+    ],
+    "pureFunctionExpectations": {
+      "module": "workbench/src/s6/**",
+      "isL2Node": { "trueSpanIds": ["b000000000000004", "b000000000000005", "b000000000000006"], "falseSpanIds": ["b000000000000001", "b000000000000002", "b000000000000003"], "rule": "flags contains L2 only (no nodeKey hard-coding)" },
+      "localValueRows": { "b000000000000004": 1, "b000000000000005": 2, "b000000000000006": 1 },
+      "isValueChange": { "b000000000000004": false, "b000000000000005": true, "b000000000000006": false },
+      "invocationDiffNodes": { "groupSpanIds": ["b000000000000004", "b000000000000005", "b000000000000006"], "diffSpanIds": ["b000000000000005"] },
+      "secondLocalRow": { "line": 24, "from": 100, "to": 0 }
+    },
+    "nonL2BadgeAbsentOnSpanIds": ["b000000000000001", "b000000000000002", "b000000000000003"],
+    "s5SelectorsRetained": ["#s5-values", "#s5-l1-badge", "#s5-source", "#s5-values-empty"],
+    "staleTextsMustBeAbsentFromSrcAndDist": [
+      "S5：已有函数级 sourcemap/manifest 源信息；无构建期局部变量/L2（S6）",
+      "运行时 ×3 属 S6",
+      "无异步/×3",
+      "无构建期局部变量/L2"
+    ],
+    "forbiddenTexts": [
+      "异步上下文已采集",
+      "无调试信息已处理",
+      "循环折叠已实现",
+      "L2 开销 ≤40%",
+      "全部方法 L2",
+      "L2 已采集"
+    ],
+    "sourceTextIsIndicative": "fixture 行号/源行只用于形状；运行时 values 行由 LVT/源码重算，UI 断言只校验 file 非空与 line>=1"
+  }
+}

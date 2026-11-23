@@ -64,9 +64,13 @@ export function formatScalar(value: unknown): string {
  * Row value text: `field` shows the collected `from → to` write (e.g.
  * `100 → 0`); `param`/`return` show `to` (redacted rows therefore show only
  * the `[REDACTED len=N]` placeholder, never an original value).
+ *
+ * S6a `local` rows (L2) show `from → to` only when a previous value exists;
+ * the first observation (`from=null`) shows just `to`, never `null → 100`.
  */
 export function valueLineText(value: L1Value): string {
-  if (value.kind === "field") {
+  const hasPrevious = value.from !== null && value.from !== undefined;
+  if (value.kind === "field" || (value.kind === "local" && hasPrevious)) {
     return `${formatScalar(value.from)} → ${formatScalar(value.to)}`;
   }
   return formatScalar(value.to);

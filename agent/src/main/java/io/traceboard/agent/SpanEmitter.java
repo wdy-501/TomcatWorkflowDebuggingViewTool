@@ -24,6 +24,8 @@ public final class SpanEmitter {
     static final String FLAG_LOST_BACKEND = "LOST_BACKEND";
     static final String FLAG_EXACT_LINK = "S3_EXACT_LINK";
     static final String FLAG_L1 = "L1";
+    /** S6a: span was collected with line-level probes (only {@code L2DemoService#reconcileAmount}). */
+    static final String FLAG_L2 = "L2";
 
     private static final int MAX_RETURN_TYPE_CHARS = 64;
 

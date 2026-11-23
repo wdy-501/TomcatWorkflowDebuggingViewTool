@@ -6,12 +6,13 @@
  * the SQL sideEffects ticket (missing = 未采集, never 0), the UI effect ticket
  * (ui_effect/render/callback listed per trace, causality not inferred), the
  * per-invocation ×N list/selector, the S5 L1 Values section (param/field/
- * return, redaction/truncation badges, 行号未采集/第 i/N 次) and the gap list
- * (F > N > R, one gap per span).
+ * return, redaction/truncation badges, 行号未采集/第 i/N 次), the S6a L2 rows
+ * (L2 badge/note, `行号 N` + `100 → 0` for `local` kinds, 值变化 on the
+ * invocation whose local value changed) and the gap list (F > N > R).
  *
  * S5 reads `values` straight from the graph node; it never decodes `.map`,
- * never recomputes redaction/truncation and never claims local variables or
- * line-level values (L2/S6).
+ * never recomputes redaction/truncation. S6a L2 claims follow the `L2` flag
+ * only (never the nodeKey); non-L2 nodes keep the S5 wording verbatim.
  */
 import { computed, ref } from "vue";
 import type { GraphNode } from "../api";
@@ -41,12 +42,19 @@ import {
   VALUES_EMPTY_TEXT,
   hasL1Flag,
   invocationText,
-  isFieldDiff,
   lineFooterText,
   s5SourceText,
   valueLineText,
   valueRows,
 } from "../s5/values";
+import {
+  L2_BADGE_TEXT,
+  S6A_L2_NOTE,
+  VALUE_CHANGE_TEXT,
+  invocationDiffNodes,
+  isL2Node,
+  isValueChange,
+} from "../s6/l2";
 
 const props = defineProps<{
   nodes: GraphNode[];
@@ -108,6 +116,8 @@ interface InvocationView {
   node: GraphNode;
   index: number;
   rows: InvocationRows;
+  /** True when THIS invocation's own values contain a value change. */
+  diff: boolean;
 }
 
 const invocations = computed<InvocationView[]>(() => {
@@ -115,6 +125,7 @@ const invocations = computed<InvocationView[]>(() => {
     node,
     index,
     rows: rowsForInvocation(node, props.nodes),
+    diff: invocationDiffNodes([node]).length > 0,
   }));
 });
 
@@ -132,6 +143,14 @@ const gaps = computed(() => deriveGaps(props.nodes));
 /** S5: node flags carry L1 → show the L1 badge (never a L2/local claim). */
 const l1Badge = computed<boolean>(() =>
   selectedNode.value !== null && hasL1Flag(selectedNode.value)
+);
+
+/**
+ * S6a: the L2 badge/note follow the `L2` span flag only (isL2Node). Non-L2
+ * nodes keep the S5 wording; the nodeKey is never used as a L2 signal.
+ */
+const l2Node = computed<boolean>(() =>
+  selectedNode.value !== null && isL2Node(selectedNode.value)
 );
 
 /** S5 rows verbatim in collected order (param → field → return); null/[] = empty. */
@@ -204,7 +223,7 @@ function onClose(): void {
         class="s4-group-badge__item"
         :class="{ 's4-group-badge__item--active': selectedNode !== null && selectedNode.nodeKey === group.nodeKey }"
         :data-node-key="group.nodeKey"
-        :title="`${group.count} 次同 nodeKey 调用（前端聚合显示；运行时 ×3 属 S6）`"
+        :title="`${group.count} 次同 nodeKey 调用（前端聚合显示；运行时 ×3 见 L2DemoService#reconcileAmount）`"
         @click="selectGroup(group)"
       >
         <span class="s4-xn">{{ group.badge }}</span>
@@ -275,9 +294,11 @@ function onClose(): void {
         </div>
       </dl>
 
-      <section id="s5-values" class="s5-values" aria-label="L1 值">
+      <section id="s5-values" class="s5-values" aria-label="值（L1 参数/字段/返回；L2 行级局部变量）">
         <header class="s5-values__head">
-          <h4 class="s4-detail__section-title">Values · L1（参数 / 字段写入 / 返回）</h4>
+          <h4 class="s4-detail__section-title">
+            {{ l2Node ? "Values · L2（行级局部变量 / 行号）" : "Values · L1（参数 / 字段写入 / 返回）" }}
+          </h4>
           <span
             v-if="l1Badge"
             id="s5-l1-badge"
@@ -286,10 +307,19 @@ function onClose(): void {
           >
             L1
           </span>
+          <span
+            v-if="l2Node"
+            id="s6-l2-badge"
+            class="s6-l2-badge"
+            title="该节点 flags 含 L2：S6a LVT 行级局部变量（仅 L2DemoService#reconcileAmount）"
+          >
+            {{ L2_BADGE_TEXT }}
+          </span>
         </header>
-        <p id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
+        <p v-if="l2Node" id="s6-l2-note" class="s6-l2-note">{{ S6A_L2_NOTE }}</p>
+        <p v-else id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
         <p class="s4-detail__hint">
-          字段写入行显示 old → new（例如 100 → 0，高亮）；参数/返回行显示 to。
+          字段写入/局部变量行显示 old → new（例如 100 → 0，高亮）；参数/返回行显示 to。
           值行序号来自 values.invocation；S4 ×N 组序号来自同 nodeKey 的已采集 span 分组，两者不混用。
         </p>
         <ul v-if="values.length > 0" class="s5-values__list">
@@ -307,7 +337,7 @@ function onClose(): void {
             <code class="s5-value__name">{{ value.name }}</code>
             <span
               class="s5-value__value"
-              :class="{ 's5-value__value--diff': isFieldDiff(value) }"
+              :class="{ 's5-value__value--diff': isValueChange(value) }"
               title="值原样来自采集端（不重算脱敏/截断）"
             >
               {{ valueLineText(value) }}
@@ -444,15 +474,22 @@ function onClose(): void {
             @change="onInvocationChange"
           >
             <option v-for="invocation in invocations" :key="invocation.node.spanId" :value="invocation.node.spanId">
-              第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次 · {{ invocation.node.spanId }} · {{ statusMeta(invocation.node.status).label }}
+              第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次 · {{ invocation.node.spanId }} · {{ statusMeta(invocation.node.status).label }}<template v-if="invocation.diff"> · {{ VALUE_CHANGE_TEXT }}</template>
             </option>
           </select>
           <ol class="s4-invocation-list">
-            <li v-for="invocation in invocations" :key="invocation.node.spanId">
+            <li
+              v-for="invocation in invocations"
+              :key="invocation.node.spanId"
+              :data-invocation-diff="invocation.diff ? 'true' : undefined"
+            >
               <button
                 type="button"
                 class="s4-invocation"
-                :class="{ 's4-invocation--active': invocation.node.spanId === selectedNode.spanId }"
+                :class="{
+                  's4-invocation--active': invocation.node.spanId === selectedNode.spanId,
+                  's4-invocation--diff': invocation.diff,
+                }"
                 @click="emit('select', invocation.node.spanId)"
               >
                 <span class="s4-invocation__line">
@@ -460,6 +497,7 @@ function onClose(): void {
                   <span class="s3-status" :class="`s3-status--${statusMeta(invocation.node.status).tone}`">
                     {{ statusMeta(invocation.node.status).label }}
                   </span>
+                  <span v-if="invocation.diff" class="s4-invocation__diff">{{ VALUE_CHANGE_TEXT }}</span>
                   <code>{{ invocation.node.spanId }}</code>
                 </span>
                 <span class="s4-invocation__line">return：{{ returnText(invocation.node) }}</span>
