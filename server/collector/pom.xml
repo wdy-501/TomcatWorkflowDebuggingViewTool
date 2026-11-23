@@ -15,7 +15,7 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Collector</name>
-  <description>S0 collector skeleton: health, meta, ingest placeholder (501)</description>
+  <description>S1 collector: NDJSON ingest, in-memory append-only store, read-only session query</description>
 
   <dependencies>
     <dependency>
@@ -25,6 +25,12 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <!-- Frozen-schema validation (draft 2020-12). Locked by s1-plan.md §6.1 (D10). -->
+    <dependency>
+      <groupId>com.networknt</groupId>
+      <artifactId>json-schema-validator</artifactId>
+      <version>1.0.87</version>
     </dependency>
   </dependencies>
 
@@ -39,6 +45,34 @@
             <goals>
               <goal>repackage</goal>
             </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Single source of truth: copy the frozen repo schema into the jar at build time.
+           No copy may exist under src/main/resources/schema (enforced by tools/verify). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>3.3.1</version>
+        <executions>
+          <execution>
+            <id>copy-frozen-schema</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/schema</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${project.basedir}/../../schema</directory>
+                  <includes>
+                    <include>traceboard.event.v1.json</include>
+                  </includes>
+                  <filtering>false</filtering>
+                </resource>
+              </resources>
+            </configuration>
           </execution>
         </executions>
       </plugin>

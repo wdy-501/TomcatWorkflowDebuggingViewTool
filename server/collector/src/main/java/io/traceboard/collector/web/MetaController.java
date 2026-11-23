@@ -7,7 +7,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Meta endpoint, shape frozen by docs/contracts/api.v1.md §3.2.
  *
- * <p>capabilities is an honesty switch: in S0 every unimplemented capability is false.</p>
+ * <p>capabilities is an honesty switch: S1 implements ingest only, so
+ * {@code ingestEvents=true} while {@code realtime} and {@code replay} stay false.</p>
  */
 @RestController
 public class MetaController {
@@ -26,7 +27,7 @@ public class MetaController {
                 VERSION,
                 API_VERSION,
                 new SchemaMeta(SCHEMA_ID, SCHEMA_VERSION, SCHEMA_DIALECT),
-                new Capabilities(true, true, false, false, false));
+                new Capabilities(true, true, true, false, false));
     }
 
     public record SchemaMeta(String id, String version, String dialect) {

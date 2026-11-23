@@ -1,0 +1,150 @@
+{
+  "schema": "traceboard.expected-facts.v1",
+  "caseId": "s1-walking-skeleton",
+  "stage": "S1",
+  "pathSyntax": "dot-separated segments; a numeric segment indexes an array; the leaf value is compared with deep JSON equality",
+  "note": "S1 walking skeleton facts only. The frontend batch is FAKE (hand-built, confidence EXACT inside the fake batch); the agent span is the shape of one REAL instrumented controller call (confidence LOST, no frontend root). The two are never correlated in S1.",
+  "sources": {
+    "frontendBatch": {
+      "file": "fixtures/s1-walking-skeleton/frontend-fake-batch.ndjson",
+      "format": "ndjson",
+      "lineCount": 2,
+      "eventCount": 2
+    },
+    "agentSpan": {
+      "file": "fixtures/s1-walking-skeleton/agent-controller-span.json",
+      "format": "json-object",
+      "lineCount": 1,
+      "eventCount": 1
+    }
+  },
+  "globalAssertions": {
+    "frontendBatch": {
+      "sessionId": "s_wb_demo",
+      "eventCount": 2,
+      "traceId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "rootEventId": "click_a1b2c3d4e5",
+      "confidenceAllExact": true,
+      "statusAllOk": true,
+      "parentChain": ["0f0e0d0c0b0a0908", "0102030405060708"],
+      "rootSpanId": "0f0e0d0c0b0a0908",
+      "intervalContainment": true,
+      "flagsInclude": ["SKELETON", "S1_WALKING_SKELETON"]
+    },
+    "agentSpan": {
+      "sessionId": "s_s1_agent",
+      "eventCount": 1,
+      "kind": "controller",
+      "nodeKey": "com.example.shop.controller.OrderController#cancel",
+      "confidence": "LOST",
+      "status": "OK",
+      "flagsInclude": ["SKELETON", "S1_ONE_METHOD", "LOST_BACKEND"],
+      "parentSpanId": null,
+      "rootEventIdEquals": "click_lost_7c3e5a91b2d4086f",
+      "rootEventIdPrefix": "click_lost_",
+      "rootEventIdSuffixIsSpanId": true,
+      "durNsPositive": true,
+      "noExceptionPayload": true,
+      "noValues": true,
+      "noSideEffects": true
+    }
+  },
+  "facts": [
+    {
+      "id": "F1",
+      "source": "frontendBatch",
+      "kind": "ui_event",
+      "nodeKey": "#btn-s1-fake",
+      "status": "OK",
+      "assert": {
+        "path": "startNs",
+        "value": 0
+      },
+      "summary": "假点击根事件从 0ns 起；这是工作台按钮生成的合成点击，不是浏览器真实采集"
+    },
+    {
+      "id": "F2",
+      "source": "frontendBatch",
+      "kind": "ui_event",
+      "nodeKey": "#btn-s1-fake",
+      "status": "OK",
+      "assert": {
+        "path": "parentSpanId",
+        "value": null
+      },
+      "summary": "合成点击是批次内唯一根（parentSpanId=null）；S1 不关联后端 span"
+    },
+    {
+      "id": "F3",
+      "source": "frontendBatch",
+      "kind": "fetch",
+      "nodeKey": "POST /api/orders/1/cancel",
+      "status": "OK",
+      "assert": {
+        "path": "parentSpanId",
+        "value": "0f0e0d0c0b0a0908"
+      },
+      "summary": "假 fetch 的父 span 是假点击（同 traceId/rootEventId），区间 [2ms,12ms] 落在点击 [0,12ms] 内"
+    },
+    {
+      "id": "F4",
+      "source": "frontendBatch",
+      "kind": "fetch",
+      "nodeKey": "POST /api/orders/1/cancel",
+      "status": "OK",
+      "assert": {
+        "path": "return.value",
+        "value": 200
+      },
+      "summary": "假 fetch 声明 HTTP 200（固定值，没有真实请求被发出）"
+    },
+    {
+      "id": "F5",
+      "source": "frontendBatch",
+      "kind": "ui_event",
+      "nodeKey": "#btn-s1-fake",
+      "status": "OK",
+      "assert": {
+        "path": "confidence",
+        "value": "EXACT"
+      },
+      "summary": "假批次自身两端齐全所以标 EXACT；该 EXACT 只描述假数据内部一致，不代表与后端 controller span 关联成功"
+    },
+    {
+      "id": "F6",
+      "source": "agentSpan",
+      "kind": "controller",
+      "nodeKey": "com.example.shop.controller.OrderController#cancel",
+      "status": "OK",
+      "assert": {
+        "path": "confidence",
+        "value": "LOST"
+      },
+      "summary": "真实插桩的 controller span 没有前端根（无 traceparent/clickId 传播），置信度 LOST，属游离区"
+    },
+    {
+      "id": "F7",
+      "source": "agentSpan",
+      "kind": "controller",
+      "nodeKey": "com.example.shop.controller.OrderController#cancel",
+      "status": "OK",
+      "assert": {
+        "path": "rootEventId",
+        "value": "click_lost_7c3e5a91b2d4086f"
+      },
+      "summary": "rootEventId 是合成占位 click_lost_+spanId，只满足 schema，不伪装成真实点击"
+    },
+    {
+      "id": "F8",
+      "source": "agentSpan",
+      "kind": "controller",
+      "nodeKey": "com.example.shop.controller.OrderController#cancel",
+      "status": "OK",
+      "assert": {
+        "path": "return.type",
+        "value": "org.springframework.http.ResponseEntity"
+      },
+      "summary": "返回值只记类型摘要，value=null 表示未采集返回值内容（S1 不做 L1 值采集）"
+    }
+  ]
+}

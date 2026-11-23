@@ -1,23 +1,42 @@
 #!/usr/bin/env node
 /**
- * TraceBoard S0 independent verifier (tester deliverable).
+ * TraceBoard S0 + S1 independent verifier (tester deliverable).
  *
- * One-shot, re-runnable gate for the S0 acceptance signals:
- *   V1   schema compiles under Ajv 2020-12 (strict) and every JSONL line validates;
- *        byte/lines/spanId/root/traceId/startNs invariants hold.
- *   V1b  expected-facts.json (5 facts + global assertions) matches events.jsonl.
- *   V1c  negative tests: invalid status / missing reason / extra property rejected;
- *        valid NOT_COLLECTED_POLICY + reason accepted.
- *   V4b  causal interval containment (sync strict; callback root-only exception).
- *   V2   real builds: root reactor (JDK21), demo backend (JDK8), workbench, demo frontend.
- *   V3   agent bytecode major version 52.
- *   V5   runtime smoke: collector 8601 (health/meta/ingest 501) and demo 8080,
- *        then both killed and ports proven free.
- *   V6   artifacts/parity: dist markers, fixture copy SHA256, no external asset URLs,
- *        agent manifest Premain-Class.
- *   V7   frozen-file drift vs the baseline SHA256 recorded in plan-review.md.
- *   V8   hygiene: no secrets, no telemetry/CDN, .gitattributes/CRLF risk note,
- *        no unexpected writes from the verifier, git index untouched.
+ * One-shot, re-runnable gate. S0 checks are kept; S1 replaces the two S0 checks that
+ * the S1 contract itself supersedes (ingest 501 -> 202/400/413/415, and the S0-only
+ * freeze baseline -> S1 G1 baseline + S0 regression):
+ *
+ *   S0 (kept)   V1/V1b/V1c/V4b case-A schema/facts/negatives/intervals; V2 real builds
+ *               (root JDK21, demo JDK8, workbench, demo frontend); V3 agent bytecode 52;
+ *               V6 workbench/demo artifacts + no external URLs + agent manifest;
+ *               V8 secrets/telemetry/CDN hygiene.
+ *   S1-A   fixtures/s1-walking-skeleton: 2-line fake batch + agent span validate against
+ *          the frozen schema (Ajv 2020-12 strict); nodeKey #cancel, LOST + LOST_BACKEND,
+ *          synthetic click_lost_ rootEventId, no CR/BOM, trailing LF; expected-facts.json
+ *          new shape (globalAssertions.<source> + facts) evaluated by a dedicated consumer;
+ *          local negative test (event carrying "seq" is rejected).
+ *   S1-B   build artifacts: agent jar major 52, shaded Byte Buddy present, Premain-Class,
+ *          no unrelocated net/bytebuddy; collector jar schema byte-identical to repo schema
+ *          (unzip -p sha256); workbench npm ci && build; dist S1 markers; Vite proxy
+ *          /ingest + /api -> http://127.0.0.1:8601.
+ *   S1-C   collector 8601 (JDK21): health/meta capabilities; ingest 202 counts, per-line
+ *          rejects, idempotent dropped, 415/400/413 envelopes, no body echo.
+ *   S1-D   query: sessions eventCount, {"seq":N,"event":{...}} wrapper with seq outside the
+ *          schema-valid event, nextSeq, limit 1 / 0 / 501, afterSeq paging/-1/abc,
+ *          unknown session 404, POST/PUT 405, graph/replay/stream 404 (not implemented).
+ *   S1-E   agent E2E (JDK8 absolute path + -javaagent): two cancel calls -> exactly 2
+ *          controller spans (OK/LOST/LOST_BACKEND/#cancel/distinct traceIds/synthetic root,
+ *          durNs>0), collector stopped -> cancel still 200 fast (fail-open), demo alive.
+ *   S1-F   workbench path: POST the same fresh fake batch the workbench sends -> 202, then
+ *          read the session back and assert seq ordering/shape.
+ *   S1-G   regression/drift: case-A still validates, S0 builds green, S0 frozen files
+ *          unchanged except the three S1-updated contracts, all files match the S1 G1
+ *          freeze baseline hashes.
+ *   S1-H   scope/security: no S2 features (service/mapper/SQL probes, correlation,
+ *          graph/timeline/replay/SSE/WS, persistence/DB), no secrets/telemetry/CDN/mirrors,
+ *          loopback only, agent fail-open structure, fake events never shown as correlated.
+ *   S1-I   cleanup: ports 8601/8080/5173/5174/4173/4174 free, no new java processes,
+ *          git status limited to expected S1 paths and an untouched index.
  *
  * Exit code 0 only when every gate passes. Product files are never modified; the only
  * writes are build outputs (target/, dist/, workbench/public/fixtures/) produced by the
@@ -55,6 +74,20 @@ const SCHEMA_REL = "schema/traceboard.event.v1.json";
 const EVENTS_REL = "fixtures/case-a-zero-rows/events.jsonl";
 const FACTS_REL = "fixtures/case-a-zero-rows/expected-facts.json";
 const PLAN_REVIEW_REL = "docs/plans/stages/S0/plan-review.md";
+const S1_PLAN_REVIEW_REL = "docs/plans/stages/S1/plan-review.md";
+
+const S1_BATCH_REL = "fixtures/s1-walking-skeleton/frontend-fake-batch.ndjson";
+const S1_AGENT_SPAN_REL = "fixtures/s1-walking-skeleton/agent-controller-span.json";
+const S1_FACTS_REL = "fixtures/s1-walking-skeleton/expected-facts.json";
+const S1_AGENT_NODE_KEY = "com.example.shop.controller.OrderController#cancel";
+const S1_AGENT_SESSION = "s_s1agent"; // -Dtraceboard.sessionId used by the E2E launch
+const S1_WORKBENCH_SESSION = "s_wb_demo";
+const S1_ALLOWED_PORT = 8601;
+const S1_PORTS = [8601, 8080, 5173, 5174, 4173, 4174];
+
+const COLLECTOR_BASE = "http://127.0.0.1:8601";
+const DEMO_BASE = "http://localhost:8080";
+const NDJSON = "application/x-ndjson";
 
 const AGENT_JAR_REL = "agent/target/traceboard-agent-0.1.0-SNAPSHOT.jar";
 const AGENT_CLASS_REL = "agent/target/classes/io/traceboard/agent/TraceAgent.class";
@@ -269,6 +302,146 @@ async function pollUntil(fn, timeoutMs, intervalMs = 500) {
 }
 
 const REPRO_VERIFY = `(cd "tools/verify" && npm ci && node verify.mjs)`;
+
+/* ------------------------------------------------------------------ */
+/* S1 HTTP / process / file helpers                                    */
+/* ------------------------------------------------------------------ */
+
+async function requestBase(base, pathname, init = {}, timeoutMs = HTTP_TIMEOUT_MS) {
+  try {
+    const response = await fetch(base + pathname, {
+      ...init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const text = await response.text();
+    return { ok: true, url: base + pathname, status: response.status, text };
+  } catch (error) {
+    return { ok: false, error, url: base + pathname };
+  }
+}
+
+function postNdjson(pathname, body, contentType = NDJSON) {
+  return requestBase(COLLECTOR_BASE, pathname, {
+    method: "POST",
+    headers: contentType === null ? {} : { "Content-Type": contentType },
+    body,
+  }, 30000);
+}
+
+/** Parse an error envelope and return label/check tuples. */
+function envelopeChecks(res, expectedStatus, expectedError, label, forbiddenText = []) {
+  const bodyText = res.text ?? "";
+  const parsed = res.ok ? parseJson(bodyText) : { ok: false };
+  const value = parsed.ok && parsed.value && typeof parsed.value === "object" ? parsed.value : {};
+  const echoed = forbiddenText.filter((needle) => needle && bodyText.includes(needle));
+  return [
+    {
+      ok: res.ok && res.status === expectedStatus,
+      label: `${label}: HTTP ${expectedStatus}`,
+      detail: res.ok ? `status=${res.status} body=${show(bodyText)}` : String(res.error),
+    },
+    {
+      ok: parsed.ok && value.error === expectedError && value.apiVersion === "v1" && typeof value.message === "string",
+      label: `${label}: envelope {error:${expectedError}, apiVersion:v1, message}`,
+      detail: show(bodyText),
+    },
+    {
+      ok: parsed.ok && typeof value.message === "string" && value.message.length > 0 && value.message.length <= 200,
+      label: `${label}: message length 1..200`,
+      detail: parsed.ok ? `${String(value.message).length} chars` : "unparsable",
+    },
+    {
+      ok: echoed.length === 0,
+      label: `${label}: no request-body echo`,
+      detail: echoed.length ? `echoed=${echoed.join(",")}` : "no echo",
+    },
+  ];
+}
+
+/** Byte-level metadata for a UTF-8 fixture file (BOM/CR/trailing LF/lines). */
+function readTextFileMeta(rel) {
+  const buffer = readFileSync(abs(rel));
+  const text = buffer.toString("utf8");
+  const endsWithNewline = buffer.length > 0 && buffer[buffer.length - 1] === 0x0a;
+  const rawSegments = text.split("\n");
+  const bodySegments = endsWithNewline ? rawSegments.slice(0, -1) : rawSegments.slice();
+  return {
+    rel,
+    buffer,
+    text,
+    hasBom: buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf,
+    crCount: (text.match(/\r/g) ?? []).length,
+    endsWithNewline,
+    emptyLineCount: bodySegments.filter((line) => line.trim() === "").length,
+    lines: bodySegments.filter((line) => line.trim() !== ""),
+  };
+}
+
+/** Parse a plan-review "```text" block of "<sha256>  <path>" lines (optionally scoped to a heading). */
+function parseFreezeBaseline(rel, headingRe = null) {
+  const text = readFileSync(abs(rel), "utf8");
+  let scope = text;
+  if (headingRe) {
+    const start = text.search(headingRe);
+    if (start < 0) return [];
+    const rest = text.slice(start);
+    const nextHeading = rest.slice(1).search(/\n#{2,3} /);
+    scope = nextHeading < 0 ? rest : rest.slice(0, nextHeading + 1);
+  }
+  const entries = [];
+  for (const line of scope.split(/\r?\n/)) {
+    const match = line.match(/^([0-9a-f]{64})\s{2}(.+)$/);
+    if (match) entries.push({ hash: match[1], rel: match[2].trim() });
+  }
+  return entries;
+}
+
+function javaPids() {
+  const result = runExe("tasklist", ["/FI", "IMAGENAME eq java.exe", "/FO", "CSV", "/NH"], { timeout: 30000 });
+  const pids = [];
+  for (const line of (result.stdout || "").split(/\r?\n/)) {
+    const match = line.match(/^"java\.exe","(\d+)"/i);
+    if (match) pids.push(Number(match[1]));
+  }
+  return pids;
+}
+
+function gitStatusLines() {
+  const result = runExe("git", ["status", "--porcelain"], { timeout: 60000 });
+  if (result.code !== 0) return { ok: false, lines: [], error: result.stderr || "git status failed" };
+  return { ok: true, lines: (result.stdout || "").split(/\r?\n/).filter((line) => line.trim() !== "") };
+}
+
+function zipEntries(jarAbs) {
+  const result = runExe("unzip", ["-Z1", jarAbs], { timeout: 60000 });
+  return {
+    ok: result.code === 0,
+    entries: (result.stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+    stderr: result.stderr || "",
+  };
+}
+
+function dirTextFiles(rel) {
+  const dirAbs = abs(rel);
+  if (!existsSync(dirAbs)) return [];
+  return walk(dirAbs, { skip: new Set(["node_modules", "target", "dist", ".git"]) })
+    .filter((file) => /\.(java|ts|vue|js|mjs|yml|yaml|json|xml|html|css|md)$/i.test(file))
+    .map((file) => ({ rel: relOf(file), text: readFileSync(file, "utf8") }));
+}
+
+/** Remove comments so "no retry"/"no correlation" disclaimers are not scanned as code. */
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:"])\/\/[^\n]*/g, "$1");
+}
+
+function hexRandom(byteCount) {
+  const bytes = Buffer.alloc(byteCount);
+  for (let i = 0; i < byteCount; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  return bytes.toString("hex");
+}
+
 
 /* ------------------------------------------------------------------ */
 /* V0 environment                                                      */
@@ -948,8 +1121,8 @@ function parseJson(text) {
   }
 }
 
-function startJavaServer(label, exe, jarAbs, cwd) {
-  const child = spawn(exe, ["-jar", jarAbs], {
+function startJavaServer(label, exe, args, cwd) {
+  const child = spawn(exe, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -957,7 +1130,7 @@ function startJavaServer(label, exe, jarAbs, cwd) {
   const log = { text: "" };
   const append = (chunk) => {
     log.text += chunk.toString("utf8");
-    if (log.text.length > 200000) log.text = log.text.slice(-100000);
+    if (log.text.length > 400000) log.text = log.text.slice(-200000);
   };
   child.stdout?.on("data", append);
   child.stderr?.on("data", append);
@@ -983,198 +1156,1345 @@ async function stopServer(server) {
 }
 
 /* ------------------------------------------------------------------ */
-/* V5 runtime smoke                                                    */
+/* S1-C/D/F collector: ingest + query + workbench path                 */
 /* ------------------------------------------------------------------ */
 
-async function checkV5() {
-  section("V5 runtime smoke");
+function findSession(sessions, sessionId) {
+  if (!Array.isArray(sessions)) return null;
+  return sessions.find((item) => item && item.sessionId === sessionId) ?? null;
+}
 
+function wrapperProblems(validate, events, label) {
+  const problems = [];
+  if (!Array.isArray(events)) return [`${label}: events is not an array`];
+  for (const item of events) {
+    if (!item || typeof item !== "object" || !item.event || typeof item.event !== "object") {
+      problems.push(`${label}: entry without nested event object`);
+      continue;
+    }
+    if (!Number.isInteger(item.seq)) problems.push(`${label}: seq is not an integer`);
+    if (Object.prototype.hasOwnProperty.call(item.event, "seq")) problems.push(`${label}: seq leaked inside event`);
+    if (validate && !validate(item.event)) {
+      const errors = (validate.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ");
+      problems.push(`${label}: ${item.event.spanId} schema invalid (${errors})`);
+    }
+  }
+  return problems;
+}
+
+async function getEventsPage(sessionId, query = "") {
+  const res = await requestBase(
+    COLLECTOR_BASE,
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/events${query}`,
+  );
+  const parsed = res.ok ? parseJson(res.text) : { ok: false };
+  return { res, parsed, value: parsed.ok && parsed.value && typeof parsed.value === "object" ? parsed.value : {} };
+}
+
+async function checkS1CDF(validate) {
+  section("S1-C/D/F collector ingest + query + workbench path");
+  const collectorJar = abs(COLLECTOR_JAR_REL);
+  const pre = listeningOn(8601);
+  const preconditions = [
+    { ok: pre.supported && pre.lines.length === 0, label: "port 8601 free before start", detail: pre.lines.join(" | ") || "no listener" },
+    { ok: existsSync(collectorJar), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: existsSync(JDK21_JAVA), label: "JDK21 java.exe exists", detail: JDK21_JAVA },
+  ];
+  if (!preconditions.every((c) => c.ok)) {
+    record(
+      "S1-C0",
+      "collector health + meta capabilities",
+      false,
+      preconditions.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `"${JDK21_JAVA}" -jar "${COLLECTOR_JAR_REL}"`,
+    );
+    for (const [id, title] of [
+      ["S1-C1", "ingest happy path, 202 counts, idempotent dropped"],
+      ["S1-C2", "per-line rejects: invalid status + mixed batch"],
+      ["S1-C3", "envelope negatives 415/400/413 + no body echo"],
+      ["S1-D", "read-only query shapes, paging, 400/404/405, reserved routes"],
+      ["S1-F", "workbench fake-batch path"],
+    ]) {
+      record(id, title, false, [{ ok: false, label: "collector not started", detail: "precondition failed" }], null);
+    }
+    return;
+  }
+
+  let collector = null;
+  try {
+    collector = startJavaServer("collector(8601)", JDK21_JAVA, ["-jar", collectorJar], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+
+    const metaRes = health ? await requestBase(COLLECTOR_BASE, "/api/v1/meta", { method: "GET" }) : null;
+    const metaParsed = metaRes && metaRes.ok ? parseJson(metaRes.text) : { ok: false };
+    const meta = metaParsed.ok && metaParsed.value ? metaParsed.value : {};
+    const caps = meta.capabilities ?? {};
+
+    const c0 = [
+      {
+        ok: Boolean(health) && parseJson(health.text).value?.status === "UP",
+        label: "health 200 {status:UP}",
+        detail: health ? show(health.text) : "timeout / connection refused",
+      },      {
+        ok: metaRes?.ok && metaRes.status === 200 && meta.service === "traceboard-collector" &&
+          meta.apiVersion === "v1" && meta.version === "0.1.0-SNAPSHOT",
+        label: "meta service/version/apiVersion",
+        detail: show(metaRes?.text),
+      },
+      {
+        ok: meta.schema?.id === EXPECTED_SCHEMA_ID && meta.schema?.version === "traceboard.event.v1" &&
+          meta.schema?.dialect === "2020-12",
+        label: "meta schema id/version/dialect",
+        detail: show(meta.schema),
+      },
+      {
+        ok: caps.health === true && caps.meta === true && caps.ingestEvents === true &&
+          caps.realtime === false && caps.replay === false,
+        label: "capabilities ingestEvents=true / realtime=false / replay=false",
+        detail: show(caps),
+      },
+      {
+        ok: Object.keys(caps).length === 5,
+        label: "capabilities has exactly 5 keys",
+        detail: Object.keys(caps).join(","),
+      },
+    ];
+    record(
+      "S1-C0",
+      "collector health + meta capabilities",
+      c0.every((c) => c.ok),
+      c0.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `"${JDK21_JAVA}" -jar "${COLLECTOR_JAR_REL}"`,
+    );
+    if (!health) {
+      for (const [id, title] of [
+        ["S1-C1", "ingest happy path, 202 counts, idempotent dropped"],
+        ["S1-C2", "per-line rejects: invalid status + mixed batch"],
+        ["S1-C3", "envelope negatives 415/400/413 + no body echo"],
+        ["S1-D", "read-only query shapes, paging, 400/404/405, reserved routes"],
+        ["S1-F", "workbench fake-batch path"],
+      ]) {
+        record(id, title, false, [{ ok: false, label: "collector health timeout", detail: "GET /actuator/health failed" }], null);
+      }
+      return;
+    }
+
+    const batch = readTextFileMeta(S1_BATCH_REL);
+    const fixtureEvents = batch.lines.map((line) => JSON.parse(line));
+
+    /* ---------------- S1-C1 happy path + idempotency ---------------- */
+    const valid = await postNdjson("/ingest/v1/events", batch.text, `${NDJSON}; charset=utf-8`);
+    const validParsed = valid.ok ? parseJson(valid.text) : { ok: false };
+    const validBody = validParsed.ok ? validParsed.value ?? {} : {};
+    const dup = await postNdjson("/ingest/v1/events", batch.text, `${NDJSON}; charset=utf-8`);
+    const dupParsed = dup.ok ? parseJson(dup.text) : { ok: false };
+    const dupBody = dupParsed.ok ? dupParsed.value ?? {} : {};
+
+    const sessionsRes = await requestBase(COLLECTOR_BASE, "/api/v1/sessions");
+    const sessionsParsed = sessionsRes.ok ? parseJson(sessionsRes.text) : { ok: false };
+    const sessions = sessionsParsed.ok ? sessionsParsed.value?.sessions : null;
+    const wbSession = findSession(sessions, S1_WORKBENCH_SESSION);
+    const firstPage = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=0&limit=200");
+    const firstEvents = Array.isArray(firstPage.value.events) ? firstPage.value.events : [];
+    const firstProblems = wrapperProblems(validate, firstEvents, "s_wb_demo page");
+
+    const c1 = [
+      {
+        ok: valid.ok && valid.status === 202,
+        label: "valid 2-line batch -> 202",
+        detail: valid.ok ? `status=${valid.status} body=${show(valid.text)}` : String(valid.error),
+      },
+      {
+        ok: validBody.accepted === 2 && validBody.rejected === 0 && validBody.dropped === 0 &&
+          Array.isArray(validBody.errors) && validBody.errors.length === 0,
+        label: "202 {accepted:2,rejected:0,dropped:0,errors:[]}",
+        detail: show(valid.text),
+      },
+      {
+        ok: dup.ok && dup.status === 202 && dupBody.accepted === 0 && dupBody.rejected === 0 &&
+          dupBody.dropped === 2 && Array.isArray(dupBody.errors) && dupBody.errors.length === 0,
+        label: "duplicate batch -> 202 {accepted:0,rejected:0,dropped:2}",
+        detail: show(dup.text),
+      },
+      {
+        ok: Boolean(wbSession) && wbSession.eventCount === 2 &&
+          Number.isInteger(wbSession.startedAtMs) && wbSession.startedAtMs > 0 &&
+          Number.isInteger(wbSession.lastEventAtMs) && wbSession.lastEventAtMs >= wbSession.startedAtMs,
+        label: "sessions: s_wb_demo eventCount=2, startedAtMs>0, lastEventAtMs>=startedAtMs",
+        detail: show(wbSession),
+      },
+      {
+        ok: firstPage.res.ok && firstPage.res.status === 200 && firstEvents.length === 2 &&
+          firstPage.value.nextSeq === 2 &&
+          firstEvents.map((entry) => entry.seq).join(",") === "1,2",
+        label: "events page: 2 wrappers seq=1,2 nextSeq=2",
+        detail: show(firstPage.value),
+      },
+      {
+        ok: firstProblems.length === 0,
+        label: "every returned event is schema-valid and seq stays outside the event",
+        detail: firstProblems.length ? firstProblems.slice(0, 3).join(" || ") : "2/2 valid",
+      },
+    ];
+    record(
+      "S1-C1",
+      "ingest happy path, 202 counts, idempotent dropped",
+      c1.every((c) => c.ok),
+      c1.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: application/x-ndjson; charset=utf-8" --data-binary @"${S1_BATCH_REL}"`,
+    );
+
+    /* ---------------- S1-C2 per-line rejects ---------------- */
+    const badStatus = { ...fixtureEvents[0], status: "SUCCESS" };
+    const badStatusRes = await postNdjson("/ingest/v1/events", `${JSON.stringify(badStatus)}\n`);
+    const badStatusParsed = badStatusRes.ok ? parseJson(badStatusRes.text) : { ok: false };
+    const badStatusBody = badStatusParsed.ok ? badStatusParsed.value ?? {} : {};
+    const badErrors = Array.isArray(badStatusBody.errors) ? badStatusBody.errors : [];
+
+    const mixedSession = "s_s1_mixed";
+    const mixedEvent = {
+      ...fixtureEvents[0],
+      sessionId: mixedSession,
+      traceId: hexRandom(16),
+      spanId: hexRandom(8),
+      rootEventId: `click_${hexRandom(8)}`,
+    };
+    const mixedInvalidSchema = { ...mixedEvent, spanId: hexRandom(8), status: "NOT_A_STATUS" };
+    const mixedBody = `${JSON.stringify(mixedEvent)}\n{"broken":\n${JSON.stringify(mixedInvalidSchema)}\n`;
+    const mixedRes = await postNdjson("/ingest/v1/events", mixedBody);
+    const mixedParsed = mixedRes.ok ? parseJson(mixedRes.text) : { ok: false };
+    const mixedResult = mixedParsed.ok ? mixedParsed.value ?? {} : {};
+    const mixedErrors = Array.isArray(mixedResult.errors) ? mixedResult.errors : [];
+    const mixedSessionRes = await getEventsPage(mixedSession, "?afterSeq=0&limit=200");
+    const mixedStored = Array.isArray(mixedSessionRes.value.events) ? mixedSessionRes.value.events : [];
+
+    const c2 = [
+      {
+        ok: badStatusRes.ok && badStatusRes.status === 202 && badStatusBody.accepted === 0 &&
+          badStatusBody.rejected === 1 && badStatusBody.dropped === 0 && badErrors.length === 1,
+        label: "invalid status line -> 202 {accepted:0,rejected:1,dropped:0}",
+        detail: show(badStatusRes.text),
+      },
+      {
+        ok: badErrors.length === 1 && badErrors[0].line === 1 && badErrors[0].code === "schema_violation" &&
+          typeof badErrors[0].message === "string" && badErrors[0].message.length <= 200 &&
+          !badErrors[0].message.includes(fixtureEvents[0].traceId) && !badErrors[0].message.includes("SUCCESS"),
+        label: "errors[] line=1 code=schema_violation, message<=200, no payload echo",
+        detail: show(badErrors[0]),
+      },
+      {
+        ok: mixedRes.ok && mixedRes.status === 202 && mixedResult.accepted === 1 &&
+          mixedResult.rejected === 2 && mixedResult.dropped === 0,
+        label: "mixed batch -> 202 {accepted:1,rejected:2,dropped:0}",
+        detail: show(mixedRes.text),
+      },
+      {
+        ok: mixedErrors.length === 2 &&
+          mixedErrors.map((e) => e.line).join(",") === "2,3" &&
+          mixedErrors[0]?.code === "invalid_json" && mixedErrors[1]?.code === "schema_violation" &&
+          mixedErrors.every((e) => typeof e.message === "string" && e.message.length <= 200) &&
+          !mixedRes.text.includes(mixedEvent.traceId) && !mixedRes.text.includes("broken"),
+        label: "mixed errors line=2 invalid_json, line=3 schema_violation; no echo",
+        detail: show(mixedErrors),
+      },
+      {
+        ok: mixedSessionRes.res.ok && mixedSessionRes.res.status === 200 && mixedStored.length === 1 &&
+          mixedStored[0].seq === 1 && wrapperProblems(validate, mixedStored, "s_s1_mixed").length === 0,
+        label: "the one valid mixed line is stored (seq=1, schema-valid)",
+        detail: show(mixedSessionRes.value),
+      },
+    ];
+    record(
+      "S1-C2",
+      "per-line rejects: invalid status + mixed batch",
+      c2.every((c) => c.ok),
+      c2.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: application/x-ndjson" --data-binary @mixed.ndjson`,
+    );
+
+    /* ---------------- S1-C3 envelope negatives ---------------- */
+    const bigLine = `ECHOMARKER_S1 ${"a".repeat(65 * 1024)}\n`;
+    const hugeBody = `ECHOMARKER_S1${"a".repeat(4 * 1024 * 1024 + 1024)}`;
+    const bulkLines = Array.from({ length: 1001 }, (_, index) =>
+      JSON.stringify({
+        ...fixtureEvents[0],
+        sessionId: "s_s1_bulk",
+        traceId: hexRandom(16),
+        spanId: index.toString(16).padStart(16, "0"),
+        rootEventId: `click_${hexRandom(8)}`,
+        nodeKey: "#ECHOMARKER_S1",
+      }),
+    ).join("\n") + "\n";
+
+    const r415 = await postNdjson("/ingest/v1/events", batch.text, "text/plain");
+    const r415Huge = await postNdjson("/ingest/v1/events", hugeBody, "text/plain");
+    const rEmpty = await postNdjson("/ingest/v1/events", "");
+    const rBlank = await postNdjson("/ingest/v1/events", "\n");
+    const rBulk = await postNdjson("/ingest/v1/events", bulkLines);
+    const rBigLine = await postNdjson("/ingest/v1/events", bigLine);
+    const rHuge = await postNdjson("/ingest/v1/events", hugeBody);
+    const rNonUtf8 = await postNdjson("/ingest/v1/events", Buffer.from([0xff, 0xfe, 0x0a]));
+    const bulkSession = await getEventsPage("s_s1_bulk", "?afterSeq=0&limit=200");
+
+    const c3 = [
+      ...envelopeChecks(r415, 415, "unsupported_media_type", "text/plain", ["ECHOMARKER_S1"]),
+      ...envelopeChecks(r415Huge, 415, "unsupported_media_type", "wrong type + >4MB body (415 wins)", ["ECHOMARKER_S1"]),
+      ...envelopeChecks(rEmpty, 400, "bad_request", "empty body", ["ECHOMARKER_S1"]),
+      ...envelopeChecks(rBlank, 400, "bad_request", "blank line", ["ECHOMARKER_S1"]),
+      ...envelopeChecks(rBulk, 400, "bad_request", "1001 lines", ["ECHOMARKER_S1"]),
+      ...envelopeChecks(rBigLine, 413, "payload_too_large", "65KB line", ["ECHOMARKER_S1"]),
+      ...envelopeChecks(rHuge, 413, "payload_too_large", ">4MB body", ["ECHOMARKER_S1"]),
+      ...envelopeChecks(rNonUtf8, 400, "bad_request", "non-UTF-8 body", []),
+      {
+        ok: bulkSession.res.ok && bulkSession.res.status === 404,
+        label: "rejected 1001-line batch wrote nothing (s_s1_bulk 404)",
+        detail: bulkSession.res.ok ? `status=${bulkSession.res.status}` : String(bulkSession.res.error),
+      },
+    ];
+    record(
+      "S1-C3",
+      "envelope negatives 415/400/413 + no body echo",
+      c3.every((c) => c.ok),
+      c3.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: text/plain" --data-binary '{}'`,
+    );
+
+    /* ---------------- S1-D read-only query ---------------- */
+    const sessionsList = await requestBase(COLLECTOR_BASE, "/api/v1/sessions");
+    const sessionsListParsed = sessionsList.ok ? parseJson(sessionsList.text) : { ok: false };
+    const listed = sessionsListParsed.ok ? sessionsListParsed.value?.sessions : null;
+    const listedWb = findSession(listed, S1_WORKBENCH_SESSION);
+    const listedMixed = findSession(listed, "s_s1_mixed");
+
+    const pageAll = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=0&limit=200");
+    const pageOne = await getEventsPage(S1_WORKBENCH_SESSION, "?limit=1");
+    const pageAfter1 = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=1");
+    const pageAfter2 = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=2");
+    const pageExtra = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=0&limit=200&foo=bar");
+    const badLimit0 = await getEventsPage(S1_WORKBENCH_SESSION, "?limit=0");
+    const badLimit501 = await getEventsPage(S1_WORKBENCH_SESSION, "?limit=501");
+    const badAfterNegative = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=-1");
+    const badAfterText = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=abc");
+    const unknown = await getEventsPage("s_missing", "");
+    const postSessions = await requestBase(COLLECTOR_BASE, "/api/v1/sessions", { method: "POST" });
+    const putEvents = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S1_WORKBENCH_SESSION}/events`, { method: "PUT" });
+    const deleteEvents = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S1_WORKBENCH_SESSION}/events`, { method: "DELETE" });
+    const graph = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S1_WORKBENCH_SESSION}/graph`);
+    const replay = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S1_WORKBENCH_SESSION}/replay`);
+    const stream = await requestBase(COLLECTOR_BASE, "/api/v1/stream");
+    const ws = await requestBase(COLLECTOR_BASE, "/ws/v1/events");
+    const links = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S1_WORKBENCH_SESSION}/links`, { method: "POST" });
+
+    const allEvents = Array.isArray(pageAll.value.events) ? pageAll.value.events : [];
+    const d = [
+      {
+        ok: sessionsList.ok && sessionsList.status === 200 && Boolean(listedWb) && listedWb.eventCount === 2 &&
+          Boolean(listedMixed) && listedMixed.eventCount === 1,
+        label: "GET /api/v1/sessions: s_wb_demo=2, s_s1_mixed=1",
+        detail: show(listed),
+      },
+      {
+        ok: pageAll.res.status === 200 && allEvents.length === 2 && pageAll.value.nextSeq === 2 &&
+          allEvents.map((e) => e.seq).join(",") === "1,2" &&
+          wrapperProblems(validate, allEvents, "pageAll").length === 0,
+        label: "wrapper {seq,event}: 2 schema-valid events, nextSeq=2",
+        detail: show(pageAll.value),
+      },
+      {
+        ok: pageOne.res.status === 200 && pageOne.value.events?.length === 1 &&
+          pageOne.value.events[0].seq === 1 && pageOne.value.nextSeq === 1,
+        label: "limit=1 -> 1 event seq=1 nextSeq=1",
+        detail: show(pageOne.value),
+      },
+      {
+        ok: pageAfter1.res.status === 200 && pageAfter1.value.events?.length === 1 &&
+          pageAfter1.value.events[0].seq === 2 && pageAfter1.value.nextSeq === 2,
+        label: "afterSeq=1 -> seq=2 nextSeq=2",
+        detail: show(pageAfter1.value),
+      },
+      {
+        ok: pageAfter2.res.status === 200 && pageAfter2.value.events?.length === 0 && pageAfter2.value.nextSeq === 2,
+        label: "afterSeq=2 -> empty page nextSeq=2",
+        detail: show(pageAfter2.value),
+      },
+      {
+        ok: pageExtra.res.status === 200 && pageExtra.value.events?.length === 2,
+        label: "unknown query param ignored",
+        detail: `status=${pageExtra.res.status}`,
+      },
+      ...envelopeChecks(badLimit0.res, 400, "bad_request", "limit=0", []),
+      ...envelopeChecks(badLimit501.res, 400, "bad_request", "limit=501", []),
+      ...envelopeChecks(badAfterNegative.res, 400, "bad_request", "afterSeq=-1", []),
+      ...envelopeChecks(badAfterText.res, 400, "bad_request", "afterSeq=abc", []),
+      ...envelopeChecks(unknown.res, 404, "not_found", "unknown session", []),
+      {
+        ok: postSessions.ok && postSessions.status === 405,
+        label: "POST /api/v1/sessions -> 405",
+        detail: `status=${postSessions.status}`,
+      },
+      {
+        ok: putEvents.ok && putEvents.status === 405 && deleteEvents.ok && deleteEvents.status === 405,
+        label: "PUT/DELETE .../events -> 405",
+        detail: `PUT=${putEvents.status} DELETE=${deleteEvents.status}`,
+      },
+      {
+        ok: graph.ok && graph.status === 404 && replay.ok && replay.status === 404 &&
+          stream.ok && stream.status === 404 && ws.ok && ws.status === 404 &&
+          links.ok && links.status === 404,
+        label: "graph/replay/stream/ws/links not registered -> 404",
+        detail: `graph=${graph.status} replay=${replay.status} stream=${stream.status} ws=${ws.status} links=${links.status}`,
+      },
+    ];
+    record(
+      "S1-D",
+      "read-only query shapes, paging, 400/404/405, reserved routes",
+      d.every((c) => c.ok),
+      d.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s "http://127.0.0.1:8601/api/v1/sessions/s_wb_demo/events?afterSeq=0&limit=200"`,
+    );
+
+    /* ---------------- S1-F workbench fake-batch path ---------------- */
+    const wbTraceId = hexRandom(16);
+    const wbClickId = hexRandom(8);
+    const wbFetchId = hexRandom(8);
+    const wbRoot = `click_${hexRandom(8)}`;
+    const wbClick = {
+      ...fixtureEvents[0],
+      traceId: wbTraceId,
+      spanId: wbClickId,
+      rootEventId: wbRoot,
+    };
+    const wbFetch = {
+      ...fixtureEvents[1],
+      traceId: wbTraceId,
+      spanId: wbFetchId,
+      parentSpanId: wbClickId,
+      rootEventId: wbRoot,
+    };
+    const wbProblems = wrapperProblems(validate, [{ seq: 0, event: wbClick }, { seq: 1, event: wbFetch }], "generated workbench batch");
+    const wbPost = await postNdjson("/ingest/v1/events", `${JSON.stringify(wbClick)}\n${JSON.stringify(wbFetch)}\n`);
+    const wbPostParsed = wbPost.ok ? parseJson(wbPost.text) : { ok: false };
+    const wbResult = wbPostParsed.ok ? wbPostParsed.value ?? {} : {};
+    const wbSessionsRes = await requestBase(COLLECTOR_BASE, "/api/v1/sessions");
+    const wbSessionsParsed = wbSessionsRes.ok ? parseJson(wbSessionsRes.text) : { ok: false };
+    const wbSessions = wbSessionsParsed.ok ? wbSessionsParsed.value?.sessions : null;
+    const wbCount = findSession(wbSessions, S1_WORKBENCH_SESSION)?.eventCount ?? -1;
+    const wbPage = await getEventsPage(S1_WORKBENCH_SESSION, "?afterSeq=0&limit=200");
+    const wbEvents = Array.isArray(wbPage.value.events) ? wbPage.value.events : [];
+    const wbNew = wbEvents.slice(2);
+
+    const f = [
+      {
+        ok: wbProblems.length === 0,
+        label: "generated batch is schema-valid (same shape as fixtures/frontend-fake-batch.ndjson)",
+        detail: wbProblems.length ? wbProblems.join(" || ") : "2/2 valid",
+      },
+      {
+        ok: wbPost.ok && wbPost.status === 202 && wbResult.accepted === 2 && wbResult.rejected === 0 && wbResult.dropped === 0,
+        label: "POST fake batch -> 202 accepted=2",
+        detail: show(wbPost.text),
+      },
+      {
+        ok: wbCount === 4,
+        label: "sessions: s_wb_demo eventCount=4 after the second (workbench) click",
+        detail: `eventCount=${wbCount}`,
+      },
+      {
+        ok: wbPage.res.status === 200 && wbEvents.length === 4 &&
+          wbEvents.map((e) => e.seq).join(",") === "1,2,3,4" && wbPage.value.nextSeq === 4,
+        label: "read-back page keeps seq order 1,2,3,4 nextSeq=4",
+        detail: show(wbPage.value),
+      },
+      {
+        ok: wbNew.length === 2 && wbNew[0].seq === 3 && wbNew[1].seq === 4 &&
+          wbNew[0].event.kind === "ui_event" && wbNew[0].event.parentSpanId === null &&
+          wbNew[0].event.traceId === wbTraceId && wbNew[0].event.rootEventId === wbRoot &&
+          wbNew[1].event.kind === "fetch" && wbNew[1].event.parentSpanId === wbClickId &&
+          wbNew[1].event.traceId === wbTraceId && wbNew[1].event.rootEventId === wbRoot &&
+          wbNew.every((entry) => entry.event.confidence === "EXACT" && entry.event.status === "OK"),
+        label: "new page entries are the fresh ui_event root + fetch child (new trace/root, no merge)",
+        detail: show(wbNew),
+      },
+      {
+        ok: wbTraceId !== fixtureEvents[0].traceId,
+        label: "fresh click uses a new traceId (repeated clicks never collide)",
+        detail: `${wbTraceId}`,
+      },
+    ];
+    record(
+      "S1-F",
+      "workbench fake-batch path",
+      f.every((c) => c.ok),
+      f.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: application/x-ndjson" --data-binary @fresh-batch.ndjson`,
+    );
+  } finally {
+    await stopServer(collector);
+    const freed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
+    console.log(`        collector stopped; 8601 ${freed ? "free" : "STILL LISTENING"}`);
+    activeServer = null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* S1-E agent E2E + fail-open                                          */
+/* ------------------------------------------------------------------ */
+
+async function checkS1E(validate) {
+  section("S1-E agent E2E + fail-open");
   const collectorJar = abs(COLLECTOR_JAR_REL);
   const demoJar = abs(DEMO_JAR_REL);
+  const agentJar = abs(AGENT_JAR_REL);
   const pre8601 = listeningOn(8601);
   const pre8080 = listeningOn(8080);
+  const preconditions = [
+    { ok: pre8601.supported && pre8601.lines.length === 0, label: "port 8601 free", detail: pre8601.lines.join(" | ") || "no listener" },
+    { ok: pre8080.supported && pre8080.lines.length === 0, label: "port 8080 free", detail: pre8080.lines.join(" | ") || "no listener" },
+    { ok: existsSync(collectorJar), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
+    { ok: existsSync(demoJar), label: "demo jar exists", detail: DEMO_JAR_REL },
+    { ok: existsSync(agentJar), label: "agent jar exists", detail: AGENT_JAR_REL },
+    { ok: existsSync(JDK8_JAVA), label: "JDK8 java.exe exists", detail: JDK8_JAVA },
+  ];
+  if (!preconditions.every((c) => c.ok)) {
+    record("S1-E1", "agent online: 2 cancel calls -> exactly 2 controller spans", false,
+      preconditions.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`), null);
+    record("S1-E2", "fail-open: collector stopped, cancel still 200 fast, demo alive", false,
+      [{ ok: false, label: "preconditions", detail: "failed" }], null);
+    return;
+  }
 
-  const collectorChecks = [];
-  collectorChecks.push({
-    ok: pre8601.supported && pre8601.lines.length === 0,
-    label: "port 8601 free before start",
-    detail: pre8601.supported ? (pre8601.lines.join(" | ") || "no listener") : "netstat unavailable",
-  });
-  collectorChecks.push({
-    ok: existsSync(collectorJar),
-    label: "collector jar exists",
-    detail: COLLECTOR_JAR_REL,
-  });
-  collectorChecks.push({
-    ok: existsSync(JDK21_JAVA),
-    label: "JDK21 java.exe exists",
-    detail: JDK21_JAVA,
-  });
-
-  let collectorServer = null;
-  let collectorStopped = false;
-  if (collectorChecks[0].ok && collectorChecks[1].ok && collectorChecks[2].ok) {
-    try {
-      collectorServer = startJavaServer("collector(8601)", JDK21_JAVA, collectorJar, REPO);
-      const health = await pollUntil(async () => {
-        const response = await tryRequest(8601, "/actuator/health", { method: "GET" }, 5000);
-        return response.ok && response.status === 200 ? response : null;
-      }, START_TIMEOUT_MS);
-      if (!health) {
-        collectorChecks.push({ ok: false, label: "GET /actuator/health within 90s", detail: "timeout / connection refused" });
-      } else {
-        const body = parseJson(health.text);
-        collectorChecks.push({
-          ok: health.status === 200 && body.ok && body.value?.status === "UP",
-          label: "health 200 {status:UP}",
-          detail: `status=${health.status} body=${show(health.text)}`,
-        });
-      }
-
-      const metaResponse = await tryRequest(8601, "/api/v1/meta", { method: "GET" });
-      const meta = metaResponse.ok ? parseJson(metaResponse.text) : { ok: false };
-      const metaValue = meta.value ?? {};
-      collectorChecks.push({
-        ok: metaResponse.ok && metaResponse.status === 200,
-        label: "GET /api/v1/meta returns 200",
-        detail: metaResponse.ok ? `status=${metaResponse.status}` : String(metaResponse.error),
-      });
-      collectorChecks.push({
-        ok: metaValue.service === "traceboard-collector" && metaValue.apiVersion === "v1" && metaValue.version === "0.1.0-SNAPSHOT",
-        label: "meta service/version/apiVersion",
-        detail: `${metaValue.service} / ${metaValue.version} / ${metaValue.apiVersion}`,
-      });
-      collectorChecks.push({
-        ok: metaValue.schema?.id === EXPECTED_SCHEMA_ID && metaValue.schema?.version === "traceboard.event.v1" && metaValue.schema?.dialect === "2020-12",
-        label: "meta schema id/version/dialect",
-        detail: show(metaValue.schema),
-      });
-      collectorChecks.push({
-        ok:
-          metaValue.capabilities?.health === true &&
-          metaValue.capabilities?.meta === true &&
-          metaValue.capabilities?.ingestEvents === false &&
-          metaValue.capabilities?.realtime === false &&
-          metaValue.capabilities?.replay === false,
-        label: "capabilities honest (ingestEvents/realtime/replay false)",
-        detail: show(metaValue.capabilities),
-      });
-
-      const ingestBody = readFileSync(abs(EVENTS_REL), "utf8");
-      const ingest = await tryRequest(8601, "/ingest/v1/events", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
-        body: ingestBody,
-      });
-      const ingestJson = ingest.ok ? parseJson(ingest.text) : { ok: false };
-      collectorChecks.push({
-        ok: ingest.ok && ingest.status === 501,
-        label: "POST /ingest/v1/events returns 501",
-        detail: ingest.ok ? `status=${ingest.status} body=${show(ingest.text)}` : String(ingest.error),
-      });
-      collectorChecks.push({
-        ok: ingestJson.ok && ingestJson.value?.error === "not_implemented" && ingestJson.value?.apiVersion === "v1" && typeof ingestJson.value?.message === "string",
-        label: "ingest error envelope {error:not_implemented, apiVersion:v1}",
-        detail: show(ingest.text),
-      });
-    } finally {
-      await stopServer(collectorServer);
-      collectorStopped = true;
-      const freed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
-      collectorChecks.push({
-        ok: Boolean(freed),
-        label: "collector stopped, port 8601 free",
-        detail: freed ? "no LISTENING socket" : listeningOn(8601).lines.join(" | "),
-      });
-      activeServer = null;
+  let collector = null;
+  let demo = null;
+  try {
+    collector = startJavaServer("collector(8601)", JDK21_JAVA, ["-jar", collectorJar], REPO);
+    const health = await pollUntil(async () => {
+      const res = await requestBase(COLLECTOR_BASE, "/actuator/health", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    if (!health) {
+      record("S1-E1", "agent online: 2 cancel calls -> exactly 2 controller spans", false,
+        [{ ok: false, label: "collector health", detail: "timeout" }], null);
+      record("S1-E2", "fail-open: collector stopped, cancel still 200 fast, demo alive", false,
+        [{ ok: false, label: "collector not started", detail: "health timeout" }], null);
+      return;
     }
-  } else {
-    collectorChecks.push({ ok: false, label: "collector smoke executed", detail: "precondition failed" });
+
+    const startupBeforeAgentSession = await getEventsPage(S1_AGENT_SESSION, "?afterSeq=0&limit=200");
+    demo = startJavaServer("demo-backend(8080)+agent", JDK8_JAVA, [
+      `-javaagent:${agentJar}`,
+      "-Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events",
+      `-Dtraceboard.sessionId=${S1_AGENT_SESSION}`,
+      "-jar",
+      demoJar,
+    ], abs("demo/buggy-shop-boot-vue/backend"));
+
+    const orders = await pollUntil(async () => {
+      const res = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
+      return res.ok && res.status === 200 ? res : null;
+    }, START_TIMEOUT_MS);
+    const ordersBody = orders ? parseJson(orders.text) : { ok: false };
+    const firstOrder = ordersBody.ok ? ordersBody.value?.data?.[0] : undefined;
+    const premainLine = demo.log.text.split(/\r?\n/).find((line) => line.includes("premain installed")) ?? "";
+    const transformLine = demo.log.text.split(/\r?\n/).find((line) => line.includes("transformed com.example.shop.controller.OrderController")) ?? "";
+
+    const cancel1 = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" });
+    const cancel2 = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" });
+    const cancel1Body = cancel1.ok ? parseJson(cancel1.text) : { ok: false };
+    const cancel2Body = cancel2.ok ? parseJson(cancel2.text) : { ok: false };
+
+    const polled = await pollUntil(async () => {
+      const page = await getEventsPage(S1_AGENT_SESSION, "?afterSeq=0&limit=200");
+      return page.res.ok && page.res.status === 200 && Array.isArray(page.value.events) && page.value.events.length >= 2
+        ? page.value
+        : null;
+    }, 15000, 400);
+    await sleep(700);
+    const finalPage = await getEventsPage(S1_AGENT_SESSION, "?afterSeq=0&limit=200");
+    const spans = Array.isArray(finalPage.value.events) ? finalPage.value.events.map((entry) => entry.event) : [];
+
+    const spanIds = spans.map((span) => span.spanId);
+    const traceIds = spans.map((span) => span.traceId);
+    const perSpanProblems = [];
+    for (const span of spans) {
+      if (validate && !validate(span)) perSpanProblems.push(`${span.spanId} schema invalid`);
+      if (!Object.prototype.hasOwnProperty.call(span, "parentSpanId") || span.parentSpanId !== null) perSpanProblems.push(`${span.spanId} parentSpanId!=null`);
+      if (span.kind !== "controller") perSpanProblems.push(`${span.spanId} kind=${span.kind}`);
+      if (span.nodeKey !== S1_AGENT_NODE_KEY) perSpanProblems.push(`${span.spanId} nodeKey=${span.nodeKey}`);
+      if (span.status !== "OK") perSpanProblems.push(`${span.spanId} status=${span.status}`);
+      if (span.confidence !== "LOST") perSpanProblems.push(`${span.spanId} confidence=${span.confidence}`);
+      if (!Array.isArray(span.flags) || !span.flags.includes("LOST_BACKEND") || span.flags.length !== 3) {
+        perSpanProblems.push(`${span.spanId} flags=${show(span.flags)}`);
+      }
+      if (span.rootEventId !== `click_lost_${span.spanId}`) perSpanProblems.push(`${span.spanId} rootEventId=${span.rootEventId}`);
+      if (!(span.durNs > 0)) perSpanProblems.push(`${span.spanId} durNs=${span.durNs}`);
+      if (typeof span.return?.type !== "string" || span.return.type.length === 0) perSpanProblems.push(`${span.spanId} return.type empty`);
+      if (Object.prototype.hasOwnProperty.call(span, "values") || Object.prototype.hasOwnProperty.call(span, "sideEffects")) {
+        perSpanProblems.push(`${span.spanId} has values/sideEffects`);
+      }
+      if (span.source && span.source.file !== "OrderController.java") perSpanProblems.push(`${span.spanId} source.file=${span.source.file}`);
+    }
+
+    const agentChecks = [
+      { ok: Boolean(orders) && firstOrder?.id === 1 && firstOrder?.status === "CREATED", label: "demo started with -javaagent; GET /api/orders 200 id=1", detail: orders ? show(orders.text) : "timeout" },
+      { ok: startupBeforeAgentSession.res.ok && startupBeforeAgentSession.res.status === 404, label: "s_s1agent unknown before any cancel (404)", detail: `status=${startupBeforeAgentSession.res.status}` },
+      { ok: premainLine.includes(`sessionId=${S1_AGENT_SESSION}`) && premainLine.includes("OrderController#cancel(long)"), label: "agent premain installed for the single #cancel(long) target", detail: premainLine.slice(0, 240) },
+      { ok: transformLine.length > 0, label: "Byte Buddy transform hit OrderController", detail: transformLine.slice(0, 240) },
+      { ok: cancel1.ok && cancel1.status === 200 && deepEqual(cancel1Body.value, { data: true }), label: "cancel #1 -> 200 {data:true}", detail: cancel1.ok ? show(cancel1.text) : String(cancel1.error) },
+      { ok: cancel2.ok && cancel2.status === 200 && deepEqual(cancel2Body.value, { data: true }), label: "cancel #2 -> 200 {data:true}", detail: cancel2.ok ? show(cancel2.text) : String(cancel2.error) },
+      { ok: Boolean(polled), label: "read back s_s1agent events within 15s", detail: polled ? `events=${polled.events.length}` : "timeout" },
+      { ok: spans.length === 2, label: "exactly 2 controller spans (no synthetic startup events)", detail: `spans=${spans.length}` },
+      { ok: perSpanProblems.length === 0, label: "each span: controller/#cancel/OK/LOST/LOST_BACKEND/click_lost_<spanId>/durNs>0/3 flags", detail: perSpanProblems.slice(0, 4).join(" || ") || "2/2 conformant" },
+      { ok: new Set(spanIds).size === spanIds.length && spanIds.every((id) => /^[0-9a-f]{16}$/.test(id)), label: "spanIds distinct 16 lowercase hex", detail: spanIds.join(",") },
+      { ok: new Set(traceIds).size === traceIds.length && traceIds.every((id) => /^[0-9a-f]{32}$/.test(id)), label: "traceIds distinct 32 lowercase hex (one isolated root per call)", detail: traceIds.join(",") },
+      { ok: finalPage.value.nextSeq === 2 && spans.every((span) => span.sessionId === S1_AGENT_SESSION), label: "nextSeq=2, sessionId=s_s1agent", detail: `nextSeq=${finalPage.value.nextSeq}` },
+    ];
+    record(
+      "S1-E1",
+      "agent online: 2 cancel calls -> exactly 2 controller spans",
+      agentChecks.every((c) => c.ok),
+      agentChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `"${JDK8_JAVA}" -javaagent:"${AGENT_JAR_REL}" -Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events -Dtraceboard.sessionId=${S1_AGENT_SESSION} -jar "${DEMO_JAR_REL}"`,
+    );
+
+    /* -------- fail-open: stop collector, demo must stay healthy -------- */
+    await stopServer(collector);
+    const collectorFreed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
+    await sleep(500);
+
+    const startedAt = Date.now();
+    const failOpenCancel = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" });
+    const failOpenMs = Date.now() - startedAt;
+    const failOpenBody = failOpenCancel.ok ? parseJson(failOpenCancel.text) : { ok: false };
+    const aliveOrders = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const unknownCancel = await tryRequest(8080, "/api/orders/999/cancel", { method: "POST" });
+    const unknownBody = unknownCancel.ok ? parseJson(unknownCancel.text) : { ok: false };
+    await sleep(1000);
+
+    const failChecks = [
+      { ok: Boolean(collectorFreed), label: "collector stopped, 8601 free", detail: collectorFreed ? "no LISTENING socket" : listeningOn(8601).lines.join(" | ") },
+      { ok: failOpenCancel.ok && failOpenCancel.status === 200 && deepEqual(failOpenBody.value, { data: true }), label: "POST cancel with collector down -> 200 {data:true}", detail: failOpenCancel.ok ? show(failOpenCancel.text) : String(failOpenCancel.error) },
+      { ok: failOpenMs < 3000, label: "fail-open latency < 3000ms", detail: `${failOpenMs}ms` },
+      { ok: aliveOrders.ok && aliveOrders.status === 200, label: "demo process alive after collector stop", detail: `GET /api/orders -> ${aliveOrders.status}` },
+      { ok: unknownCancel.ok && unknownCancel.status === 404 && unknownBody.value?.data === false, label: "S0 regression: unknown id still 404 {data:false}", detail: unknownCancel.ok ? show(unknownCancel.text) : String(unknownCancel.error) },
+      { ok: /\[traceboard-agent\]\s+ingest_rejected=\d+\s+status=(io_error|\d+)/.test(demo.log.text), label: "sender counted the rejected send on stderr (not silent)", detail: (demo.log.text.match(/\[traceboard-agent\]\s+ingest_rejected=[^\r\n]*/) ?? ["not found"])[0] },
+    ];
+    record(
+      "S1-E2",
+      "fail-open: collector stopped, cancel still 200 fast, demo alive",
+      failChecks.every((c) => c.ok),
+      failChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `stop collector, then: curl -X POST http://localhost:8080/api/orders/1/cancel`,
+    );
+  } finally {
+    await stopServer(demo);
+    await stopServer(collector);
+    const freed8080 = await pollUntil(() => listeningOn(8080).lines.length === 0, 30000, 400);
+    const freed8601 = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
+    console.log(`        demo/collector stopped; 8080 ${freed8080 ? "free" : "STILL LISTENING"}, 8601 ${freed8601 ? "free" : "STILL LISTENING"}`);
+    activeServer = null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* S1-A fixtures + expected facts                                      */
+/* ------------------------------------------------------------------ */
+
+function checkS1A(validate) {
+  section("S1-A fixtures + expected facts");
+  const checks = [];
+  const batch = readTextFileMeta(S1_BATCH_REL);
+  const agent = readTextFileMeta(S1_AGENT_SPAN_REL);
+  let batchEvents = [];
+  let agentSpan = null;
+  try {
+    batchEvents = batch.lines.map((line) => JSON.parse(line));
+  } catch (error) {
+    checks.push({ ok: false, label: "frontend-fake-batch.ndjson parses", detail: error.message });
+  }
+  try {
+    agentSpan = JSON.parse(agent.lines[0]);
+  } catch (error) {
+    checks.push({ ok: false, label: "agent-controller-span.json parses", detail: error.message });
+  }
+
+  checks.push({ ok: batch.lines.length === 2, label: "fake batch has exactly 2 non-empty lines", detail: `lines=${batch.lines.length}` });
+  checks.push({ ok: agent.lines.length === 1, label: "agent span is exactly 1 JSON object line", detail: `lines=${agent.lines.length}` });
+  for (const [name, file] of [["fake batch", batch], ["agent span", agent]]) {
+    checks.push({ ok: !file.hasBom, label: `${name}: UTF-8 without BOM`, detail: `hasBom=${file.hasBom}` });
+    checks.push({ ok: file.crCount === 0, label: `${name}: no CR bytes`, detail: `\\r count=${file.crCount}` });
+    checks.push({ ok: file.endsWithNewline, label: `${name}: trailing LF`, detail: `lastByte=0x${file.buffer.length ? file.buffer[file.buffer.length - 1].toString(16) : "??"}` });
+    checks.push({ ok: file.emptyLineCount === 0, label: `${name}: no empty lines`, detail: `emptyLines=${file.emptyLineCount}` });
+  }
+
+  const invalid = [];
+  if (validate) {
+    batchEvents.forEach((event, index) => {
+      if (!validate(event)) invalid.push(`batch line ${index + 1}: ${(validate.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ")}`);
+    });
+    if (agentSpan && !validate(agentSpan)) invalid.push(`agent span: ${(validate.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ")}`);
+  }
+  checks.push({
+    ok: validate !== null && batchEvents.length === 2 && Boolean(agentSpan) && invalid.length === 0,
+    label: "3/3 fixture events validate against the frozen schema (Ajv 2020-12 strict)",
+    detail: invalid.length ? invalid.join(" || ") : "3/3 valid",
+  });
+
+  if (batchEvents.length === 2) {
+    const [click, fetch] = batchEvents;
+    checks.push({
+      ok: click.kind === "ui_event" && click.nodeKey === "#btn-s1-fake" && click.parentSpanId === null &&
+        click.startNs === 0 && click.durNs === 12000000 && click.status === "OK" && click.return === null,
+      label: "fake click: ui_event #btn-s1-fake root [0,12ms], return null",
+      detail: `${click.kind} ${click.nodeKey} startNs=${click.startNs} durNs=${click.durNs}`,
+    });
+    checks.push({
+      ok: fetch.kind === "fetch" && fetch.nodeKey === "POST /api/orders/1/cancel" &&
+        fetch.parentSpanId === click.spanId && fetch.startNs >= click.startNs &&
+        fetch.startNs + fetch.durNs <= click.startNs + click.durNs &&
+        deepEqual(fetch.return, { type: "http", value: 200 }),
+      label: "fake fetch: child of click, interval nested, return {type:http,value:200}",
+      detail: `[${fetch.startNs},${fetch.startNs + fetch.durNs}] inside [${click.startNs},${click.startNs + click.durNs}]`,
+    });
+    checks.push({
+      ok: click.sessionId === S1_WORKBENCH_SESSION && fetch.sessionId === S1_WORKBENCH_SESSION &&
+        click.traceId === fetch.traceId && click.rootEventId === fetch.rootEventId &&
+        click.confidence === "EXACT" && fetch.confidence === "EXACT" &&
+        [click, fetch].every((event) => Array.isArray(event.flags) &&
+          event.flags.includes("SKELETON") && event.flags.includes("S1_WALKING_SKELETON")),
+      label: "fake batch: same session/trace/root, EXACT + SKELETON flags",
+      detail: `${click.traceId} ${click.rootEventId}`,
+    });
+  }
+
+  if (agentSpan) {
+    checks.push({
+      ok: agentSpan.kind === "controller" && agentSpan.nodeKey === S1_AGENT_NODE_KEY && agentSpan.nodeKey.endsWith("#cancel"),
+      label: "agent span: kind=controller nodeKey ...OrderController#cancel",
+      detail: `${agentSpan.kind} ${agentSpan.nodeKey}`,
+    });
+    checks.push({
+      ok: agentSpan.confidence === "LOST" && agentSpan.parentSpanId === null && agentSpan.status === "OK",
+      label: "agent span: LOST, isolated root (parentSpanId null), OK",
+      detail: `${agentSpan.confidence} parent=${agentSpan.parentSpanId} status=${agentSpan.status}`,
+    });
+    checks.push({
+      ok: Array.isArray(agentSpan.flags) && agentSpan.flags.length === 3 &&
+        agentSpan.flags.includes("SKELETON") && agentSpan.flags.includes("S1_ONE_METHOD") &&
+        agentSpan.flags.includes("LOST_BACKEND"),
+      label: "agent span flags exactly [SKELETON,S1_ONE_METHOD,LOST_BACKEND]",
+      detail: show(agentSpan.flags),
+    });
+    checks.push({
+      ok: agentSpan.rootEventId === `click_lost_${agentSpan.spanId}` &&
+        /^click_[A-Za-z0-9_-]{8,}$/.test(agentSpan.rootEventId) &&
+        agentSpan.rootEventId !== `click_${agentSpan.spanId}`,
+      label: "agent span rootEventId is the synthetic click_lost_<spanId> placeholder",
+      detail: `${agentSpan.rootEventId} (spanId=${agentSpan.spanId})`,
+    });
+    checks.push({
+      ok: /^[0-9a-f]{32}$/.test(agentSpan.traceId) && /^[0-9a-f]{16}$/.test(agentSpan.spanId) &&
+        agentSpan.durNs > 0 && agentSpan.startNs >= 0,
+      label: "agent span ids/regEx/durations valid (durNs>0)",
+      detail: `traceId=${agentSpan.traceId} spanId=${agentSpan.spanId} durNs=${agentSpan.durNs}`,
+    });
+    checks.push({
+      ok: typeof agentSpan.return?.type === "string" && agentSpan.return.type.length > 0 &&
+        !Object.prototype.hasOwnProperty.call(agentSpan, "values") &&
+        !Object.prototype.hasOwnProperty.call(agentSpan, "sideEffects") &&
+        !Object.prototype.hasOwnProperty.call(agentSpan, "reason"),
+      label: "agent span has return.type and no values/sideEffects/reason",
+      detail: show(agentSpan.return),
+    });
+    if (agentSpan.source) {
+      checks.push({
+        ok: agentSpan.source.file === "OrderController.java",
+        label: "agent span source.file is OrderController.java (line not compared)",
+        detail: `${agentSpan.source.file}:${agentSpan.source.line}`,
+      });
+    }
+    if (batchEvents.length === 2) {
+      const sessions = new Set([...batchEvents.map((e) => e.sessionId), agentSpan.sessionId]);
+      const traces = new Set([...batchEvents.map((e) => e.traceId), agentSpan.traceId]);
+      checks.push({
+        ok: sessions.size === 2 && traces.size === 2,
+        label: "fake batch and agent span share neither sessionId nor traceId (no correlation)",
+        detail: `sessions=${[...sessions].join(",")} traces=${traces.size}`,
+      });
+    }
+  }
+
+  const seqNegative = validate && batchEvents[0] ? (() => {
+    const copy = { ...batchEvents[0], seq: 1 };
+    return { ok: validate(copy) === false, label: "negative: event carrying seq is rejected" };
+  })() : { ok: false, label: "negative: seq rejection (validator unavailable)" };
+  checks.push(seqNegative);
+
+  /* ---- expected-facts.json NEW shape (globalAssertions.<source> + facts) ---- */
+  let factsDoc = null;
+  try {
+    factsDoc = JSON.parse(readFileSync(abs(S1_FACTS_REL), "utf8"));
+  } catch (error) {
+    checks.push({ ok: false, label: "expected-facts.json parses", detail: error.message });
+  }
+  if (factsDoc) {
+    const sourceData = {
+      frontendBatch: { rel: S1_BATCH_REL, lines: batch.lines.length, events: batchEvents },
+      agentSpan: { rel: S1_AGENT_SPAN_REL, lines: agent.lines.length, events: agentSpan ? [agentSpan] : [] },
+    };
+    checks.push({
+      ok: factsDoc.caseId === "s1-walking-skeleton" && factsDoc.stage === "S1",
+      label: "expected-facts identifies caseId/stage",
+      detail: `${factsDoc.caseId} / ${factsDoc.stage}`,
+    });
+
+    const declaredSources = Object.entries(factsDoc.sources ?? {});
+    checks.push({ ok: declaredSources.length === 2, label: "expected-facts declares 2 sources", detail: declaredSources.map(([k]) => k).join(",") });
+    for (const [name, declared] of declaredSources) {
+      const data = sourceData[name];
+      if (!data) {
+        checks.push({ ok: false, label: `source ${name} known to the S1 consumer`, detail: "unknown source" });
+        continue;
+      }
+      checks.push({
+        ok: declared.file === data.rel && declared.lineCount === data.lines && declared.eventCount === data.events.length,
+        label: `source ${name}: file/lineCount/eventCount match the actual fixture`,
+        detail: `file=${declared.file} lines=${data.lines}/${declared.lineCount} events=${data.events.length}/${declared.eventCount}`,
+      });
+    }
+
+    const globalFails = [];
+    for (const [name, assertions] of Object.entries(factsDoc.globalAssertions ?? {})) {
+      const data = sourceData[name];
+      if (!data) {
+        globalFails.push(`${name}: unknown source`);
+        continue;
+      }
+      const events = data.events;
+      for (const [key, expected] of Object.entries(assertions)) {
+        let ok = false;
+        let actual = "";
+        if (key === "sessionId") { ok = events.length > 0 && events.every((e) => e.sessionId === expected); actual = [...new Set(events.map((e) => e.sessionId))].join(","); }
+        else if (key === "eventCount") { ok = events.length === expected; actual = String(events.length); }
+        else if (key === "traceId") { ok = events.length > 0 && events.every((e) => e.traceId === expected); actual = [...new Set(events.map((e) => e.traceId))].join(","); }
+        else if (key === "rootEventId") { ok = events.length > 0 && events.every((e) => e.rootEventId === expected); actual = [...new Set(events.map((e) => e.rootEventId))].join(","); }
+        else if (key === "confidenceAllExact") { ok = events.length > 0 && events.every((e) => e.confidence === "EXACT"); actual = [...new Set(events.map((e) => e.confidence))].join(","); }
+        else if (key === "statusAllOk") { ok = events.length > 0 && events.every((e) => e.status === "OK"); actual = [...new Set(events.map((e) => e.status))].join(","); }
+        else if (key === "parentChain") {
+          ok = Array.isArray(expected) && expected.length === events.length &&
+            expected.every((spanId, index) => events[index].spanId === spanId) &&
+            expected.slice(1).every((spanId, index) => events[index + 1].parentSpanId === events[index].spanId);
+          actual = events.map((e) => `${e.spanId}<-${e.parentSpanId}`).join(",");
+        } else if (key === "rootSpanId") {
+          const roots = events.filter((e) => e.parentSpanId === null);
+          ok = roots.length === 1 && roots[0].spanId === expected;
+          actual = roots.map((e) => e.spanId).join(",");
+        } else if (key === "intervalContainment") {
+          const byId = new Map(events.map((e) => [e.spanId, e]));
+          ok = expected === true && events.filter((e) => e.parentSpanId !== null).every((e) => {
+            const parent = byId.get(e.parentSpanId);
+            return parent && e.startNs >= parent.startNs && e.startNs + e.durNs <= parent.startNs + parent.durNs;
+          });
+          actual = `${events.filter((e) => e.parentSpanId !== null).length} child spans`;
+        } else if (key === "flagsInclude") {
+          ok = Array.isArray(expected) && events.length > 0 &&
+            events.every((e) => expected.every((flag) => Array.isArray(e.flags) && e.flags.includes(flag)));
+          actual = [...new Set(events.flatMap((e) => e.flags ?? []))].join(",");
+        } else if (key === "kind") { ok = events.length === 1 && events[0].kind === expected; actual = events.map((e) => e.kind).join(","); }
+        else if (key === "nodeKey") { ok = events.length === 1 && events[0].nodeKey === expected; actual = events.map((e) => e.nodeKey).join(","); }
+        else if (key === "confidence") { ok = events.length === 1 && events[0].confidence === expected; actual = events.map((e) => e.confidence).join(","); }
+        else if (key === "status") { ok = events.length === 1 && events[0].status === expected; actual = events.map((e) => e.status).join(","); }
+        else if (key === "parentSpanId") { ok = events.length === 1 && events[0].parentSpanId === expected; actual = String(events[0]?.parentSpanId); }
+        else if (key === "rootEventIdEquals") { ok = events.length === 1 && events[0].rootEventId === expected; actual = String(events[0]?.rootEventId); }
+        else if (key === "rootEventIdPrefix") { ok = events.length === 1 && typeof events[0].rootEventId === "string" && events[0].rootEventId.startsWith(expected); actual = String(events[0]?.rootEventId); }
+        else if (key === "rootEventIdSuffixIsSpanId") { ok = expected === true && events.length === 1 && events[0].rootEventId.endsWith(events[0].spanId); actual = String(events[0]?.rootEventId); }
+        else if (key === "durNsPositive") { ok = expected === true && events.length === 1 && events[0].durNs > 0; actual = String(events[0]?.durNs); }
+        else if (key === "noExceptionPayload") { ok = expected === true && !events.some((e) => /exception|stack|error/i.test(Object.keys(e).join(","))); actual = Object.keys(events[0] ?? {}).join(","); }
+        else if (key === "noValues") { ok = expected === true && !events.some((e) => Object.prototype.hasOwnProperty.call(e, "values")); actual = "values absent"; }
+        else if (key === "noSideEffects") { ok = expected === true && !events.some((e) => Object.prototype.hasOwnProperty.call(e, "sideEffects")); actual = "sideEffects absent"; }
+        else { ok = false; actual = "unknown assertion key"; }
+        if (!ok) globalFails.push(`${name}.${key} expected=${show(expected)} actual=${actual}`);
+      }
+    }
+    checks.push({
+      ok: globalFails.length === 0,
+      label: "globalAssertions.<source> fully evaluated (no unknown keys)",
+      detail: globalFails.length ? globalFails.slice(0, 4).join(" || ") : "0 failures",
+    });
+
+    const factList = Array.isArray(factsDoc.facts) ? factsDoc.facts : [];
+    const factFails = [];
+    for (const fact of factList) {
+      const data = sourceData[fact.source];
+      if (!data) { factFails.push(`${fact.id}: unknown source ${fact.source}`); continue; }
+      const matches = data.events.filter((event) => event.kind === fact.kind && event.nodeKey === fact.nodeKey);
+      if (matches.length !== 1) { factFails.push(`${fact.id}: matches=${matches.length}`); continue; }
+      if (matches[0].status !== fact.status) factFails.push(`${fact.id}: status=${matches[0].status} expected=${fact.status}`);
+      const lookup = getByPath(matches[0], fact.assert?.path);
+      if (!lookup.found || !deepEqual(lookup.value, fact.assert?.value)) {
+        factFails.push(`${fact.id}: ${fact.assert?.path}=${lookup.found ? show(lookup.value) : "not found"} expected=${show(fact.assert?.value)}`);
+      }
+      if (typeof fact.summary !== "string" || fact.summary.trim().length === 0) factFails.push(`${fact.id}: empty summary`);
+    }
+    checks.push({
+      ok: factList.length === 8 && factFails.length === 0,
+      label: "all 8 facts locate a unique event and deep-equal their assertion",
+      detail: factFails.length ? factFails.slice(0, 4).join(" || ") : `facts=${factList.length}, 0 failures`,
+    });
   }
 
   gate(
-    "V5a",
-    "collector smoke: health UP, meta, ingest 501, clean shutdown",
-    collectorChecks,
-    `"${JDK21_JAVA}" -jar "${COLLECTOR_JAR_REL}"`,
+    "S1-A",
+    "S1 fixtures + expected-facts consumer (NEW globalAssertions shape)",
+    checks,
+    `sha256sum "${S1_BATCH_REL}" "${S1_AGENT_SPAN_REL}" "${S1_FACTS_REL}"`,
   );
+}
 
-  const demoChecks = [];
-  demoChecks.push({
-    ok: pre8080.supported && pre8080.lines.length === 0,
-    label: "port 8080 free before start",
-    detail: pre8080.supported ? (pre8080.lines.join(" | ") || "no listener") : "netstat unavailable",
+/* ------------------------------------------------------------------ */
+/* S1-B build artifacts                                                */
+/* ------------------------------------------------------------------ */
+
+function checkS1B(builds, validate) {
+  section("S1-B build artifacts");
+  const checks = [];
+  const agentJar = abs(AGENT_JAR_REL);
+  const collectorJar = abs(COLLECTOR_JAR_REL);
+  const workbenchDist = distTextFiles(WORKBENCH_DIST_REL).map((f) => f.text).join("\n");
+
+  checks.push({ ok: builds.root === true, label: "root reactor mvn package (JDK21) exit 0", detail: "see V2a" });
+  checks.push({ ok: builds.workbenchCi === true && builds.workbenchBuild === true, label: "workbench npm ci && npm run build exit 0", detail: "see V2c-1/V2c-2" });
+  checks.push({ ok: builds.demoBackend === true, label: "demo backend (JDK8) build exit 0", detail: "see V2b" });
+  checks.push({ ok: builds.demoFrontendCi === true && builds.demoFrontendBuild === true, label: "demo frontend build exit 0", detail: "see V2d-1/V2d-2" });
+
+  const agentEntries = existsSync(agentJar) ? zipEntries(agentJar) : { ok: false, entries: [], stderr: "missing" };
+  const shaded = agentEntries.entries.filter((entry) => entry.startsWith("io/traceboard/agent/shaded/net/bytebuddy/") && entry.endsWith(".class"));
+  const unrelocated = agentEntries.entries.filter((entry) => entry.startsWith("net/bytebuddy/") || entry === "net/bytebuddy");
+  checks.push({ ok: agentEntries.ok, label: "agent jar readable (unzip -Z1)", detail: agentEntries.ok ? `${agentEntries.entries.length} entries` : agentEntries.stderr });
+  checks.push({
+    ok: shaded.length > 0,
+    label: "shaded Byte Buddy present (io/traceboard/agent/shaded/net/bytebuddy/**)",
+    detail: shaded.length ? `${shaded.length} classes, e.g. ${shaded[0]}` : "missing",
   });
-  demoChecks.push({ ok: existsSync(demoJar), label: "demo jar exists", detail: DEMO_JAR_REL });
-  demoChecks.push({ ok: existsSync(JDK8_JAVA), label: "JDK8 java.exe exists", detail: JDK8_JAVA });
+  checks.push({
+    ok: unrelocated.length === 0,
+    label: "no unrelocated net/bytebuddy entries",
+    detail: unrelocated.length ? unrelocated.slice(0, 4).join(",") : "0",
+  });
 
-  if (demoChecks.every((c) => c.ok)) {
-    let demoServer = null;
-    try {
-      demoServer = startJavaServer("demo-backend(8080)", JDK8_JAVA, demoJar, abs("demo/buggy-shop-boot-vue/backend"));
-      const orders = await pollUntil(async () => {
-        const response = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
-        return response.ok && response.status === 200 ? response : null;
-      }, START_TIMEOUT_MS);
-      if (!orders) {
-        demoChecks.push({ ok: false, label: "GET /api/orders within 90s", detail: "timeout / connection refused" });
-      } else {
-        const body = parseJson(orders.text);
-        const first = body.ok ? body.value?.data?.[0] : undefined;
-        demoChecks.push({
-          ok: first?.id === 1 && first?.orderNo === "SO-0001" && first?.status === "CREATED" && first?.amount === 100,
-          label: "GET /api/orders 200 with seed order id=1",
-          detail: `status=${orders.status} first=${show(first)}`,
-        });
-      }
+  if (existsSync(agentJar)) {
+    const manifest = runExe("unzip", ["-p", agentJar, "META-INF/MANIFEST.MF"]);
+    const premain = (manifest.stdout || "").split(/\r?\n/).find((line) => /^Premain-Class:/i.test(line.trim())) ?? "";
+    checks.push({
+      ok: manifest.code === 0 && /io\.traceboard\.agent\.TraceAgent/.test(premain),
+      label: "MANIFEST Premain-Class: io.traceboard.agent.TraceAgent",
+      detail: premain.trim() || `unzip exit=${manifest.code}`,
+    });
+    checks.push({
+      ok: !/^Agent-Class:/im.test(manifest.stdout || ""),
+      label: "MANIFEST has no Agent-Class (no attach API)",
+      detail: /^Agent-Class:/im.test(manifest.stdout || "") ? "present (BAD)" : "absent",
+    });
+  }
+  checks.push({
+    ok: !existsSync(abs("agent/dependency-reduced-pom.xml")),
+    label: "agent/dependency-reduced-pom.xml absent",
+    detail: existsSync(abs("agent/dependency-reduced-pom.xml")) ? "present (BAD)" : "absent",
+  });
 
-      const cancel = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" });
-      const cancelBody = cancel.ok ? parseJson(cancel.text) : { ok: false };
-      demoChecks.push({
-        ok: cancel.ok && cancel.status === 200 && cancelBody.ok && deepEqual(cancelBody.value, { data: true }),
-        label: "POST /api/orders/1/cancel 200 {data:true}",
-        detail: cancel.ok ? `status=${cancel.status} body=${show(cancel.text)}` : String(cancel.error),
-      });
+  const javap = existsSync(JDK21_JAVAP)
+    ? runExe(JDK21_JAVAP, ["-verbose", "-classpath", agentJar, "io.traceboard.agent.TraceAgent"])
+    : { stdout: "", stderr: "javap missing" };
+  const major = Number((javap.stdout.match(/major version:\s*(\d+)/) ?? [])[1]);
+  checks.push({ ok: major === 52, label: "agent jar class major version 52", detail: `major=${Number.isNaN(major) ? "?" : major}` });
 
-      const missing = await tryRequest(8080, "/api/orders/999/cancel", { method: "POST" });
-      const missingBody = missing.ok ? parseJson(missing.text) : { ok: false };
-      demoChecks.push({
-        ok: missing.ok && missing.status === 404 && missingBody.ok && missingBody.value?.data === false,
-        label: "POST /api/orders/999/cancel 404 {data:false}",
-        detail: missing.ok ? `status=${missing.status} body=${show(missing.text)}` : String(missing.error),
-      });
-    } finally {
-      await stopServer(demoServer);
-      const freed = await pollUntil(() => listeningOn(8080).lines.length === 0, 30000, 400);
-      demoChecks.push({
-        ok: Boolean(freed),
-        label: "demo backend stopped, port 8080 free",
-        detail: freed ? "no LISTENING socket" : listeningOn(8080).lines.join(" | "),
-      });
-      activeServer = null;
-    }
-  } else {
-    demoChecks.push({ ok: false, label: "demo smoke executed", detail: "precondition failed" });
+  const schemaInJar = existsSync(collectorJar)
+    ? runExe("unzip", ["-p", collectorJar, "BOOT-INF/classes/schema/traceboard.event.v1.json"])
+    : { code: 1, stdout: "", stderr: "collector jar missing" };
+  const jarSchemaHash = schemaInJar.code === 0 ? sha256Text(schemaInJar.stdout) : "unreadable";
+  const repoSchemaHash = sha256File(abs(SCHEMA_REL));
+  const collectorEntries = existsSync(collectorJar) ? zipEntries(collectorJar) : { ok: false, entries: [] };
+  const schemaCopies = collectorEntries.entries.filter((entry) => entry.endsWith("schema/traceboard.event.v1.json"));
+  checks.push({
+    ok: schemaInJar.code === 0 && jarSchemaHash === repoSchemaHash,
+    label: "collector jar schema byte-identical to repo schema (unzip -p sha256)",
+    detail: `jar=${jarSchemaHash} repo=${repoSchemaHash}`,
+  });
+  checks.push({
+    ok: schemaCopies.length === 1,
+    label: "collector jar contains exactly one schema copy",
+    detail: schemaCopies.join(",") || "none",
+  });
+  checks.push({
+    ok: !existsSync(abs("server/collector/src/main/resources/schema")),
+    label: "no schema copy under server/collector/src/main/resources",
+    detail: "absent",
+  });
+
+  const distTokens = ["发送假点击/请求", "Walking skeleton", "nodeKey", "seq", "btn-s1-fake", "no correlation yet"];
+  for (const token of distTokens) {
+    checks.push({
+      ok: workbenchDist.includes(token),
+      label: `workbench dist contains "${token}"`,
+      detail: "found",
+    });
   }
 
-  gate(
-    "V5b",
-    "demo backend smoke: orders 200, cancel true, unknown 404, clean shutdown",
-    demoChecks,
-    `(cd "demo/buggy-shop-boot-vue/backend" && "${JDK8_JAVA}" -jar "${DEMO_JAR_REL}")`,
-  );
+  const viteConfig = readFileSync(abs("workbench/vite.config.ts"), "utf8");
+  const proxy = (name) => new RegExp(`["']${name}["']\\s*:\\s*\\{[\\s\\S]*?target:\\s*["']http://127\\.0\\.0\\.1:8601["']`).test(viteConfig);
+  checks.push({ ok: proxy("/ingest"), label: "vite proxy /ingest -> http://127.0.0.1:8601", detail: proxy("/ingest") ? "configured" : "missing" });
+  checks.push({ ok: proxy("/api"), label: "vite proxy /api -> http://127.0.0.1:8601", detail: proxy("/api") ? "configured" : "missing" });
+  checks.push({ ok: /strictPort:\s*true/.test(viteConfig) && /port:\s*5173/.test(viteConfig), label: "vite dev server port 5173 strictPort:true", detail: "configured" });
+  checks.push({ ok: !/0\.0\.0\.0/.test(viteConfig), label: "vite config binds no 0.0.0.0 address", detail: "none" });
 
-  await sleep(500);
-  const post8601 = listeningOn(8601);
-  const post8080 = listeningOn(8080);
+  if (validate) checks.push({ ok: true, label: "schema validator available for runtime gates", detail: "compiled in V1" });
+
   gate(
-    "V5c",
-    "ports 8601/8080 released after smoke (no residual processes)",
-    [
-      { ok: post8601.supported && post8601.lines.length === 0, label: "8601 not LISTENING", detail: post8601.lines.join(" | ") || "free" },
-      { ok: post8080.supported && post8080.lines.length === 0, label: "8080 not LISTENING", detail: post8080.lines.join(" | ") || "free" },
-    ],
-    `netstat -ano | grep -E ":(8601|8080)"`,
+    "S1-B",
+    "S1 build artifacts: jar shading/schema parity, workbench dist markers, Vite proxy",
+    checks,
+    `(cd "workbench" && npm ci && npm run build) && unzip -p "${COLLECTOR_JAR_REL}" "BOOT-INF/classes/schema/traceboard.event.v1.json" | sha256sum`,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* S1-G regression + drift                                             */
+/* ------------------------------------------------------------------ */
+
+function resultById(id) {
+  return RESULTS.find((item) => item.id === id) ?? null;
+}
+
+function checkS1G(builds) {
+  section("S1-G regression + freeze drift");
+  const checks = [];
+  const updatedContracts = new Set([
+    "docs/contracts/api.v1.md",
+    "docs/contracts/transport.v1.md",
+    "docs/contracts/event-model.v1.md",
+  ]);
+
+  const s1Baseline = parseFreezeBaseline(S1_PLAN_REVIEW_REL, /^#{2,3} 8\. G1 冻结基线/m);
+  checks.push({ ok: s1Baseline.length === 10, label: "10 S1 G1 baseline hashes recorded in S1 plan-review.md", detail: `found=${s1Baseline.length}` });
+  const s1Map = new Map(s1Baseline.map((entry) => [entry.rel, entry.hash]));
+  for (const entry of s1Baseline) {
+    const fileAbs = abs(entry.rel);
+    const actual = existsSync(fileAbs) ? sha256File(fileAbs) : "missing";
+    checks.push({ ok: actual === entry.hash, label: `S1 freeze ${entry.rel}`, detail: `actual=${actual} baseline=${entry.hash}` });
+  }
+
+  const s0Baseline = parseFreezeBaseline(PLAN_REVIEW_REL);
+  checks.push({ ok: s0Baseline.length === 7, label: "7 S0 G1 baseline hashes recorded in S0 plan-review.md", detail: `found=${s0Baseline.length}` });
+  const drifted = [];
+  for (const entry of s0Baseline) {
+    const fileAbs = abs(entry.rel);
+    const actual = existsSync(fileAbs) ? sha256File(fileAbs) : "missing";
+    if (updatedContracts.has(entry.rel)) {
+      const expected = s1Map.get(entry.rel);
+      const ok = actual === expected && actual !== entry.hash;
+      checks.push({
+        ok,
+        label: `S0->S1 contract update ${entry.rel} (allowed only via S1 G1 freeze)`,
+        detail: `s0=${entry.hash.slice(0, 12)} s1=${actual.slice(0, 12)}`,
+      });
+      if (!ok) drifted.push(entry.rel);
+    } else {
+      const ok = actual === entry.hash;
+      checks.push({ ok, label: `S0 frozen unchanged ${entry.rel}`, detail: `actual=${actual} s0=${entry.hash}` });
+      if (!ok) drifted.push(entry.rel);
+    }
+  }
+
+  const priorIds = ["V1", "V1b", "V1c", "V4b"];
+  checks.push({
+    ok: priorIds.every((id) => resultById(id)?.ok === true),
+    label: "S0 case-A fixture still validates (V1/V1b/V1c/V4b)",
+    detail: priorIds.map((id) => `${id}=${resultById(id)?.ok ? "PASS" : "FAIL"}`).join(","),
+  });
+  const buildIds = ["V2a", "V2b", "V2c-1", "V2c-2", "V2d-1", "V2d-2"];
+  checks.push({
+    ok: buildIds.every((id) => resultById(id)?.ok === true),
+    label: "S0 builds still green (root/demo/workbench/demo frontend)",
+    detail: buildIds.map((id) => `${id}=${resultById(id)?.ok ? "PASS" : "FAIL"}`).join(","),
+  });
+  checks.push({
+    ok: drifted.length === 0,
+    label: "no unexplained drift (only the 3 S1-updated contracts differ from S0)",
+    detail: drifted.length ? drifted.join(",") : "clean",
+  });
+
+  gate(
+    "S1-G",
+    "regression: case-A valid, S0 builds green, S1 G1 freeze baseline intact",
+    checks,
+    `sha256sum "schema/traceboard.event.v1.json" "docs/contracts/api.v1.md" "docs/contracts/transport.v1.md" "docs/contracts/event-model.v1.md" "${S1_BATCH_REL}"`,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* S1-H scope / security                                               */
+/* ------------------------------------------------------------------ */
+
+function checkS1H() {
+  section("S1-H scope / security");
+  const checks = [];
+
+  const collectorFiles = dirTextFiles("server/collector/src");
+  const collectorCode = collectorFiles.map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
+  const routes = [];
+  for (const file of collectorCode) {
+    if (!/\.java$/.test(file.rel)) continue;
+    for (const match of file.text.matchAll(/@(Get|Post|Put|Patch|Delete)Mapping\s*\(\s*(?:path\s*=\s*)?["']([^"']+)["']/g)) {
+      routes.push(`${match[1].toUpperCase()} ${match[2]}`);
+    }
+  }
+  const expectedRoutes = [
+    "GET /api/v1/meta",
+    "GET /api/v1/sessions",
+    "GET /api/v1/sessions/{sessionId}/events",
+    "POST /ingest/v1/events",
+  ];
+  checks.push({
+    ok: routes.slice().sort().join("|") === expectedRoutes.slice().sort().join("|"),
+    label: "collector registers exactly the 4 S1 routes (no graph/replay/stream/links)",
+    detail: routes.sort().join(", "),
+  });
+  const reservedRouteLeak = collectorCode.filter((file) => /["']\/[^"']*(graph|replay|links|stream)[^"']*["']/.test(file.text));
+  checks.push({
+    ok: reservedRouteLeak.length === 0,
+    label: "no reserved route string in collector mapping annotations",
+    detail: reservedRouteLeak.map((f) => f.rel).join(",") || "none",
+  });
+
+  const collectorForbidden = [
+    { name: "s2-db", re: /JdbcTemplate|java\.sql|javax\.sql|@Repository|spring-data-jpa|mybatis|hibernate/i },
+    { name: "s2-persistence", re: /FileOutputStream|Files\.write|java\.nio\.file|RandomAccessFile/ },
+    { name: "s2-correlation", re: /traceparent|clickId|mergeRootEvent/i },
+    { name: "s2-stream", re: /SseEmitter|EventSource|WebSocket|@ServerEndpoint/ },
+    { name: "cors", re: /@CrossOrigin|Access-Control-Allow/ },
+  ];
+  const collectorHits = [];
+  for (const file of collectorCode) {
+    for (const { name, re } of collectorForbidden) {
+      if (re.test(file.text)) collectorHits.push(`${file.rel} [${name}]`);
+    }
+  }
+  checks.push({ ok: collectorHits.length === 0, label: "collector has no DB/persistence/correlation/SSE-WS/CORS code", detail: collectorHits.join(",") || "none" });
+
+  const agentFiles = dirTextFiles("agent/src");
+  const agentCode = agentFiles.map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
+  const traceAgent = agentCode.find((f) => f.rel.endsWith("TraceAgent.java"))?.text ?? "";
+  const typeMatchers = (traceAgent.match(/\.type\(/g) ?? []).length;
+  const adviceSites = (traceAgent.match(/Advice\.to\(/g) ?? []).length;
+  checks.push({
+    ok: typeMatchers === 1 && adviceSites === 1 &&
+      /named\("cancel"\)/.test(traceAgent) && /takesArguments\(long\.class\)/.test(traceAgent) &&
+      traceAgent.includes("com.example.shop.controller.OrderController") &&
+      !/com\.example\.shop\.(service|mapper|repository)/.test(traceAgent),
+    label: "agent instruments exactly one type/method (OrderController#cancel(long))",
+    detail: `.type=${typeMatchers} Advice.to=${adviceSites}`,
+  });
+  const agentForbidden = [
+    { name: "s2-sql", re: /java\.sql|PreparedStatement|ResultSet|rowsAffected/ },
+    { name: "s2-correlation", re: /traceparent|clickId|correlat(?:e|ion)/ },
+    { name: "s2-targets", re: /com\.example\.shop\.(service|mapper|repository)/ },
+  ];
+  const agentHits = [];
+  for (const file of agentCode) {
+    for (const { name, re } of agentForbidden) {
+      if (re.test(file.text)) agentHits.push(`${file.rel} [${name}]`);
+    }
+  }
+  checks.push({ ok: agentHits.length === 0, label: "agent has no SQL/row/service/correlation probing", detail: agentHits.join(",") || "none" });
+
+  const workbenchFiles = dirTextFiles("workbench/src");
+  const wbText = workbenchFiles.map((f) => f.text).join("\n");
+  const wbCode = workbenchFiles.map((f) => stripComments(f.text)).join("\n");
+  const apiText = workbenchFiles.find((f) => f.rel.endsWith("src/api.ts"))?.text ?? "";
+  const apiCode = stripComments(apiText);
+  checks.push({
+    ok: !/\bEventSource\b|new WebSocket|setInterval/.test(wbCode),
+    label: "workbench has no SSE/WebSocket/interval polling",
+    detail: /\bEventSource\b|new WebSocket|setInterval/.test(wbCode) ? "stream API found" : "none",
+  });
+  checks.push({
+    ok: !/<canvas/i.test(wbCode) && !/from\s+["'](d3|echarts|cytoscape|vis-network|chart\.js|three)/.test(wbCode),
+    label: "workbench has no graph/canvas library or canvas element",
+    detail: "none",
+  });
+  checks.push({
+    ok: !/\bTimeline\b|\bid=["']timeline|import[^;]*\bReplay\b|id=["']replay/.test(wbCode),
+    label: "workbench has no timeline/replay view component",
+    detail: "none",
+  });
+  checks.push({
+    ok: !/rowCount|rowsAffected|sideEffects/.test(collectorCode.map((file) => file.text).join("\n")),
+    label: "collector collects no row counts/side effects (no S2 probes)",
+    detail: "none",
+  });
+  const workbenchPkg = readFileSync(abs("workbench/package.json"), "utf8");
+  checks.push({
+    ok: !/"(d3|echarts|cytoscape|vis-network|chart\.js|three|sigma)"/.test(workbenchPkg),
+    label: "workbench package.json has no graph/timeline dependency",
+    detail: "dependencies: vue, pinia only",
+  });
+  const fakeBatchText = workbenchFiles.find((f) => f.rel.endsWith("src/s1/fakeBatch.ts"))?.text ?? "";
+  const panelText = workbenchFiles.find((f) => f.rel.endsWith("components/S1Panel.vue"))?.text ?? "";
+  const agentSessionRead = /(?:fetchEventsPage|readBack|readOnce)\s*\(\s*["'`]s_s1|sessionId\s*[:=]\s*["']s_s1/.test(panelText + apiText);
+  checks.push({
+    ok: /S1_SESSION_ID\s*=\s*"s_wb_demo"/.test(fakeBatchText) && /readBack\(S1_SESSION_ID\)/.test(panelText) && !agentSessionRead,
+    label: "workbench reads only s_wb_demo (the agent session is never queried)",
+    detail: agentSessionRead ? "agent session used in a read call" : "s_wb_demo readback only",
+  });
+  checks.push({
+    ok: wbText.includes("no correlation yet") && /假/.test(wbText),
+    label: "workbench labels the skeleton honestly (no correlation yet / fake)",
+    detail: "banner present",
+  });
+  checks.push({
+    ok: apiCode.includes('"/ingest/v1/events"') && apiCode.includes('"/api/v1/sessions"') &&
+      !/["'`]https?:\/\//.test(apiCode),
+    label: "workbench API client uses relative paths only (proxy, no CORS/absolute URL)",
+    detail: apiCode.includes('"/ingest/v1/events"') ? "relative" : "missing",
+  });
+
+  const appYml = readFileSync(abs("server/collector/src/main/resources/application.yml"), "utf8");
+  checks.push({
+    ok: /address:\s*127\.0\.0\.1/.test(appYml) && /port:\s*8601/.test(appYml) && !/0\.0\.0\.0/.test(appYml),
+    label: "collector binds 127.0.0.1:8601 only",
+    detail: "application.yml loopback",
+  });
+
+  const agentSources = agentCode.map((f) => f.text).join("\n");
+  const failOpen = (agentSources.match(/catch\s*\(\s*Throwable/g) ?? []).length;
+  checks.push({
+    ok: failOpen >= 4 && !/\bretry\b|for\s*\(\s*int\s+attempt/i.test(agentSources) &&
+      /ArrayBlockingQueue/.test(agentSources) && /CAPACITY\s*=\s*16/.test(agentSources) &&
+      /CONNECT_TIMEOUT_MS\s*=\s*300/.test(agentSources) && /READ_TIMEOUT_MS\s*=\s*700/.test(agentSources),
+    label: "agent fail-open: Throwable guards, bounded queue 16, 300/700ms, no retries",
+    detail: `catch(Throwable)=${failOpen}`,
+  });
+
+  const mirrorHits = [];
+  for (const file of ["workbench/package-lock.json", "demo/buggy-shop-boot-vue/frontend/package-lock.json", "tools/verify/package-lock.json"]) {
+    const text = readFileSync(abs(file), "utf8");
+    for (const match of text.matchAll(/"resolved":\s*"([^"]+)"/g)) {
+      const host = (match[1].match(/^https?:\/\/([^/]+)/) ?? [])[1] ?? "";
+      if (host && host !== "registry.npmjs.org") mirrorHits.push(`${file} -> ${host}`);
+    }
+  }
+  const npmrcFiles = [...walk(abs("."), { skip: new Set(["node_modules", ".git", "target", "dist", "work"]) })]
+    .filter((file) => path.basename(file) === ".npmrc");
+  checks.push({
+    ok: mirrorHits.length === 0 && npmrcFiles.length === 0,
+    label: "no third-party npm mirrors (.npmrc absent, all resolved hosts = registry.npmjs.org)",
+    detail: mirrorHits.length ? mirrorHits.slice(0, 4).join(" | ") : "official registry only",
+  });
+  const pomTexts = ["pom.xml", "agent/pom.xml", "server/collector/pom.xml", "demo/buggy-shop-boot-vue/backend/pom.xml"]
+    .filter((rel) => existsSync(abs(rel)))
+    .map((rel) => readFileSync(abs(rel), "utf8"));
+  checks.push({
+    ok: pomTexts.every((text) => !/<repository>|<mirror>|<pluginRepository>/.test(text)),
+    label: "no custom Maven repository/mirror in poms (Maven Central default)",
+    detail: "none",
+  });
+
+  const s1FixtureText = readFileSync(abs(S1_BATCH_REL), "utf8") + readFileSync(abs(S1_AGENT_SPAN_REL), "utf8");
+  checks.push({
+    ok: !/[\w.+-]+@[\w-]+\.[\w.]+/.test(s1FixtureText) && !/\b1[3-9]\d{9}\b/.test(s1FixtureText),
+    label: "S1 fixtures contain no email/phone-like real data",
+    detail: "none",
+  });
+
+  gate(
+    "S1-H",
+    "scope/security: no S2 features, loopback only, fail-open, no secrets/mirrors",
+    checks,
+    `grep -rnE "EventSource|WebSocket|JdbcTemplate|traceparent|clickId" agent/src server/collector/src workbench/src`,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* S1-I cleanup                                                        */
+/* ------------------------------------------------------------------ */
+
+function checkS1I() {
+  section("S1-I cleanup");
+  const checks = [];
+  for (const port of S1_PORTS) {
+    const state = listeningOn(port);
+    checks.push({
+      ok: state.supported && state.lines.length === 0,
+      label: `port ${port} not LISTENING`,
+      detail: state.lines.join(" | ") || "free",
+    });
+  }
+
+  const nowPids = javaPids();
+  const leftover = nowPids.filter((pid) => !BASELINE.javaPids.includes(pid));
+  checks.push({
+    ok: leftover.length === 0,
+    label: "no java.exe process left behind by this run",
+    detail: leftover.length ? `pids=${leftover.join(",")}` : `none (baseline=${BASELINE.javaPids.join(",") || "0"})`,
+  });
+
+  const status = gitStatusLines();
+  const allowed = [
+    "agent/",
+    "server/",
+    "workbench/",
+    "pom.xml",
+    "docs/contracts/api.v1.md",
+    "docs/contracts/transport.v1.md",
+    "docs/contracts/event-model.v1.md",
+    "docs/plans/stages/S1/",
+    "fixtures/s1-walking-skeleton/",
+    "tools/verify/",
+    "README.md",
+    ".gitattributes",
+  ];
+  const forbidden = [
+    "schema/",
+    "fixtures/case-a-zero-rows/",
+    "demo/",
+    "docs/contracts/status-semantics.md",
+    "docs/plans/stages/S0/",
+    "docs/plans/00-master-plan.md",
+    "docs/plans/SOLO-PLAN.md",
+  ];
+  const unexpected = [];
+  const forbiddenHits = [];
+  const staged = [];
+  for (const line of status.lines) {
+    const index = `${line[0] ?? " "}${line[1] ?? " "}`;
+    const rel = line.slice(3).trim().replace(/^"|"$/g, "").split("/").join("/");
+    if (index[0] !== " " && index[0] !== "?") staged.push(line);
+    if (!allowed.some((prefix) => rel === prefix || rel.startsWith(prefix))) unexpected.push(line);
+    if (forbidden.some((prefix) => rel === prefix || rel.startsWith(prefix))) forbiddenHits.push(line);
+  }
+  checks.push({
+    ok: status.ok && forbiddenHits.length === 0,
+    label: "no git change under frozen/foreign paths (schema, case-A, demo, S0 docs)",
+    detail: forbiddenHits.slice(0, 4).join(" | ") || "none",
+  });
+  checks.push({
+    ok: status.ok && unexpected.length === 0,
+    label: "git status only shows expected S1 product/test paths",
+    detail: unexpected.slice(0, 4).join(" | ") || `${status.lines.length} expected entries`,
+  });
+  checks.push({
+    ok: status.ok && staged.length === 0,
+    label: "git index untouched (no staged entries)",
+    detail: staged.slice(0, 4).join(" | ") || "all changes untracked/unstaged",
+  });
+
+  gate(
+    "S1-I",
+    "cleanup: ports free, no java processes, git status limited to expected S1 paths",
+    checks,
+    `netstat -ano | grep -E ":(${S1_PORTS.join("|")})\\s" ; tasklist | grep -i java ; git status --porcelain`,
   );
 }
 
@@ -1325,7 +2645,7 @@ function checkV6() {
   }
   record(
     "V6e",
-    "agent jar manifest declares the noop premain",
+    "agent jar manifest declares the S1 premain entry point",
     manifestChecks.every((c) => c.ok),
     manifestChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
     `unzip -p "${AGENT_JAR_REL}" META-INF/MANIFEST.MF | grep -i "Premain-Class"`,
@@ -1336,60 +2656,9 @@ function checkV6() {
 /* V7 frozen drift                                                     */
 /* ------------------------------------------------------------------ */
 
-function checkV7() {
-  section("V7 frozen-file drift vs plan-review baseline");
-  const checks = [];
-  const baseline = [];
-  let reviewText = "";
-  try {
-    reviewText = readFileSync(abs(PLAN_REVIEW_REL), "utf8");
-  } catch (error) {
-    checks.push({ ok: false, label: "plan-review.md readable", detail: error.message });
-  }
-  for (const line of reviewText.split(/\r?\n/)) {
-    const match = line.match(/^([0-9a-f]{64})\s{2}(.+)$/);
-    if (match) baseline.push({ hash: match[1], rel: match[2].trim() });
-  }
-  checks.push({
-    ok: baseline.length === 7,
-    label: "7 baseline hashes recorded in plan-review.md",
-    detail: `found=${baseline.length}`,
-  });
-
-  for (const entry of baseline) {
-    const fileAbs = abs(entry.rel);
-    const exists = existsSync(fileAbs);
-    const actual = exists ? sha256File(fileAbs) : "missing";
-    checks.push({
-      ok: exists && actual === entry.hash,
-      label: `drift ${entry.rel}`,
-      detail: `actual=${actual} baseline=${entry.hash}`,
-    });
-  }
-
-  // Report every frozen-scope file, including those without a recorded baseline.
-  const frozenScope = [
-    ...walk(abs("schema")),
-    ...walk(abs("fixtures")),
-    ...walk(abs("docs/contracts")),
-  ].map(relOf);
-  const baselined = new Set(baseline.map((b) => b.rel));
-  for (const rel of frozenScope.sort()) {
-    if (baselined.has(rel)) continue;
-    checks.push({
-      ok: true,
-      label: `no baseline recorded (reported only) ${rel}`,
-      detail: sha256File(abs(rel)),
-    });
-  }
-
-  gate(
-    "V7",
-    "schema/fixtures/contracts match the G1 freeze baseline",
-    checks,
-    `sha256sum "schema/traceboard.event.v1.json" "fixtures/case-a-zero-rows/events.jsonl" "fixtures/case-a-zero-rows/expected-facts.json" "docs/contracts/event-model.v1.md" "docs/contracts/status-semantics.md" "docs/contracts/transport.v1.md" "docs/contracts/api.v1.md"`,
-  );
-}
+// The S0-only drift gate was superseded by S1-G: it now checks the S1 G1 baseline
+// (10 files) plus S0 regression (all S0 files unchanged except the three S1-updated
+// contracts). Nothing to run here.
 
 /* ------------------------------------------------------------------ */
 /* V8 hygiene                                                          */
@@ -1509,7 +2778,7 @@ function checkV8() {
   }
   record("V8c", ".gitattributes / CRLF risk recorded", true, attrChecks.map((c) => `note ${c.label} :: ${c.detail}`), null);
 
-  // V8d verifier made no product writes; git index untouched
+  // V8d verifier made no product writes; git status/index unchanged by this run
   const snapshotNow = sourceSnapshot();
   const changed = [];
   for (const [rel, hash] of Object.entries(SNAPSHOT)) {
@@ -1517,20 +2786,23 @@ function checkV8() {
   }
   const added = Object.keys(snapshotNow).filter((rel) => !(rel in SNAPSHOT));
 
-  const status = runExe("git", ["status", "--porcelain"], { timeout: 60000 });
-  const statusLines = (status.stdout || "").split(/\r?\n/).filter((line) => line.trim() !== "");
-  const stagedOrModified = statusLines.filter((line) => !line.startsWith("??"));
+  const status = gitStatusLines();
+  const statusNow = status.lines.slice().sort().join("\n");
   const ignoredNodeModules = runExe("git", ["check-ignore", "-q", "--", "tools/verify/node_modules/ajv/package.json"]);
 
   const hygieneChecks = [
     { ok: changed.length === 0, label: "no product file modified during verify", detail: changed.length ? changed.slice(0, 5).join(" | ") : `${Object.keys(SNAPSHOT).length} files stable` },
     { ok: added.length === 0, label: "no product files added during verify", detail: added.length ? added.slice(0, 5).join(" | ") : "none" },
-    { ok: stagedOrModified.length === 0, label: "git index untouched (no add/modify/delete entries)", detail: stagedOrModified.length ? stagedOrModified.slice(0, 5).join(" | ") : `${statusLines.length} untracked paths, all "??"` },
+    {
+      ok: status.ok && statusNow === BASELINE.gitStatus,
+      label: "git status identical before/after verify (verifier wrote no tracked product path)",
+      detail: status.ok ? `${status.lines.length} entries, unchanged=${statusNow === BASELINE.gitStatus}` : status.error,
+    },
     { ok: ignoredNodeModules.code === 0, label: "tools/verify/node_modules is gitignored", detail: ignoredNodeModules.code === 0 ? "ignored" : "NOT ignored" },
   ];
   record(
     "V8d",
-    "verifier wrote no product files; git index untouched",
+    "verifier wrote no product files; git status unchanged by the run",
     hygieneChecks.every((c) => c.ok),
     hygieneChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
     `git status --porcelain`,
@@ -1542,6 +2814,7 @@ function checkV8() {
 /* ------------------------------------------------------------------ */
 
 let SNAPSHOT = {};
+let BASELINE = { javaPids: [], gitStatus: "" };
 
 function sourceSnapshot() {
   const files = [];
@@ -1580,12 +2853,17 @@ function sourceSnapshot() {
 async function main() {
   const startedAt = new Date();
   console.log("==============================================");
-  console.log("TraceBoard S0 verifier");
+  console.log("TraceBoard S0 + S1 verifier");
   console.log(`repo: ${REPO}`);
   console.log(`started: ${startedAt.toISOString()}`);
   console.log("==============================================");
 
   SNAPSHOT = sourceSnapshot();
+  const statusBefore = gitStatusLines();
+  BASELINE = {
+    javaPids: javaPids(),
+    gitStatus: statusBefore.lines.slice().sort().join("\n"),
+  };
 
   const env = captureEnv();
   section("V0 environment");
@@ -1600,6 +2878,7 @@ async function main() {
       `mvn(default JAVA_HOME)=${env.mvnDefault}`,
       `mvn(JDK21)=${env.mvnJdk21}`,
       `platform=${env.platform}`,
+      `baseline java pids=${BASELINE.javaPids.join(",") || "none"}; git status entries=${statusBefore.lines.length}`,
     ],
     null,
   );
@@ -1609,12 +2888,21 @@ async function main() {
   checkV1c(v1.parsed, v1.validate);
   checkV4b(v1.parsed);
 
-  checkV2();
+  const builds = checkV2();
   checkV3();
-  await checkV5();
+
+  checkS1A(v1.validate);
+  checkS1B(builds, v1.validate);
+
+  await checkS1CDF(v1.validate);
+  await checkS1E(v1.validate);
+
   checkV6();
-  checkV7();
   checkV8();
+
+  checkS1G(builds);
+  checkS1H();
+  checkS1I();
 
   section("SUMMARY");
   const failed = RESULTS.filter((r) => !r.ok);
@@ -1625,7 +2913,7 @@ async function main() {
     for (const item of failed) console.log(`  - ${item.id}: ${item.title}`);
   }
   const verdict = failed.length === 0 ? "PASS" : "FAIL";
-  console.log(`S0 TEST: ${verdict}`);
+  console.log(`S1 TEST: ${verdict}`);
 
   if (process.argv.includes("--json")) {
     console.log(

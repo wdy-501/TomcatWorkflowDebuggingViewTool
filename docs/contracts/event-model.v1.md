@@ -1,6 +1,9 @@
 # 事件模型 v1（event-model.v1）
 
 > 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23｜作者：plan-writer（S0）
+> 变更记录：**2026-11-23 S1 增补（G1 第 1 轮返工）**——§2/§5/§7/§9/§11 记录“游离后端根（isolated backend request）”这一**唯一例外**
+>   （`parentSpanId=null` + `kind=controller` + `confidence=LOST` + 合成 `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）。
+>   **仅文档修订：schema 与 fixture 字节未变。**
 > 机器可校验版本：`schema/traceboard.event.v1.json`（JSON Schema 2020-12，`$id=urn:traceboard:schema:event:v1`）
 > 语义来源：主计划 §13.4 / §2.3 / §8.3 / §9.2；分发书 §4.1。本文与 schema 冲突时以 schema 为机器事实、以本文为语义解释。
 
@@ -20,8 +23,8 @@
 | `sessionId` | string | 是 | `^s_[A-Za-z0-9_-]+$`；会话分区键 |
 | `traceId` | string | 是 | `^[0-9a-f]{32}$`，W3C trace id；同一操作链共用 |
 | `spanId` | string | 是 | `^[0-9a-f]{16}$`；会话内唯一 |
-| `parentSpanId` | string \| null | 是 | `^[0-9a-f]{16}$` 或 `null`；根 span 为 `null` |
-| `rootEventId` | string | 是 | `^click_[A-Za-z0-9_-]{8,}$`；前端点击根 ID，后端 span 继承 |
+| `parentSpanId` | string \| null | 是 | `^[0-9a-f]{16}$` 或 `null`；根 span 为 `null`（含 §5 第 2 条的“游离后端根”唯一例外） |
+| `rootEventId` | string | 是 | `^click_[A-Za-z0-9_-]{8,}$`；前端点击根 ID，后端 span 继承；游离后端根使用合成占位 `click_lost_<spanId>`（见 §5 第 2 条例外） |
 | `kind` | string | 是 | 见 §3.1，11 值枚举 |
 | `nodeKey` | string | 是 | 稳定节点键，1–512 字符；后端建议 `FQCN#method`，前端建议 `源文件#函数` |
 | `source` | object | 否 | `{file:string\|null, line:int\|null}`；见 §4.1 |
@@ -78,7 +81,7 @@
 |---|---|
 | `EXACT` | traceparent + clickId 链路完整 |
 | `INFERRED` | header 丢失但时间窗/指纹吻合（推断，可确认） |
-| `LOST` | 只有一端（前端有请求后端无 span，或反之）→ 游离区 |
+| `LOST` | 只有一端（前端有请求后端无 span，或反之）→ 游离区；**后端有请求无前端根**的具体形状见 §5 第 2 条例外 |
 | `MANUAL` | 用户手工建立关联；回放保持，但不伪装自动 |
 
 ## 4. 嵌套对象
@@ -139,8 +142,15 @@
 
 1. `spanId` 会话内唯一；`parentSpanId` 指向的 span 必须在同一流中出现（S0 fixture 必须满足；
    未来允许缺失并标 `NOT_COLLECTED_LOST`，需契约变更）。
-2. `parentSpanId=null` 仅用于操作根（S0 为 `ui_event`）；同一 `traceId` 只有一个根。
-3. 所有事件共用同一 `rootEventId`；前端点击生成，后端通过 traceparent + clickId 继承。
+2. `parentSpanId=null` 只出现在**根 span**上，且同一 `traceId` 只有一个根。S1 的根只有两种，除此之外任何 `parentSpanId=null` 都是契约违规：
+   - **操作根**：前端 `ui_event`（S0 样例的形状），`rootEventId` 由前端点击生成；
+   - **S1 例外——游离后端根（isolated backend request）**：一次后端请求**没有任何前端根**时（主计划 §8.3“后端有请求但无前端根 → 游离区”），
+     允许一条后端根 span：`parentSpanId=null`、`kind` 为后端 kind（**S1 只允许 `controller`**，且**不得**为 `ui_event`）、
+     `confidence=LOST`、`flags` 必须含 `LOST_BACKEND`；其 `traceId` 由该 span 独占（不得与任何前端或其它游离根的 `traceId` 相同）。
+   `ui_event` 根与游离后端根不得共存于同一 `traceId`；游离后端根说明“这条链没有前端点击”，不表示关联失败或推断成功。
+3. 同一 `traceId` 内的所有事件共用同一 `rootEventId`；前端点击生成，后端通过 traceparent + clickId 继承。
+   **唯一例外**是第 2 条的游离后端根：其 `rootEventId` 由本端合成占位 `click_lost_<该 span 的 spanId>`
+   （仍满足 `^click_[A-Za-z0-9_-]{8,}$`），表示“这条链没有前端点击”；不得写成真实 clickId，也不得与任何前端 `rootEventId` 相同。
 4. 文件顺序按 `startNs` 非降序；子 span 的 `[startNs, startNs+durNs]` 落在父 span 区间内。**唯一例外**：`kind=callback`（响应回调）允许在其 `fetch` 父 span 结束后启动，但其区间必须落在其所在根 span（`parentSpanId=null` 的祖先）区间内。
 5. `startNs`/`durNs` 是整数纳秒；禁止浮点、禁止负数、禁止回退。
 6. `status` 与 `confidence` 正交：`EXACT` 不等于 `OK`；`LOST` 是置信度而非状态。
@@ -159,10 +169,13 @@
 | flag | 含义 | 状态 |
 |---|---|---|
 | `DROP_COUNT=<n>` | 会话累计丢弃事件数；`0` 表示未丢弃 | v1 使用，case A 每行携带 |
+| `LOST_BACKEND` | 该 span 是只有后端一端的**游离后端根**（`parentSpanId=null`、`confidence=LOST`、`rootEventId=click_lost_<spanId>`，见 §5 第 2 条例外） | v1 使用（S1 起由 agent 写入） |
 | `SAMPLED` | 本 span 经过采样 | 预留（v1 可写） |
 | `L2` | 该 span 走深度档采集 | 预留（v1 可写） |
+| `SKELETON` / `S1_ONE_METHOD` / `S1_WALKING_SKELETON` | S1 walking skeleton 的**阶段标记**（只说明采集范围/来源，不承载关联语义） | 本阶段使用 |
 
 - flag 是**提示**，不改变 `status`；未知 flag 读取方必须忽略而非报错（但 schema 只允许上述字符集）。
+- `SKELETON`/`S1_ONE_METHOD`/`S1_WALKING_SKELETON` 是本阶段标记：读取方一律按“未知 flag 忽略”规则处理，不得据此推断关联或能力。
 - 静默丢弃不可接受：任何丢弃都必须以 `DROP_COUNT` 或 `NOT_COLLECTED_LOST + reason` 出现（主计划 §9.2）。
 
 ## 8. 隐私与预算（v1 摘要）
@@ -181,9 +194,10 @@
 | `valueRef` 内容寻址 | 大对象去重预留；v1 只放摘要 |
 | 事件类型扩展 | `session_start`/`graph_patch` 等未定义 |
 | 异步上下文/跨服务字段 | `async` kind 已留，上下文传播字段未定义 |
-| 关联规则表/游离区结构 | S1 设计，本文不实现 |
+| 关联规则表/游离区结构 | S1 起允许 §5 第 2 条的**游离后端根形状**（`parentSpanId=null` + `kind=controller` + `confidence=LOST` + `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）；关联规则表、时间窗推断、游离区合并/手工关联（`MANUAL`）仍属后续检查点 |
 
-**S0 边界**：本模型是“可校验的契约 + fixture 样例”，不代表已具备采集/关联能力。
+**S0 边界**：S0 的样例只证明“可校验的契约 + fixture 样例”，不代表已具备采集/关联能力。
+**S1 边界**：S1 只有 §5 第 2 条例外描述的最小后端根采集（单方法 agent，`confidence=LOST`）；仍无任何关联/合并/推断能力。
 
 ## 10. 变更流程
 
@@ -194,6 +208,9 @@
 
 ## 11. 参考样例
 
-- 合规样例：`fixtures/case-a-zero-rows/events.jsonl`（9 行，全 `OK`/`EXACT`）。
-- 期望事实：`fixtures/case-a-zero-rows/expected-facts.json`。
-- 校验入口：`(cd "tools/verify" && node verify.mjs)`。
+- 合规样例（S0，前端点击链）：`fixtures/case-a-zero-rows/events.jsonl`（9 行，全 `OK`/`EXACT`）。
+- 期望事实（S0）：`fixtures/case-a-zero-rows/expected-facts.json`。
+- S1 假前端批次（2 行，全 `OK`/`EXACT`，点击链）：`fixtures/s1-walking-skeleton/frontend-fake-batch.ndjson`。
+- S1 游离后端根样例（1 行）：`fixtures/s1-walking-skeleton/agent-controller-span.json`
+  （`kind=controller`、`parentSpanId=null`、`confidence=LOST`、`rootEventId=click_lost_<spanId>`、flags 含 `LOST_BACKEND`；§5 第 2 条例外）。
+- 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0 门禁；S1 由 tester 扩展）。

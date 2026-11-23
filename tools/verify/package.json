@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "TraceBoard S0 independent verifier: schema/fixture, expected facts, negative cases, causal intervals, builds, agent bytecode, runtime smoke, artifacts/parity, frozen drift, hygiene",
+  "description": "TraceBoard S0+S1 independent verifier: S0 schema/fixture/negatives/intervals/builds/artifacts/hygiene plus S1 fixtures+facts, ingest/query/agent E2E/workbench path, regression+freeze drift, scope/security and cleanup",
   "scripts": {
     "verify": "node verify.mjs"
   },

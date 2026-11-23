@@ -15,30 +15,77 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Agent</name>
-  <description>S0 noop -javaagent skeleton (no instrumentation)</description>
+  <description>S1 -javaagent: Byte Buddy instrumentation of exactly one demo controller method, fail-open NDJSON sender</description>
 
   <properties>
-    <!-- S0 decision: agent bytecode must stay Java 8 (class file major version 52). -->
+    <!-- S1 decision: agent bytecode must stay Java 8 (class file major version 52). -->
     <maven.compiler.release>8</maven.compiler.release>
+    <byte-buddy.version>1.14.19</byte-buddy.version>
   </properties>
 
-  <!-- Deliberately zero dependencies: no ASM, no Byte Buddy, no attach API. -->
-  <dependencies/>
+  <dependencies>
+    <!-- Only dependency; shaded + relocated into the agent jar (no attach API, no ASM, no Jackson). -->
+    <dependency>
+      <groupId>net.bytebuddy</groupId>
+      <artifactId>byte-buddy</artifactId>
+      <version>${byte-buddy.version}</version>
+    </dependency>
+  </dependencies>
 
   <build>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jar-plugin</artifactId>
-        <configuration>
-          <archive>
-            <manifestEntries>
-              <Premain-Class>io.traceboard.agent.TraceAgent</Premain-Class>
-              <Implementation-Title>TraceBoard Agent</Implementation-Title>
-              <Implementation-Version>${project.version}</Implementation-Version>
-            </manifestEntries>
-          </archive>
-        </configuration>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.5.3</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <!-- Keep the repository clean: never emit agent/dependency-reduced-pom.xml. -->
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <shadedArtifactAttached>false</shadedArtifactAttached>
+              <artifactSet>
+                <includes>
+                  <include>net.bytebuddy:byte-buddy</include>
+                </includes>
+              </artifactSet>
+              <relocations>
+                <relocation>
+                  <pattern>net.bytebuddy</pattern>
+                  <shadedPattern>io.traceboard.agent.shaded.net.bytebuddy</shadedPattern>
+                </relocation>
+              </relocations>
+              <filters>
+                <filter>
+                  <artifact>net.bytebuddy:byte-buddy</artifact>
+                  <excludes>
+                    <exclude>META-INF/MANIFEST.MF</exclude>
+                    <exclude>META-INF/versions/**</exclude>
+                    <exclude>module-info.class</exclude>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <manifestEntries>
+                    <Premain-Class>io.traceboard.agent.TraceAgent</Premain-Class>
+                    <Implementation-Title>TraceBoard Agent</Implementation-Title>
+                    <Implementation-Version>${project.version}</Implementation-Version>
+                    <Can-Redefine-Classes>false</Can-Redefine-Classes>
+                    <Can-Retransform-Classes>false</Can-Retransform-Classes>
+                  </manifestEntries>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>
