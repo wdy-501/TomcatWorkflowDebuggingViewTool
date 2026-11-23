@@ -222,7 +222,7 @@ G2 收尾：继续无 java.exe；提交前工作区仅 S2 产品/测试/契约/f
 | 项 | 值 |
 |---|---|
 | 基线 commit | `feat(S2): zero-row fact chain — H2 defect, 4-span agent, requests/graph, request switching` |
-| 基线 commit 哈希 | `（首轮提交后由 G2 追加）` |
+| 基线 commit 哈希 | `eff152f3c1009d60f0aa33e9ac6c384ede5862ee`（`s2-baseline` 指向同一 commit） |
 | tag | `s2-baseline`（lightweight，指向基线 commit） |
 | 后续 commit | `docs(S2): record baseline commit`（仅 `acceptance.md`、`progress.md`；不改历史、不 amend） |
 | 归档 | `docs/plans/archive/stage-S2-2026-11-23/`（提交前快照；MANIFEST 记 SHA256 与恢复方法） |

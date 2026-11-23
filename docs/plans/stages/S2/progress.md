@@ -73,7 +73,7 @@ NEXT: S3（前端 SDK/关联/回放/时间轴）— 需 dispatcher 新分发书�
 
 ## 基线记录
 
-- 基线 commit：`（首轮提交后由 G2 追加）`
+- 基线 commit：`eff152f3c1009d60f0aa33e9ac6c384ede5862ee`（`feat(S2): zero-row fact chain — H2 defect, 4-span agent, requests/graph, request switching`；tag `s2-baseline` 指向同一 commit）
 - tag：`s2-baseline`（指向同一 commit）
 - 后续 commit：`docs(S2): record baseline commit`（仅 `acceptance.md`、`progress.md`）
 - 归档：`docs/plans/archive/stage-S2-2026-11-23/`（提交前快照；SHA256 与恢复方法见其 `MANIFEST.md`）
