@@ -1,9 +1,11 @@
 # 传输契约 v1（transport.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24）
 > 变更记录：**2026-11-23 S1 增补**——通路 A（ingest）与通路 C 的**只读会话查询**转为已实现；
 >   实时推送（通路 B：SSE/WebSocket）与回放仍为预留，S1 代码中不存在。S0 的“501 骨架”行为按原样保留为 `S0` 历史注记。
 >   **2026-11-23 G1 第 1 轮**：§4.5 增第 8 条，记录 S1 agent 事件的“游离后端根”语义（`event-model.v1.md` §5 第 2 条例外；仅文档，schema/fixture 未变）。
+>   **2026-11-24 S2 增补（最小）**：通路 C 新增两个**只读派生**查询 `GET .../requests` 与 `GET .../graph?traceId=`（§6.3，形状见 `api.v1.md` §8）；
+>   通路 A（ingest）**零改动**；通路 B（SSE/WebSocket）仍不实现，回放仍预留。无新增写入通路、无新端口、无 CORS。
 > 范围：collector 与 agent/SDK/工作台之间的数据通路。**S0 只实现骨架**：ingest 返回 501，实时与回放全部预留。
 > 关联契约：`event-model.v1.md`（事件语义）、`api.v1.md`（HTTP 端点清单、S1 实现矩阵 §2.1 与 S1 定义 §7）。
 
@@ -22,6 +24,8 @@
 - 不使用任何外部 CDN/在线字体/遥测端点；所有资源本地打包。
 - S1 代理：workbench 的 Vite 代理把 `/ingest` 与 `/api` 转发到 `http://127.0.0.1:8601`（IPv4 字面量，避免 `[::1]`），
   因此浏览器只发同源相对路径；collector 仍不加 CORS 头。
+- **S2**：collector 在同一 `127.0.0.1:8601` 上新增 `requests`/`graph` 两个只读查询（工作台经同一条 `/api` 代理读取）；
+  demo 后端仍 `localhost:8080`（JDK8，H2 嵌入式）、workbench 5173、demo 前端 5174 均不变；无新端口、无新代理规则。
 
 ## 2. 三条通路（职责分离）
 
@@ -29,7 +33,7 @@
 |---|---|---|---|
 | A. 批量 ingest | agent/SDK → collector | `POST /ingest/v1/events`，NDJSON | **S1 已实现**（S0 曾返回 501） |
 | B. 实时推送 | collector → workbench | SSE 或 WebSocket（二选一或并存） | **预留，S1 未实现**（代码中不存在） |
-| C. 只读查询 / 回放 | workbench → collector | HTTP GET | **S1：只读会话/事件查询已实现**；**回放仍预留** |
+| C. 只读查询 / 回放 | workbench → collector | HTTP GET | **S1：只读会话/事件查询已实现**；**S2：新增 requests/graph 只读派生查询**；**回放仍预留** |
 
 - 唯一事实源是 append-only 事件流；B/C 都是派生读取，不得改写事件。
 - S0 的 demo 应用、demo 前端、workbench 与 collector **彼此不通信**（分发书 §2.2）；S1 只放开
@@ -174,6 +178,26 @@ GET /api/v1/sessions/s_wb_demo/events?afterSeq=0&limit=200
 - 回放语义：输入是已有事件流，**不重新执行程序**；不调用 demo 后端、不发 HTTP 写请求、不触发 SQL。
 - 回放响应不得包含凭据/原始敏感值；脱敏与截断标记原样保留。
 
+### 6.3 S2 只读请求/图查询（已实现；仍是查询，不是回放）
+
+```http
+GET /api/v1/sessions/{sessionId}/requests
+→ 200 {"sessionId":"s_...","requests":[{"traceId","rootSpanId","rootKind","nodeKey","status","confidence","spanCount","startedAtNs","durNs","hasError"}]}
+
+GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex>
+→ 200 {"sessionId","traceId","rootEventId","confidence","nodes":[11 个固定字段],"edges":[{"from","to","count":1}]}
+```
+
+- 形状、字段语义、排序、聚合优先级与 `400/404/405` 的权威定义在 `api.v1.md` §8.1/§8.2；本节只记录传输层事实：
+  - **读时派生**：每次请求从内存事件快照现算，无缓存、无持久化、无后台任务；两次相同 GET 结果一致，事件数/`seq`/存储不变。
+  - `graph` 的 `traceId` 是**必填**查询参数（`^[0-9a-f]{32}$`），缺失/非法 → `400`；未知 session 或 session 内无该 trace → `404`。
+  - 只有 `GET`；写动词 → `405`；无 CORS、无分页、无 `429`；错误用统一信封（§4.3）。
+  - **不是回放**：不重新执行程序、不调用 demo 后端、不发写请求、不触发 SQL、不提供虚拟时钟；`capabilities.replay` 保持 `false`。
+  - **不是实时**：没有 SSE/WebSocket/长连接；工作台的刷新是客户端手动按钮 + 低频轮询（非服务端推送）。
+  - 未注册路由保持 404：`/replay`、`/stream`、`/ws/v1/events`、`/links`。
+- S2 的 agent 事件仍是 §4.5 第 8 条的游离后端根，并在同一 `traceId` 内带 `service/mapper/sql` 子链（`event-model.v1.md` §5 第 2 条 S2 补充）；
+  `requests` 对这类 trace 返回 `confidence="LOST"`，UI 必须标为游离/未归属，不得画成点击链的一环。
+
 ## 7. 安全与合规
 
 - 只监听 `127.0.0.1`；无外网访问；无遥测；不上传工作区外数据。
@@ -185,5 +209,5 @@ GET /api/v1/sessions/s_wb_demo/events?afterSeq=0&limit=200
 
 - 路径带主版本（`/ingest/v1/`、`/api/v1/`）；事件带 `schema=traceboard.event.v1`。
 - 兼容性原则：新增可选字段需契约变更；语义变更必须升主版本并保留旧路径一个检查点。
-- S0/S1 的所有“预留”端点不得以“已实现”名义写进 README/报告；状态以 `api.v1.md` §2.1（S1）与 §2（S0 历史）为准。
-- S1 的“会话查询”≠“回放”：README/报告/UI 不得把 `GET /api/v1/sessions*` 描述为回放。
+- S0/S1/S2 的所有“预留”端点不得以“已实现”名义写进 README/报告；状态以 `api.v1.md` §2.2（S2 当前）、§2.1（S1 历史）与 §2（S0 历史）为准。
+- S1/S2 的“会话查询 / 请求摘要 / 派生图”≠“回放”：README/报告/UI 不得把 `GET /api/v1/sessions*` 描述为回放。

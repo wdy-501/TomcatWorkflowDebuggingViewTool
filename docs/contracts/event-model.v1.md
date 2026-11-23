@@ -4,6 +4,10 @@
 > 变更记录：**2026-11-23 S1 增补（G1 第 1 轮返工）**——§2/§5/§7/§9/§11 记录“游离后端根（isolated backend request）”这一**唯一例外**
 >   （`parentSpanId=null` + `kind=controller` + `confidence=LOST` + 合成 `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）。
 >   **仅文档修订：schema 与 fixture 字节未变。**
+>   **2026-11-24 S2 澄清（仅短注，无字段/枚举/约束变更）**：①`sideEffects[].transaction="UNKNOWN"` 合法且 S2 默认用它（未采集事务边界，不猜 `COMMITTED`）；
+>   ②controller 的 HTTP 状态码可写入 `return`（`{type:"org.springframework.http.ResponseEntity","value":200}` / 404），前端 `fetch` 仍按 §4.3 用 `{type:"http",value:200}`；
+>   ③§5 第 2 条“游离后端根”在 S2 是一棵**同 trace 的子链**（根 `parentSpanId=null`，子 span 指向父、继承 `confidence=LOST` 与 `rootEventId`，`LOST_BACKEND` 只写根）。
+>   **schema 字节不变**（G1 冻结面零漂移）。
 > 机器可校验版本：`schema/traceboard.event.v1.json`（JSON Schema 2020-12，`$id=urn:traceboard:schema:event:v1`）
 > 语义来源：主计划 §13.4 / §2.3 / §8.3 / §9.2；分发书 §4.1。本文与 schema 冲突时以 schema 为机器事实、以本文为语义解释。
 
@@ -81,7 +85,7 @@
 |---|---|
 | `EXACT` | traceparent + clickId 链路完整 |
 | `INFERRED` | header 丢失但时间窗/指纹吻合（推断，可确认） |
-| `LOST` | 只有一端（前端有请求后端无 span，或反之）→ 游离区；**后端有请求无前端根**的具体形状见 §5 第 2 条例外 |
+| `LOST` | 只有一端（前端有请求后端无 span，或反之）→ 游离区；**后端有请求无前端根**的具体形状见 §5 第 2 条例外（S2 起该游离后端根可带同一 trace 的子链，子 span 继承 `LOST`） |
 | `MANUAL` | 用户手工建立关联；回放保持，但不伪装自动 |
 
 ## 4. 嵌套对象
@@ -107,6 +111,9 @@
 - `type` 推荐词表（**契约建议，不强制枚举**）：`boolean`、`int`、`long`、`double`、`string`、`object`、`array`、`http`、`ui_effect`。
 - **HTTP 约定**：`fetch`（或 `controller`）事件的 HTTP 状态码写在 `return={type:"http", value:200}`。
   case A 选择把它放在 `fetch` 事件上；回调事件的 `return.type="ui_effect"`，`value` 为用户可见提示文案。
+- **S2 澄清（controller）**：后端 controller 没有前端 `fetch` 事件时，可直接在 controller span 上用真实返回类型的 FQCN 作为 `type`、
+  用 HTTP 状态码作为 `value`，例如 `{"type":"org.springframework.http.ResponseEntity","value":200}`（未知 id 为 404）。
+  这是同一 HTTP 约定的后端写法（agent 反射读取状态码，读不到就 `value=null`，不猜）；仍不记录响应 body。
 - 对象值只放摘要：深度 ≤4、字段 ≤30、字符串 ≤2KB（主计划 §9.2）；大对象去重（`valueRef`）为 v1 预留，见 §9。
 
 ### 4.4 `values[]`
@@ -137,6 +144,8 @@
 
 - SQL 文本与参数**不进入 v1**（隐私/预算）；字段级 SQL 参数（脱敏后）是 L1 契约变更，见 §9。
 - 一条事件可带多个 SQL（批处理），顺序即执行顺序。
+- **S2 澄清**：`transaction="UNKNOWN"` 合法且是 S2 的默认值——S2 agent 在 MyBatis `PreparedStatementHandler#update` 处只能确定
+  **影响行数**，看不到事务是否提交，因此写 `UNKNOWN`（不猜 `COMMITTED`）；`rowsAffected=0` 是正常事实，不是错误状态。
 
 ## 5. 不变量（校验工具会检查，评审也按此核对）
 
@@ -147,6 +156,9 @@
    - **S1 例外——游离后端根（isolated backend request）**：一次后端请求**没有任何前端根**时（主计划 §8.3“后端有请求但无前端根 → 游离区”），
      允许一条后端根 span：`parentSpanId=null`、`kind` 为后端 kind（**S1 只允许 `controller`**，且**不得**为 `ui_event`）、
      `confidence=LOST`、`flags` 必须含 `LOST_BACKEND`；其 `traceId` 由该 span 独占（不得与任何前端或其它游离根的 `traceId` 相同）。
+     **S2 补充（同一条例外的子链）**：该游离后端根可以拥有**同一 `traceId` 内的子 span**（`parentSpanId` 指向本 trace 的 span，
+     `kind` 为后端 kind：S2 为 `service`/`mapper`/`sql`），子 span 继承 `confidence=LOST` 与同一 `rootEventId`；
+     `LOST_BACKEND` 仍**只写根**（它描述“整条链没有前端根”，不是每个子节点各带一次）。该 `traceId` 仍不得含任何前端事件（`ui_event`/`js_method`/`fetch`/`callback`/`render`）。
    `ui_event` 根与游离后端根不得共存于同一 `traceId`；游离后端根说明“这条链没有前端点击”，不表示关联失败或推断成功。
 3. 同一 `traceId` 内的所有事件共用同一 `rootEventId`；前端点击生成，后端通过 traceparent + clickId 继承。
    **唯一例外**是第 2 条的游离后端根：其 `rootEventId` 由本端合成占位 `click_lost_<该 span 的 spanId>`
@@ -173,6 +185,7 @@
 | `SAMPLED` | 本 span 经过采样 | 预留（v1 可写） |
 | `L2` | 该 span 走深度档采集 | 预留（v1 可写） |
 | `SKELETON` / `S1_ONE_METHOD` / `S1_WALKING_SKELETON` | S1 walking skeleton 的**阶段标记**（只说明采集范围/来源，不承载关联语义） | 本阶段使用 |
+| `S2_ZERO_ROW_CHAIN` | S2 0 行事实链的**阶段标记**（controller/service/mapper/sql 四点采集；只说明采集范围/来源，不承载关联语义） | 本阶段使用（S2 起由 agent 写入全部 4 个 span） |
 
 - flag 是**提示**，不改变 `status`；未知 flag 读取方必须忽略而非报错（但 schema 只允许上述字符集）。
 - `SKELETON`/`S1_ONE_METHOD`/`S1_WALKING_SKELETON` 是本阶段标记：读取方一律按“未知 flag 忽略”规则处理，不得据此推断关联或能力。
@@ -198,6 +211,8 @@
 
 **S0 边界**：S0 的样例只证明“可校验的契约 + fixture 样例”，不代表已具备采集/关联能力。
 **S1 边界**：S1 只有 §5 第 2 条例外描述的最小后端根采集（单方法 agent，`confidence=LOST`）；仍无任何关联/合并/推断能力。
+**S2 边界**：S2 采集 4 个后端 span（`controller/service/mapper/sql` 的 `confidence=LOST` 游离后端请求链）与 SQL `rowsAffected`；
+仍无前端 SDK/`traceparent`/clickId 传播、无关联/合并/推断、无 `values`/异常 payload、无回放/实时。0 行只是返回事实，不是错误状态。
 
 ## 10. 变更流程
 
@@ -213,4 +228,7 @@
 - S1 假前端批次（2 行，全 `OK`/`EXACT`，点击链）：`fixtures/s1-walking-skeleton/frontend-fake-batch.ndjson`。
 - S1 游离后端根样例（1 行）：`fixtures/s1-walking-skeleton/agent-controller-span.json`
   （`kind=controller`、`parentSpanId=null`、`confidence=LOST`、`rootEventId=click_lost_<spanId>`、flags 含 `LOST_BACKEND`；§5 第 2 条例外）。
-- 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0 门禁；S1 由 tester 扩展）。
+- **S2 0 行事实链样例（4 行，单 trace，全 `OK`/`LOST`）**：`fixtures/s2-zero-row-chain/events.ndjson`
+  （controller 根 + service + mapper + sql 子链；SQL `rowsAffected=0`/`transaction=UNKNOWN`；flags `S2_ZERO_ROW_CHAIN`，根另含 `LOST_BACKEND`）。
+  期望事实：`fixtures/s2-zero-row-chain/expected-facts.json`（6 条 fact + `globalAssertions`）。
+- 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0/S1 门禁；S2 由 tester 扩展 S2-A..S2-L）。

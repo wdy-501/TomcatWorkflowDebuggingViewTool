@@ -1,48 +1,62 @@
 #!/usr/bin/env node
 /**
- * TraceBoard S0 + S1 independent verifier (tester deliverable).
+ * TraceBoard S0 + S1 + S2 independent verifier (tester deliverable).
  *
- * One-shot, re-runnable gate. S0 checks are kept; S1 replaces the two S0 checks that
- * the S1 contract itself supersedes (ingest 501 -> 202/400/413/415, and the S0-only
- * freeze baseline -> S1 G1 baseline + S0 regression):
+ * One-shot, re-runnable gate. All S0 checks are kept; the S1 gates that the S2 contract
+ * supersedes are migrated (dispatch S2 §4.8) without relaxing the remaining S1 coverage:
  *
  *   S0 (kept)   V1/V1b/V1c/V4b case-A schema/facts/negatives/intervals; V2 real builds
  *               (root JDK21, demo JDK8, workbench, demo frontend); V3 agent bytecode 52;
  *               V6 workbench/demo artifacts + no external URLs + agent manifest;
  *               V8 secrets/telemetry/CDN hygiene.
- *   S1-A   fixtures/s1-walking-skeleton: 2-line fake batch + agent span validate against
- *          the frozen schema (Ajv 2020-12 strict); nodeKey #cancel, LOST + LOST_BACKEND,
- *          synthetic click_lost_ rootEventId, no CR/BOM, trailing LF; expected-facts.json
- *          new shape (globalAssertions.<source> + facts) evaluated by a dedicated consumer;
- *          local negative test (event carrying "seq" is rejected).
- *   S1-B   build artifacts: agent jar major 52, shaded Byte Buddy present, Premain-Class,
- *          no unrelocated net/bytebuddy; collector jar schema byte-identical to repo schema
- *          (unzip -p sha256); workbench npm ci && build; dist S1 markers; Vite proxy
- *          /ingest + /api -> http://127.0.0.1:8601.
- *   S1-C   collector 8601 (JDK21): health/meta capabilities; ingest 202 counts, per-line
- *          rejects, idempotent dropped, 415/400/413 envelopes, no body echo.
- *   S1-D   query: sessions eventCount, {"seq":N,"event":{...}} wrapper with seq outside the
- *          schema-valid event, nextSeq, limit 1 / 0 / 501, afterSeq paging/-1/abc,
- *          unknown session 404, POST/PUT 405, graph/replay/stream 404 (not implemented).
- *   S1-E   agent E2E (JDK8 absolute path + -javaagent): two cancel calls -> exactly 2
- *          controller spans (OK/LOST/LOST_BACKEND/#cancel/distinct traceIds/synthetic root,
- *          durNs>0), collector stopped -> cancel still 200 fast (fail-open), demo alive.
- *   S1-F   workbench path: POST the same fresh fake batch the workbench sends -> 202, then
- *          read the session back and assert seq ordering/shape.
- *   S1-G   regression/drift: case-A still validates, S0 builds green, S0 frozen files
- *          unchanged except the three S1-updated contracts, all files match the S1 G1
- *          freeze baseline hashes.
- *   S1-H   scope/security: no S2 features (service/mapper/SQL probes, correlation,
- *          graph/timeline/replay/SSE/WS, persistence/DB), no secrets/telemetry/CDN/mirrors,
- *          loopback only, agent fail-open structure, fake events never shown as correlated.
- *   S1-I   cleanup: ports 8601/8080/5173/5174/4173/4174 free, no new java processes,
- *          git status limited to expected S1 paths and an untouched index.
+ *   S1-A   fixtures/s1-walking-skeleton: fake batch + agent span validate against the frozen
+ *          schema; expected-facts consumer; "seq" negative test.
+ *   S1-B   agent jar major 52 / shaded Byte Buddy / Premain-Class / no unrelocated classes;
+ *          collector jar schema byte-identical to the repo schema; workbench build; dist S1
+ *          markers; Vite proxy /ingest + /api -> http://127.0.0.1:8601.
+ *   S1-C/D ingest/query regression: health/meta capabilities, 202 counts, per-line rejects,
+ *          415/400/413 envelopes, sessions/events paging, 400/404/405. S2 change: graph with
+ *          no traceId is now 400 (implemented), replay/stream/ws/links stay 404.
+ *   S1-F   workbench fake-batch path (s_wb_demo) -> 202, seq order, read-back shape.
+ *   S2-7   fixtures/s2-zero-row-chain: 4 lines through the frozen schema (Ajv strict), chain
+ *          invariants (single root, LOST, OK, nesting, 0 rows/UNKNOWN), expected-facts
+ *          consumer (6 facts + globalAssertions), negative chain/schema mutations, and the
+ *          S0/S1 fixture bytes unchanged.
+ *   S2-1   build artifacts: root JDK21, demo JDK8 (H2/MyBatis), agent 52 + shaded + premain,
+ *          collector schema parity, workbench npm ci + build.
+ *   S2-2   demo defect (H2/MyBatis, real runtime): GET /api/orders seed id1 CREATED 100;
+ *          POST /api/orders/1/cancel -> 200 {"data":true}; GET again -> STILL CREATED;
+ *          unknown 999 -> 404 {"data":false}; embedded H2 only.
+ *   S2-3   agent 4-span E2E: collector 8601 + demo JDK8 with -javaagent + session s_s2agent;
+ *          exactly 4 spans per cancel (controller LOST root 200 -> service true -> mapper 0
+ *          -> sql rowsAffected 0/UNKNOWN), same trace/root, parent chain, all OK, no THREW,
+ *          nested durations, S2_ZERO_ROW_CHAIN/LOST_BACKEND (DROP_COUNT flags not compared);
+ *          second cancel -> independent second 4-span trace with another traceId.
+ *   S2-4   read-only derivation at runtime: requests (spanCount 4, rootKind/status/LOST/
+ *          dur/sort), graph (4 nodes/3 edges, deterministic repeated GET, events unchanged),
+ *          missing traceId 400, unknown trace/session 404, POST 405, reserved 404, and the
+ *          S1 sessions/events regression. The same shapes are also asserted against the
+ *          ingested S2 fixture (gate S2-4F) before the E2E.
+ *   S2-5   fail-open: collector stopped -> cancel still 200 fast, demo alive, stderr
+ *          ingest_rejected evidence, no application exception.
+ *   S2-6   workbench: dist S2 fact-chain markers/selectors, S1 fake panel retained, S0
+ *          fixture panel retained, no graph library / no S3 artifact.
+ *   S2-8   scope/security: 6 collector routes exactly, 4 agent points exactly, no S3
+ *          (SDK/traceparent/replay/timeline/SSE/WS/values/persistence), no secrets/
+ *          telemetry/CDN/mirrors, loopback only, embedded H2 only, one schema copy.
+ *   S2-9   drift + cleanup: S2 G1 hashes intact, S0 freeze intact, S1 fixture bytes intact,
+ *          case-A valid, S0 builds green, ports free, no java leftovers, git untouched.
+ *          S2-AMD-01 exception: exactly demo/buggy-shop-boot-vue/frontend/src/App.vue may
+ *          differ (text/template banner only) — its case-A copy is asserted, the stale S0 copy
+ *          is rejected, the diff must stay outside <script>/<style> with an identical template
+ *          element/attribute inventory, every other demo-frontend file stays frozen, and the
+ *          demo frontend still issues only /api fetches (no SDK/collector calls).
  *
  * Exit code 0 only when every gate passes. Product files are never modified; the only
  * writes are build outputs (target/, dist/, workbench/public/fixtures/) produced by the
  * product's own build commands, plus OS temp files that are deleted afterwards.
  *
- * Usage (from tools/verify):  node verify.mjs   [--json]
+ * Usage (from tools/verify):  npm ci && node verify.mjs   [--json]
  */
 
 import { createHash } from "node:crypto";
@@ -74,16 +88,41 @@ const SCHEMA_REL = "schema/traceboard.event.v1.json";
 const EVENTS_REL = "fixtures/case-a-zero-rows/events.jsonl";
 const FACTS_REL = "fixtures/case-a-zero-rows/expected-facts.json";
 const PLAN_REVIEW_REL = "docs/plans/stages/S0/plan-review.md";
-const S1_PLAN_REVIEW_REL = "docs/plans/stages/S1/plan-review.md";
 
 const S1_BATCH_REL = "fixtures/s1-walking-skeleton/frontend-fake-batch.ndjson";
 const S1_AGENT_SPAN_REL = "fixtures/s1-walking-skeleton/agent-controller-span.json";
 const S1_FACTS_REL = "fixtures/s1-walking-skeleton/expected-facts.json";
 const S1_AGENT_NODE_KEY = "com.example.shop.controller.OrderController#cancel";
-const S1_AGENT_SESSION = "s_s1agent"; // -Dtraceboard.sessionId used by the E2E launch
 const S1_WORKBENCH_SESSION = "s_wb_demo";
-const S1_ALLOWED_PORT = 8601;
 const S1_PORTS = [8601, 8080, 5173, 5174, 4173, 4174];
+
+/* ---------------------------- S2 (0-row fact chain) ---------------------------- */
+
+const S2_PLAN_REVIEW_REL = "docs/plans/stages/S2/plan-review.md";
+const S2_EVENTS_REL = "fixtures/s2-zero-row-chain/events.ndjson";
+const S2_FACTS_REL = "fixtures/s2-zero-row-chain/expected-facts.json";
+const S2_SESSION = "s_s2agent"; // dispatch §4.2 default session of the S2 agent
+const S2_TRACE_ID = "9f8e7d6c5b4a39281706f5e4d3c2b1a0"; // fixture traceId (not used at runtime)
+const S2_ROOT_SPAN_ID = "1a2b3c4d5e6f7a80";
+const S2_ROOT_EVENT_ID = `click_lost_${S2_ROOT_SPAN_ID}`;
+const S2_CONTROLLER_NODE_KEY = "com.example.shop.controller.OrderController#cancel";
+const S2_SERVICE_NODE_KEY = "com.example.shop.service.OrderService#cancel";
+const S2_MAPPER_NODE_KEY = "com.example.shop.mapper.OrderMapper#cancelById";
+const S2_SQL_NODE_KEY = "OrderMapper.cancelById";
+const S2_FLAG_CHAIN = "S2_ZERO_ROW_CHAIN";
+const S2_FLAG_LOST_BACKEND = "LOST_BACKEND";
+const S2_RESPONSE_ENTITY_TYPE = "org.springframework.http.ResponseEntity";
+
+/*
+ * S2-AMD-01 (dispatch amendment): exactly one post-freeze demo-frontend change is allowed —
+ * the text/template-only banner in demo/buggy-shop-boot-vue/frontend/src/App.vue. The rest of
+ * demo/buggy-shop-boot-vue/frontend/ stays frozen, and the exception must never widen to the
+ * directory prefix (amendment §4/§6).
+ */
+const DEMO_FRONTEND_REL = "demo/buggy-shop-boot-vue/frontend";
+const DEMO_APP_REL = "demo/buggy-shop-boot-vue/frontend/src/App.vue";
+const AMD01_BANNER_TOKENS = ["案例 A", "故意缺陷", "UPDATE 0 行", "后端由 Java agent 采集", "前端无 SDK"];
+const AMD01_STALE_TOKENS = ["S0 demo 骨架", "无采集", "无缺陷", "S0 demo 骨架：无采集、无缺陷、无 SDK"];
 
 const COLLECTOR_BASE = "http://127.0.0.1:8601";
 const DEMO_BASE = "http://localhost:8080";
@@ -109,7 +148,7 @@ const EXPECTED_EVENT_COUNT = 9;
 /* ------------------------------------------------------------------ */
 
 const RESULTS = [];
-let activeServer = null;
+const activeServers = new Set();
 const tmpDirs = [];
 
 function record(id, title, ok, evidence = [], repro = null) {
@@ -412,6 +451,33 @@ function gitStatusLines() {
   return { ok: true, lines: (result.stdout || "").split(/\r?\n/).filter((line) => line.trim() !== "") };
 }
 
+/** Read a committed (HEAD) version of a repo-relative file; used for the S2-AMD-01 diff scope. */
+function gitShowFile(rel) {
+  const result = runExe("git", ["show", `HEAD:${rel}`], { timeout: 60000 });
+  return {
+    ok: result.code === 0 && !result.error,
+    text: result.stdout ?? "",
+    stderr: result.stderr || result.error?.message || "",
+  };
+}
+
+/** Split a single-file Vue SFC into the pre-template, template body and post-template sections. */
+function vueSections(text) {
+  const open = text.indexOf("<template>");
+  const close = text.lastIndexOf("</template>");
+  if (open < 0 || close < 0 || close < open) return null;
+  return {
+    prefix: text.slice(0, open),
+    body: text.slice(open + "<template>".length, close),
+    suffix: text.slice(close + "</template>".length),
+  };
+}
+
+/** Ordered element/attribute inventory of a template body (text nodes excluded). */
+function templateTagInventory(body) {
+  return [...body.matchAll(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?>/g)].map((m) => m[0].replace(/\s+/g, " ").trim());
+}
+
 function zipEntries(jarAbs) {
   const result = runExe("unzip", ["-Z1", jarAbs], { timeout: 60000 });
   return {
@@ -440,6 +506,162 @@ function hexRandom(byteCount) {
   const bytes = Buffer.alloc(byteCount);
   for (let i = 0; i < byteCount; i += 1) bytes[i] = Math.floor(Math.random() * 256);
   return bytes.toString("hex");
+}
+
+/* ------------------------------------------------------------------ */
+/* S2 shared helpers: chain invariants + G1 freeze parsing             */
+/* ------------------------------------------------------------------ */
+
+const S2_CHAIN_SLOTS = [
+  { kind: "controller", nodeKey: S2_CONTROLLER_NODE_KEY },
+  { kind: "service", nodeKey: S2_SERVICE_NODE_KEY },
+  { kind: "mapper", nodeKey: S2_MAPPER_NODE_KEY },
+  { kind: "sql", nodeKey: S2_SQL_NODE_KEY },
+];
+
+function sortedByStart(events) {
+  return events
+    .slice()
+    .sort((a, b) => (a.startNs - b.startNs) || String(a.spanId).localeCompare(String(b.spanId)));
+}
+
+/**
+ * Validate the S2 controller -> service -> mapper -> sql fact chain (dispatch §4.2).
+ * Runtime spans may carry extra flags (DROP_COUNT=<n>), so exact flags are only compared
+ * for the frozen fixture. Returns a list of human-readable problems (empty == conformant).
+ */
+function chainProblems(spans, { fixture = false, sessionId = S2_SESSION } = {}) {
+  const problems = [];
+  if (!Array.isArray(spans) || spans.length !== 4) {
+    problems.push(`spanCount=${Array.isArray(spans) ? spans.length : "?"}`);
+    return problems;
+  }
+  const s = sortedByStart(spans);
+  const [controller, service, mapper, sql] = s;
+
+  S2_CHAIN_SLOTS.forEach((slot, index) => {
+    if (s[index].kind !== slot.kind) problems.push(`slot${index} kind=${s[index].kind}`);
+    if (s[index].nodeKey !== slot.nodeKey) problems.push(`slot${index} nodeKey=${s[index].nodeKey}`);
+  });
+
+  if (sessionId) {
+    const sessions = [...new Set(s.map((e) => e.sessionId))];
+    if (sessions.length !== 1 || sessions[0] !== sessionId) problems.push(`sessionIds=${sessions.join(",")}`);
+  }
+  const traceIds = [...new Set(s.map((e) => e.traceId))];
+  if (traceIds.length !== 1 || !/^[0-9a-f]{32}$/.test(String(traceIds[0]))) {
+    problems.push(`traceIds=${traceIds.join(",")}`);
+  }
+  const roots = s.filter((e) => e.parentSpanId === null);
+  if (roots.length !== 1) problems.push(`roots=${roots.length}`);
+  if (controller.parentSpanId !== null) problems.push("controller parentSpanId!=null");
+  if (service.parentSpanId !== controller.spanId) problems.push("service parent mismatch");
+  if (mapper.parentSpanId !== service.spanId) problems.push("mapper parent mismatch");
+  if (sql.parentSpanId !== mapper.spanId) problems.push("sql parent mismatch");
+  const rootEventIds = [...new Set(s.map((e) => e.rootEventId))];
+  if (rootEventIds.length !== 1) problems.push(`rootEventIds=${rootEventIds.join(",")}`);
+  if (controller.rootEventId !== `click_lost_${controller.spanId}`) {
+    problems.push(`rootEventId=${controller.rootEventId}`);
+  }
+
+  for (let i = 0; i < s.length; i += 1) {
+    const span = s[i];
+    if (!/^[0-9a-f]{16}$/.test(String(span.spanId))) problems.push(`slot${i} spanId=${span.spanId}`);
+    if (!(span.durNs > 0)) problems.push(`slot${i} durNs=${span.durNs}`);
+    if (!(span.startNs >= 0)) problems.push(`slot${i} startNs=${span.startNs}`);
+    if (span.confidence !== "LOST") problems.push(`slot${i} confidence=${span.confidence}`);
+    if (span.status !== "OK") problems.push(`slot${i} status=${span.status}`);
+    const flags = Array.isArray(span.flags) ? span.flags : [];
+    if (!flags.includes(S2_FLAG_CHAIN)) problems.push(`slot${i} missing ${S2_FLAG_CHAIN}`);
+    if (i === 0 && !flags.includes(S2_FLAG_LOST_BACKEND)) problems.push(`root missing ${S2_FLAG_LOST_BACKEND}`);
+    if (i > 0 && flags.includes(S2_FLAG_LOST_BACKEND)) problems.push(`slot${i} child has ${S2_FLAG_LOST_BACKEND}`);
+    if (fixture) {
+      const expectedFlags = i === 0 ? [S2_FLAG_CHAIN, S2_FLAG_LOST_BACKEND] : [S2_FLAG_CHAIN];
+      if (!deepEqual(flags, expectedFlags)) problems.push(`slot${i} flags=${show(flags)}`);
+    }
+    if (!span.thread || typeof span.thread.name !== "string" || span.thread.name.length === 0) {
+      problems.push(`slot${i} thread missing`);
+    }
+    if (i > 0 && !(span.startNs >= s[i - 1].startNs)) problems.push("startNs not non-decreasing");
+  }
+  const threadNames = [...new Set(s.map((e) => e.thread?.name ?? ""))];
+  if (threadNames.length !== 1) problems.push(`threadNames=${threadNames.join(",")}`);
+
+  for (let i = 1; i < s.length; i += 1) {
+    const parent = s[i - 1];
+    const child = s[i];
+    if (child.startNs < parent.startNs || child.startNs + child.durNs > parent.startNs + parent.durNs) {
+      problems.push(`slot${i} not nested inside slot${i - 1}`);
+    }
+  }
+
+  const checkReturn = (span, type, value, label) => {
+    if (!span.return || span.return.type !== type || !deepEqual(span.return.value, value)) {
+      problems.push(`${label} return=${show(span.return)}`);
+    }
+  };
+  checkReturn(controller, S2_RESPONSE_ENTITY_TYPE, 200, "controller");
+  checkReturn(service, "boolean", true, "service");
+  checkReturn(mapper, "int", 0, "mapper");
+  if (sql.return !== null) problems.push(`sql return=${show(sql.return)}`);
+  const effects = Array.isArray(sql.sideEffects) ? sql.sideEffects : [];
+  if (effects.length !== 1) {
+    problems.push(`sql sideEffects count=${effects.length}`);
+  } else {
+    const effect = effects[0];
+    if (effect.type !== "sql" || effect.sqlId !== S2_SQL_NODE_KEY ||
+        effect.rowsAffected !== 0 || effect.transaction !== "UNKNOWN") {
+      problems.push(`sql sideEffect=${show(effect)}`);
+    }
+  }
+  return problems;
+}
+
+/** Parse the two hash blocks of S2 plan-review §2 (S2 freeze + S0/S1 freeze). */
+function s2FreezeSections() {
+  const entries = parseFreezeBaseline(S2_PLAN_REVIEW_REL, /^#{2,3} 2\. 冻结基线/m);
+  const isS2 = (rel) =>
+    rel === SCHEMA_REL ||
+    rel.startsWith("docs/contracts/") ||
+    rel.startsWith("fixtures/s2-zero-row-chain/") ||
+    rel.startsWith("docs/plans/stages/S2/");
+  const isS0S1 = (rel) =>
+    rel.startsWith("fixtures/case-a-zero-rows/") || rel.startsWith("fixtures/s1-walking-skeleton/");
+  return {
+    all: entries,
+    s2: entries.filter((entry) => isS2(entry.rel)),
+    s0s1: entries.filter((entry) => isS0S1(entry.rel)),
+  };
+}
+
+/** Derived "#trace.<name>" values allowed by the S2 expected-facts consumer. */
+function derivedTraceValue(events, name) {
+  switch (name) {
+    case "threwCount":
+      return events.filter((event) => event.status === "THREW").length;
+    case "spanCount":
+      return events.length;
+    case "rootCount":
+      return events.filter((event) => event.parentSpanId === null).length;
+    case "kindCount": {
+      const counts = {};
+      for (const event of events) counts[event.kind] = (counts[event.kind] ?? 0) + 1;
+      return counts;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** Fact lookup: "#trace.*" is derived over the whole source, otherwise a dot path on the event. */
+function factPathValue(event, events, dottedPath) {
+  const path = String(dottedPath ?? "");
+  if (path.startsWith("#trace.")) {
+    const name = path.slice("#trace.".length);
+    const value = derivedTraceValue(events, name);
+    return { found: value !== undefined, value };
+  }
+  return getByPath(event, path);
 }
 
 
@@ -1138,14 +1360,15 @@ function startJavaServer(label, exe, args, cwd) {
     log.text += `\n[spawn error] ${error.message}`;
   });
   const server = { label, child, log, port: null };
-  activeServer = server;
+  activeServers.add(server);
   console.log(`        started ${label}: pid=${child.pid} exe=${exe}`);
   return server;
 }
 
 async function stopServer(server) {
-  if (!server || !server.child || server.child.exitCode !== null || server.child.pid === undefined) {
-    if (activeServer === server) activeServer = null;
+  if (!server) return;
+  activeServers.delete(server);
+  if (!server.child || server.child.exitCode !== null || server.child.pid === undefined) {
     return;
   }
   spawnSync("taskkill", ["/PID", String(server.child.pid), "/T", "/F"], {
@@ -1540,17 +1763,18 @@ async function checkS1CDF(validate) {
         label: "PUT/DELETE .../events -> 405",
         detail: `PUT=${putEvents.status} DELETE=${deleteEvents.status}`,
       },
+      ...envelopeChecks(graph, 400, "bad_request", "graph without traceId (S2: implemented, param required)", []),
       {
-        ok: graph.ok && graph.status === 404 && replay.ok && replay.status === 404 &&
+        ok: replay.ok && replay.status === 404 &&
           stream.ok && stream.status === 404 && ws.ok && ws.status === 404 &&
           links.ok && links.status === 404,
-        label: "graph/replay/stream/ws/links not registered -> 404",
-        detail: `graph=${graph.status} replay=${replay.status} stream=${stream.status} ws=${ws.status} links=${links.status}`,
+        label: "replay/stream/ws/links not registered -> 404",
+        detail: `replay=${replay.status} stream=${stream.status} ws=${ws.status} links=${links.status}`,
       },
     ];
     record(
       "S1-D",
-      "read-only query shapes, paging, 400/404/405, reserved routes",
+      "read-only query shapes, paging, 400/404/405, S2 graph param contract, reserved routes",
       d.every((c) => c.ok),
       d.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
       `curl -s "http://127.0.0.1:8601/api/v1/sessions/s_wb_demo/events?afterSeq=0&limit=200"`,
@@ -1631,20 +1855,231 @@ async function checkS1CDF(validate) {
       f.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
       `curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" -H "Content-Type: application/x-ndjson" --data-binary @fresh-batch.ndjson`,
     );
+
+    /* ---------------- S2-4F requests/graph over the ingested S2 fixture ---------------- */
+    const s2Meta = readTextFileMeta(S2_EVENTS_REL);
+    const s2FixtureEvents = s2Meta.lines.map((line) => JSON.parse(line));
+    const s2Ingest = await postNdjson("/ingest/v1/events", s2Meta.text, `${NDJSON}; charset=utf-8`);
+    const s2IngestParsed = s2Ingest.ok ? parseJson(s2Ingest.text) : { ok: false };
+    const s2IngestBody = s2IngestParsed.ok ? s2IngestParsed.value ?? {} : {};
+
+    const pageBeforeGraph = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+    const s2ReqRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/requests`);
+    const s2ReqParsed = s2ReqRes.ok ? parseJson(s2ReqRes.text) : { ok: false };
+    const s2ReqBody = s2ReqParsed.ok ? s2ReqParsed.value ?? {} : {};
+    const s2Requests = Array.isArray(s2ReqBody.requests) ? s2ReqBody.requests : [];
+    const s2Req0 = s2Requests[0] ?? {};
+
+    const s2GraphUrl = `/api/v1/sessions/${S2_SESSION}/graph?traceId=${S2_TRACE_ID}`;
+    const s2GraphRes1 = await requestBase(COLLECTOR_BASE, s2GraphUrl);
+    const s2GraphParsed1 = s2GraphRes1.ok ? parseJson(s2GraphRes1.text) : { ok: false };
+    const s2Graph1 = s2GraphParsed1.ok ? s2GraphParsed1.value ?? {} : {};
+    const s2GraphRes2 = await requestBase(COLLECTOR_BASE, s2GraphUrl);
+    const pageAfterGraph = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+
+    const s2Nodes = Array.isArray(s2Graph1.nodes) ? s2Graph1.nodes : [];
+    const s2Edges = Array.isArray(s2Graph1.edges) ? s2Graph1.edges : [];
+    const nodeMismatches = [];
+    const orderedFixture = sortedByStart(s2FixtureEvents);
+    if (s2Nodes.length === orderedFixture.length) {
+      orderedFixture.forEach((event, index) => {
+        const node = s2Nodes[index];
+        const expectedReturn = Object.prototype.hasOwnProperty.call(event, "return") ? event.return : null;
+        const expectedEffects = Array.isArray(event.sideEffects) ? event.sideEffects : [];
+        if (node.spanId !== event.spanId || node.parentSpanId !== event.parentSpanId ||
+            node.kind !== event.kind || node.nodeKey !== event.nodeKey ||
+            node.status !== event.status || node.startNs !== event.startNs || node.durNs !== event.durNs) {
+          nodeMismatches.push(`node${index} scalars`);
+        }
+        if (!deepEqual(node.return, expectedReturn)) nodeMismatches.push(`node${index} return=${show(node.return)}`);
+        if (!deepEqual(node.sideEffects, expectedEffects)) nodeMismatches.push(`node${index} sideEffects=${show(node.sideEffects)}`);
+        if (!deepEqual(node.thread, event.thread)) nodeMismatches.push(`node${index} thread`);
+        if (!deepEqual(node.flags, event.flags)) nodeMismatches.push(`node${index} flags=${show(node.flags)}`);
+      });
+    }
+    const expectedEdges = orderedFixture.slice(1).map((event, index) => ({
+      from: orderedFixture[index].spanId,
+      to: event.spanId,
+      count: 1,
+    }));
+
+    const badGraphNoParam = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/graph`);
+    const badGraphUpper = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/graph?traceId=${S2_TRACE_ID.toUpperCase()}`);
+    const badGraphMarker = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/graph?traceId=ECHOMARKER_S2_NOT_HEX_0123456789`);
+    const unknownTrace = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/graph?traceId=${"0".repeat(32)}`);
+    const unknownSessionReq = await requestBase(COLLECTOR_BASE, "/api/v1/sessions/s_s2_missing/requests");
+    const unknownSessionGraph = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/s_s2_missing/graph?traceId=${S2_TRACE_ID}`);
+    const postRequests = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/requests`, { method: "POST" });
+    const postGraph = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/graph?traceId=${S2_TRACE_ID}`, { method: "POST" });
+    const s2Replay = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/replay`);
+    const s2Stream = await requestBase(COLLECTOR_BASE, "/api/v1/stream");
+    const s2Ws = await requestBase(COLLECTOR_BASE, "/ws/v1/events");
+    const s2Links = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/links`, { method: "POST" });
+
+    const pageBeforeCount = Array.isArray(pageBeforeGraph.value.events) ? pageBeforeGraph.value.events.length : -1;
+    const pageAfterCount = Array.isArray(pageAfterGraph.value.events) ? pageAfterGraph.value.events.length : -1;
+    const s2f = [
+      {
+        ok: s2Ingest.ok && s2Ingest.status === 202 && s2IngestBody.accepted === 4 &&
+          s2IngestBody.rejected === 0 && s2IngestBody.dropped === 0,
+        label: "POST fixtures/s2-zero-row-chain/events.ndjson -> 202 accepted=4",
+        detail: show(s2Ingest.text),
+      },
+      {
+        ok: s2ReqRes.ok && s2ReqRes.status === 200 && s2ReqBody.sessionId === S2_SESSION &&
+          s2Requests.length === 1,
+        label: "requests: 200, sessionId echo, exactly 1 trace",
+        detail: show(s2ReqRes.text),
+      },
+      {
+        ok: s2Req0.traceId === S2_TRACE_ID && s2Req0.rootSpanId === S2_ROOT_SPAN_ID &&
+          s2Req0.rootKind === "controller" && s2Req0.nodeKey === S2_CONTROLLER_NODE_KEY &&
+          s2Req0.status === "OK" && s2Req0.confidence === "LOST" && s2Req0.spanCount === 4 &&
+          s2Req0.startedAtNs === 1000000000 && s2Req0.durNs === 8000000 && s2Req0.hasError === false,
+        label: "requests[0]: fixture trace/root/controller/OK/LOST/spanCount=4/dur=8ms/no error",
+        detail: show(s2Req0),
+      },
+      {
+        ok: s2GraphRes1.ok && s2GraphRes1.status === 200 && s2Graph1.sessionId === S2_SESSION &&
+          s2Graph1.traceId === S2_TRACE_ID && s2Graph1.rootEventId === S2_ROOT_EVENT_ID &&
+          s2Graph1.confidence === "LOST",
+        label: "graph: 200, session/trace/rootEventId/confidence echo",
+        detail: show({ sessionId: s2Graph1.sessionId, traceId: s2Graph1.traceId, rootEventId: s2Graph1.rootEventId, confidence: s2Graph1.confidence }),
+      },
+      {
+        ok: s2Nodes.length === 4 && s2Nodes.map((node) => node.kind).join(",") === "controller,service,mapper,sql" &&
+          nodeMismatches.length === 0,
+        label: "graph nodes: 4, startNs order controller/service/mapper/sql, return/sideEffects/thread/flags verbatim",
+        detail: nodeMismatches.length ? nodeMismatches.slice(0, 4).join(" || ") : "4/4 nodes match the fixture",
+      },
+      {
+        ok: s2Edges.length === 3 && deepEqual(s2Edges, expectedEdges),
+        label: "graph edges: 3 exact parent->child pairs, count=1",
+        detail: show(s2Edges),
+      },
+      {
+        ok: s2GraphRes2.ok && s2GraphRes2.status === 200 && s2GraphRes2.text === s2GraphRes1.text,
+        label: "two identical graph GETs return byte-identical bodies (read-time derivation)",
+        detail: s2GraphRes2.text === s2GraphRes1.text ? "identical" : show(s2GraphRes2.text),
+      },
+      {
+        ok: pageBeforeGraph.res.status === 200 && pageBeforeCount === 4 && pageAfterCount === 4 &&
+          pageBeforeGraph.value.nextSeq === 4 && pageAfterGraph.value.nextSeq === 4 &&
+          pageAfterGraph.text === pageBeforeGraph.text,
+        label: "graph/requests reads do not change events/seq (4 events before and after)",
+        detail: `before=${pageBeforeCount} after=${pageAfterCount} nextSeq=${pageAfterGraph.value.nextSeq}`,
+      },
+      ...envelopeChecks(badGraphNoParam, 400, "bad_request", "graph missing traceId", []),
+      ...envelopeChecks(badGraphUpper, 400, "bad_request", "graph uppercase traceId", []),
+      {
+        ok: badGraphMarker.ok && badGraphMarker.status === 400 && !badGraphMarker.text.includes("ECHOMARKER_S2"),
+        label: "graph invalid traceId -> 400 without echoing the parameter",
+        detail: show(badGraphMarker.text),
+      },
+      ...envelopeChecks(unknownTrace, 404, "not_found", "graph unknown traceId in session", []),
+      ...envelopeChecks(unknownSessionReq, 404, "not_found", "requests unknown session", []),
+      ...envelopeChecks(unknownSessionGraph, 404, "not_found", "graph unknown session", []),
+      {
+        ok: postRequests.status === 405 && postGraph.status === 405,
+        label: "POST requests/graph -> 405 (read-only)",
+        detail: `requests=${postRequests.status} graph=${postGraph.status}`,
+      },
+      {
+        ok: s2Replay.status === 404 && s2Stream.status === 404 && s2Ws.status === 404 && s2Links.status === 404,
+        label: "replay/stream/ws/links stay unregistered -> 404",
+        detail: `replay=${s2Replay.status} stream=${s2Stream.status} ws=${s2Ws.status} links=${s2Links.status}`,
+      },
+    ];
+    record(
+      "S2-4F",
+      "requests/graph over the deterministic S2 fixture (shape, edges, determinism, 400/404/405)",
+      s2f.every((c) => c.ok),
+      s2f.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s "http://127.0.0.1:8601/api/v1/sessions/${S2_SESSION}/graph?traceId=${S2_TRACE_ID}"`,
+    );
   } finally {
     await stopServer(collector);
     const freed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
     console.log(`        collector stopped; 8601 ${freed ? "free" : "STILL LISTENING"}`);
-    activeServer = null;
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* S1-E agent E2E + fail-open                                          */
+/* S2-2/3/4/5 demo defect + 4-span E2E + requests/graph + fail-open     */
 /* ------------------------------------------------------------------ */
 
-async function checkS1E(validate) {
-  section("S1-E agent E2E + fail-open");
+function groupByTrace(spans) {
+  const map = new Map();
+  for (const span of spans) {
+    if (!map.has(span.traceId)) map.set(span.traceId, []);
+    map.get(span.traceId).push(span);
+  }
+  return [...map.entries()].map(([traceId, group]) => ({ traceId, spans: group }));
+}
+
+/** Problems of the runtime graph view (4 nodes / 3 edges, same facts as the spans). */
+function graphProblems(graph, traceId) {
+  const problems = [];
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+  if (nodes.length !== 4) {
+    problems.push(`nodes=${nodes.length}`);
+    return problems;
+  }
+  if (nodes.map((node) => node.kind).join(",") !== "controller,service,mapper,sql") {
+    problems.push(`kindOrder=${nodes.map((node) => node.kind).join(",")}`);
+  }
+  S2_CHAIN_SLOTS.forEach((slot, index) => {
+    if (nodes[index].kind !== slot.kind) problems.push(`node${index} kind`);
+    if (nodes[index].nodeKey !== slot.nodeKey) problems.push(`node${index} nodeKey`);
+  });
+  if (nodes[0].parentSpanId !== null) problems.push("root parentSpanId!=null");
+  for (let i = 1; i < nodes.length; i += 1) {
+    if (nodes[i].parentSpanId !== nodes[i - 1].spanId) problems.push(`node${i} parent mismatch`);
+    if (!(nodes[i].startNs >= nodes[i - 1].startNs)) problems.push("nodes not sorted by startNs");
+    if (nodes[i].startNs < nodes[i - 1].startNs ||
+        nodes[i].startNs + nodes[i].durNs > nodes[i - 1].startNs + nodes[i - 1].durNs) {
+      problems.push(`node${i} not nested`);
+    }
+    if (!(nodes[i].durNs > 0)) problems.push(`node${i} durNs=${nodes[i].durNs}`);
+  }
+  const expectedEdges = nodes.slice(1).map((node, index) => ({
+    from: nodes[index].spanId,
+    to: node.spanId,
+    count: 1,
+  }));
+  if (!deepEqual(edges, expectedEdges)) problems.push(`edges=${show(edges)}`);
+  const checkNodeReturn = (node, type, value, label) => {
+    if (!node.return || node.return.type !== type || !deepEqual(node.return.value, value)) {
+      problems.push(`${label} return=${show(node.return)}`);
+    }
+  };
+  checkNodeReturn(nodes[0], S2_RESPONSE_ENTITY_TYPE, 200, "controller");
+  checkNodeReturn(nodes[1], "boolean", true, "service");
+  checkNodeReturn(nodes[2], "int", 0, "mapper");
+  if (nodes[3].return !== null) problems.push(`sql return=${show(nodes[3].return)}`);
+  const effects = Array.isArray(nodes[3].sideEffects) ? nodes[3].sideEffects : [];
+  if (effects.length !== 1 || effects[0].type !== "sql" ||
+      effects[0].sqlId !== S2_SQL_NODE_KEY || effects[0].rowsAffected !== 0 ||
+      effects[0].transaction !== "UNKNOWN") {
+    problems.push(`sql sideEffects=${show(effects)}`);
+  }
+  const rootFlags = Array.isArray(nodes[0].flags) ? nodes[0].flags : [];
+  const childFlags = nodes.slice(1).flatMap((node) => (Array.isArray(node.flags) ? node.flags : []));
+  if (!rootFlags.includes(S2_FLAG_CHAIN) || !rootFlags.includes(S2_FLAG_LOST_BACKEND)) {
+    problems.push(`root flags=${show(rootFlags)}`);
+  }
+  if (!childFlags.includes(S2_FLAG_CHAIN) || childFlags.includes(S2_FLAG_LOST_BACKEND)) {
+    problems.push(`child flags=${show(childFlags)}`);
+  }
+  if (graph.traceId !== traceId) problems.push(`traceId=${graph.traceId}`);
+  if (graph.confidence !== "LOST") problems.push(`confidence=${graph.confidence}`);
+  if (graph.rootEventId !== `click_lost_${nodes[0].spanId}`) problems.push(`rootEventId=${graph.rootEventId}`);
+  return problems;
+}
+
+async function checkS2E2E(validate) {
+  section("S2-2/3/4/5 demo 0-row defect + agent 4-span E2E + requests/graph + fail-open");
   const collectorJar = abs(COLLECTOR_JAR_REL);
   const demoJar = abs(DEMO_JAR_REL);
   const agentJar = abs(AGENT_JAR_REL);
@@ -1656,13 +2091,14 @@ async function checkS1E(validate) {
     { ok: existsSync(collectorJar), label: "collector jar exists", detail: COLLECTOR_JAR_REL },
     { ok: existsSync(demoJar), label: "demo jar exists", detail: DEMO_JAR_REL },
     { ok: existsSync(agentJar), label: "agent jar exists", detail: AGENT_JAR_REL },
-    { ok: existsSync(JDK8_JAVA), label: "JDK8 java.exe exists", detail: JDK8_JAVA },
+    { ok: existsSync(JDK8_JAVA), label: "JDK8 java.exe exists (absolute path)", detail: JDK8_JAVA },
   ];
+  const preconditionEvidence = preconditions.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`);
+  const reproE2E = `"${JDK8_JAVA}" -javaagent:"${AGENT_JAR_REL}" -Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events -Dtraceboard.sessionId=${S2_SESSION} -jar "${DEMO_JAR_REL}"`;
   if (!preconditions.every((c) => c.ok)) {
-    record("S1-E1", "agent online: 2 cancel calls -> exactly 2 controller spans", false,
-      preconditions.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`), null);
-    record("S1-E2", "fail-open: collector stopped, cancel still 200 fast, demo alive", false,
-      [{ ok: false, label: "preconditions", detail: "failed" }], null);
+    for (const id of ["S2-2", "S2-3", "S2-4", "S2-5"]) {
+      record(id, "S2 runtime gate (preconditions)", false, preconditionEvidence, reproE2E);
+    }
     return;
   }
 
@@ -1675,91 +2111,363 @@ async function checkS1E(validate) {
       return res.ok && res.status === 200 ? res : null;
     }, START_TIMEOUT_MS);
     if (!health) {
-      record("S1-E1", "agent online: 2 cancel calls -> exactly 2 controller spans", false,
-        [{ ok: false, label: "collector health", detail: "timeout" }], null);
-      record("S1-E2", "fail-open: collector stopped, cancel still 200 fast, demo alive", false,
-        [{ ok: false, label: "collector not started", detail: "health timeout" }], null);
+      for (const id of ["S2-2", "S2-3", "S2-4", "S2-5"]) {
+        record(id, "S2 runtime gate (collector health)", false,
+          [{ ok: false, label: "collector health", detail: "timeout" }], reproE2E);
+      }
       return;
     }
 
-    const startupBeforeAgentSession = await getEventsPage(S1_AGENT_SESSION, "?afterSeq=0&limit=200");
+    const startupSession = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
     demo = startJavaServer("demo-backend(8080)+agent", JDK8_JAVA, [
       `-javaagent:${agentJar}`,
       "-Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events",
-      `-Dtraceboard.sessionId=${S1_AGENT_SESSION}`,
+      `-Dtraceboard.sessionId=${S2_SESSION}`,
       "-jar",
       demoJar,
     ], abs("demo/buggy-shop-boot-vue/backend"));
 
-    const orders = await pollUntil(async () => {
+    const ordersBefore = await pollUntil(async () => {
       const res = await tryRequest(8080, "/api/orders", { method: "GET" }, 5000);
       return res.ok && res.status === 200 ? res : null;
     }, START_TIMEOUT_MS);
-    const ordersBody = orders ? parseJson(orders.text) : { ok: false };
-    const firstOrder = ordersBody.ok ? ordersBody.value?.data?.[0] : undefined;
-    const premainLine = demo.log.text.split(/\r?\n/).find((line) => line.includes("premain installed")) ?? "";
-    const transformLine = demo.log.text.split(/\r?\n/).find((line) => line.includes("transformed com.example.shop.controller.OrderController")) ?? "";
+    const ordersBeforeBody = ordersBefore ? parseJson(ordersBefore.text) : { ok: false };
+    const seedRows = ordersBeforeBody.ok && Array.isArray(ordersBeforeBody.value?.data)
+      ? ordersBeforeBody.value.data
+      : [];
+    const seed = seedRows[0] ?? {};
 
+    /* ---------------- cancel #1 -> exactly 4 spans within 15s ---------------- */
     const cancel1 = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" });
-    const cancel2 = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" });
     const cancel1Body = cancel1.ok ? parseJson(cancel1.text) : { ok: false };
-    const cancel2Body = cancel2.ok ? parseJson(cancel2.text) : { ok: false };
-
-    const polled = await pollUntil(async () => {
-      const page = await getEventsPage(S1_AGENT_SESSION, "?afterSeq=0&limit=200");
-      return page.res.ok && page.res.status === 200 && Array.isArray(page.value.events) && page.value.events.length >= 2
-        ? page.value
-        : null;
+    const pollA = await pollUntil(async () => {
+      const page = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+      const spans = Array.isArray(page.value.events) ? page.value.events.map((entry) => entry.event) : [];
+      return page.res.ok && page.res.status === 200 && spans.length >= 4 ? { page, spans } : null;
     }, 15000, 400);
-    await sleep(700);
-    const finalPage = await getEventsPage(S1_AGENT_SESSION, "?afterSeq=0&limit=200");
-    const spans = Array.isArray(finalPage.value.events) ? finalPage.value.events.map((entry) => entry.event) : [];
+    await sleep(600);
+    const pageA = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+    const spansA = Array.isArray(pageA.value.events) ? pageA.value.events.map((entry) => entry.event) : [];
+    const traceAId = spansA[0]?.traceId;
+    const chainAProblems = chainProblems(spansA, { sessionId: S2_SESSION });
+    const schemaProblemsA = validate ? spansA.filter((span) => !validate(span)).map((span) => span.spanId) : [];
+    const sortA = sortedByStart(spansA);
+    const rootA = sortA[0] ?? {};
+    const sqlA = sortA.find((span) => span.kind === "sql") ?? {};
 
-    const spanIds = spans.map((span) => span.spanId);
-    const traceIds = spans.map((span) => span.traceId);
-    const perSpanProblems = [];
-    for (const span of spans) {
-      if (validate && !validate(span)) perSpanProblems.push(`${span.spanId} schema invalid`);
-      if (!Object.prototype.hasOwnProperty.call(span, "parentSpanId") || span.parentSpanId !== null) perSpanProblems.push(`${span.spanId} parentSpanId!=null`);
-      if (span.kind !== "controller") perSpanProblems.push(`${span.spanId} kind=${span.kind}`);
-      if (span.nodeKey !== S1_AGENT_NODE_KEY) perSpanProblems.push(`${span.spanId} nodeKey=${span.nodeKey}`);
-      if (span.status !== "OK") perSpanProblems.push(`${span.spanId} status=${span.status}`);
-      if (span.confidence !== "LOST") perSpanProblems.push(`${span.spanId} confidence=${span.confidence}`);
-      if (!Array.isArray(span.flags) || !span.flags.includes("LOST_BACKEND") || span.flags.length !== 3) {
-        perSpanProblems.push(`${span.spanId} flags=${show(span.flags)}`);
-      }
-      if (span.rootEventId !== `click_lost_${span.spanId}`) perSpanProblems.push(`${span.spanId} rootEventId=${span.rootEventId}`);
-      if (!(span.durNs > 0)) perSpanProblems.push(`${span.spanId} durNs=${span.durNs}`);
-      if (typeof span.return?.type !== "string" || span.return.type.length === 0) perSpanProblems.push(`${span.spanId} return.type empty`);
-      if (Object.prototype.hasOwnProperty.call(span, "values") || Object.prototype.hasOwnProperty.call(span, "sideEffects")) {
-        perSpanProblems.push(`${span.spanId} has values/sideEffects`);
-      }
-      if (span.source && span.source.file !== "OrderController.java") perSpanProblems.push(`${span.spanId} source.file=${span.source.file}`);
-    }
-
-    const agentChecks = [
-      { ok: Boolean(orders) && firstOrder?.id === 1 && firstOrder?.status === "CREATED", label: "demo started with -javaagent; GET /api/orders 200 id=1", detail: orders ? show(orders.text) : "timeout" },
-      { ok: startupBeforeAgentSession.res.ok && startupBeforeAgentSession.res.status === 404, label: "s_s1agent unknown before any cancel (404)", detail: `status=${startupBeforeAgentSession.res.status}` },
-      { ok: premainLine.includes(`sessionId=${S1_AGENT_SESSION}`) && premainLine.includes("OrderController#cancel(long)"), label: "agent premain installed for the single #cancel(long) target", detail: premainLine.slice(0, 240) },
-      { ok: transformLine.length > 0, label: "Byte Buddy transform hit OrderController", detail: transformLine.slice(0, 240) },
-      { ok: cancel1.ok && cancel1.status === 200 && deepEqual(cancel1Body.value, { data: true }), label: "cancel #1 -> 200 {data:true}", detail: cancel1.ok ? show(cancel1.text) : String(cancel1.error) },
-      { ok: cancel2.ok && cancel2.status === 200 && deepEqual(cancel2Body.value, { data: true }), label: "cancel #2 -> 200 {data:true}", detail: cancel2.ok ? show(cancel2.text) : String(cancel2.error) },
-      { ok: Boolean(polled), label: "read back s_s1agent events within 15s", detail: polled ? `events=${polled.events.length}` : "timeout" },
-      { ok: spans.length === 2, label: "exactly 2 controller spans (no synthetic startup events)", detail: `spans=${spans.length}` },
-      { ok: perSpanProblems.length === 0, label: "each span: controller/#cancel/OK/LOST/LOST_BACKEND/click_lost_<spanId>/durNs>0/3 flags", detail: perSpanProblems.slice(0, 4).join(" || ") || "2/2 conformant" },
-      { ok: new Set(spanIds).size === spanIds.length && spanIds.every((id) => /^[0-9a-f]{16}$/.test(id)), label: "spanIds distinct 16 lowercase hex", detail: spanIds.join(",") },
-      { ok: new Set(traceIds).size === traceIds.length && traceIds.every((id) => /^[0-9a-f]{32}$/.test(id)), label: "traceIds distinct 32 lowercase hex (one isolated root per call)", detail: traceIds.join(",") },
-      { ok: finalPage.value.nextSeq === 2 && spans.every((span) => span.sessionId === S1_AGENT_SESSION), label: "nextSeq=2, sessionId=s_s1agent", detail: `nextSeq=${finalPage.value.nextSeq}` },
+    /* ---------------- log evidence (classes load lazily) ---------------- */
+    const premainLine = demo.log.text.split(/\r?\n/).find((line) => line.includes("premain installed")) ?? "";
+    const transformTargets = [
+      "com.example.shop.controller.OrderController",
+      "com.example.shop.service.OrderService",
+      "org.apache.ibatis.binding.MapperProxy",
+      "org.apache.ibatis.executor.statement.PreparedStatementHandler",
     ];
+    const missingTransforms = transformTargets.filter(
+      (target) => !demo.log.text.includes(`transformed ${target}`),
+    );
+    const demoJarEntries = zipEntries(abs(DEMO_JAR_REL));
+    const h2Lib = demoJarEntries.entries.find((entry) => /^BOOT-INF\/lib\/h2-[\d.]+\.jar$/.test(entry)) ?? "";
+    const mysqlLibs = demoJarEntries.entries.filter((entry) => /^BOOT-INF\/lib\/.*(?:mysql|mariadb).*\.jar$/i.test(entry));
+    const h2Line = h2Lib ? `${h2Lib} bundled (runtime), mysql jars=${mysqlLibs.length}` : "";
+    const h2Embedded = h2Lib.length > 0 && mysqlLibs.length === 0;
+
+    /* ---------------- cancel #2 -> second independent 4-span trace ---------------- */
+    const cancel2 = await tryRequest(8080, "/api/orders/1/cancel", { method: "POST" });
+    const cancel2Body = cancel2.ok ? parseJson(cancel2.text) : { ok: false };
+    const pollB = await pollUntil(async () => {
+      const page = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+      const spans = Array.isArray(page.value.events) ? page.value.events.map((entry) => entry.event) : [];
+      return page.res.ok && page.res.status === 200 && spans.length >= 8 ? { page, spans } : null;
+    }, 15000, 400);
+    await sleep(600);
+    const pageB = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+    const spansB = Array.isArray(pageB.value.events) ? pageB.value.events.map((entry) => entry.event) : [];
+    const groups = groupByTrace(spansB);
+    const groupA = groups.find((group) => group.traceId === traceAId) ?? null;
+    const groupB = groups.find((group) => group.traceId !== traceAId) ?? null;
+    const chainBProblems = groupB ? chainProblems(groupB.spans, { sessionId: S2_SESSION }) : ["missing second trace"];
+    const schemaProblemsB = validate ? spansB.filter((span) => !validate(span)).map((span) => span.spanId) : [];
+
+    const s2Checks = [
+      {
+        ok: Boolean(ordersBefore) && ordersBeforeBody.ok && seedRows.length === 1 &&
+          seed.id === 1 && seed.orderNo === "SO-0001" && seed.status === "CREATED" &&
+          typeof seed.amount === "number" && seed.amount === 100,
+        label: "demo + agent started; GET /api/orders seed id=1 SO-0001 CREATED amount 100 from H2",
+        detail: ordersBefore ? show(ordersBefore.text) : "timeout",
+      },
+      {
+        ok: startupSession.res.ok && startupSession.res.status === 404,
+        label: `session ${S2_SESSION} unknown before any cancel (404)`,
+        detail: `status=${startupSession.res.status}`,
+      },
+      {
+        ok: premainLine.includes(`sessionId=${S2_SESSION}`) &&
+          transformTargets.every((target) => premainLine.includes(target)),
+        label: "agent premain installed with the 4 documented targets and sessionId=s_s2agent",
+        detail: premainLine.slice(0, 400),
+      },
+      {
+        ok: missingTransforms.length === 0,
+        label: "Byte Buddy transformed all 4 points (controller/service/MapperProxy/PreparedStatementHandler)",
+        detail: missingTransforms.length ? `missing: ${missingTransforms.join(",")}` : "4/4 transformed",
+      },
+      {
+        ok: h2Embedded,
+        label: "demo jar bundles embedded H2 (BOOT-INF/lib/h2-*.jar) and no MySQL driver",
+        detail: h2Line || "missing h2 lib in the demo fat jar",
+      },
+      {
+        ok: cancel1.ok && cancel1.status === 200 && deepEqual(cancel1Body.value, { data: true }),
+        label: "cancel #1 -> 200 {data:true}",
+        detail: cancel1.ok ? show(cancel1.text) : String(cancel1.error),
+      },
+      {
+        ok: Boolean(pollA),
+        label: "read back >=4 spans within 15s",
+        detail: pollA ? `events=${pollA.spans.length}` : "timeout",
+      },
+      {
+        ok: spansA.length === 4 && pageA.value.nextSeq === 4,
+        label: "exactly 4 spans for request #1 (no synthetic/startup spans), nextSeq=4",
+        detail: `spans=${spansA.length} nextSeq=${pageA.value.nextSeq}`,
+      },
+      {
+        ok: schemaProblemsA.length === 0,
+        label: "all 4 runtime spans validate against the frozen schema",
+        detail: schemaProblemsA.length ? schemaProblemsA.join(",") : "4/4 valid",
+      },
+      {
+        ok: chainAProblems.length === 0,
+        label: "chain #1: controller(LOST root,200) -> service(true) -> mapper(0) -> sql(rows 0/UNKNOWN), OK, nested, S2_ZERO_ROW_CHAIN",
+        detail: chainAProblems.slice(0, 6).join(" || ") || `trace=${traceAId} root=${rootA.spanId} durNs=${rootA.durNs}`,
+      },
+      {
+        ok: cancel2.ok && cancel2.status === 200 && deepEqual(cancel2Body.value, { data: true }),
+        label: "cancel #2 -> 200 {data:true}",
+        detail: cancel2.ok ? show(cancel2.text) : String(cancel2.error),
+      },
+      {
+        ok: Boolean(pollB) && spansB.length === 8 && pageB.value.nextSeq === 8,
+        label: "read back exactly 8 spans (2 x 4) within 15s, nextSeq=8",
+        detail: pollB ? `events=${spansB.length} nextSeq=${pageB.value.nextSeq}` : "timeout",
+      },
+      {
+        ok: groups.length === 2 && Boolean(groupA) && Boolean(groupB) &&
+          groupA.spans.length === 4 && groupB.spans.length === 4 &&
+          groupA.traceId !== groupB.traceId && rootA.spanId !== sortedByStart(groupB?.spans ?? [])[0]?.spanId,
+        label: "two independent 4-span traces with distinct traceIds/root spans",
+        detail: groups.map((group) => `${group.traceId.slice(0, 8)}(${group.spans.length})`).join(","),
+      },
+      {
+        ok: chainBProblems.length === 0 && schemaProblemsB.length === 0,
+        label: "chain #2 has the same 4-span shape and schema-valid events",
+        detail: chainBProblems.slice(0, 6).join(" || ") || "conformant",
+      },
+    ];
+
     record(
-      "S1-E1",
-      "agent online: 2 cancel calls -> exactly 2 controller spans",
-      agentChecks.every((c) => c.ok),
-      agentChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
-      `"${JDK8_JAVA}" -javaagent:"${AGENT_JAR_REL}" -Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events -Dtraceboard.sessionId=${S1_AGENT_SESSION} -jar "${DEMO_JAR_REL}"`,
+      "S2-3",
+      "agent E2E: each cancel -> exactly 4 spans (controller->service->mapper->sql), LOST/OK/0 rows, second call independent",
+      s2Checks.every((c) => c.ok),
+      s2Checks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      reproE2E,
     );
 
-    /* -------- fail-open: stop collector, demo must stay healthy -------- */
+    /* ---------------- S2-4 runtime requests + graph + errors + S1 regression ---------------- */
+    const requestsRes = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/requests`);
+    const requestsParsed = requestsRes.ok ? parseJson(requestsRes.text) : { ok: false };
+    const requestsBody = requestsParsed.ok ? requestsParsed.value ?? {} : {};
+    const requests = Array.isArray(requestsBody.requests) ? requestsBody.requests : [];
+    const requestA = requests.find((item) => item.traceId === traceAId) ?? {};
+    const requestB = requests.find((item) => item.traceId !== traceAId) ?? {};
+    const rootB = groupB ? sortedByStart(groupB.spans)[0] ?? {} : {};
+
+    const graphUrlA = `/api/v1/sessions/${S2_SESSION}/graph?traceId=${traceAId}`;
+    const graphPageBefore = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+    const graphRes1 = await requestBase(COLLECTOR_BASE, graphUrlA);
+    const graphParsed1 = graphRes1.ok ? parseJson(graphRes1.text) : { ok: false };
+    const graph1 = graphParsed1.ok ? graphParsed1.value ?? {} : {};
+    const graphRes2 = await requestBase(COLLECTOR_BASE, graphUrlA);
+    const graphPageAfter = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+    const graphIssues = graphProblems(graph1, traceAId);
+
+    const badGraphNoParam = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/graph`);
+    const unknownTrace = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/graph?traceId=${"0".repeat(32)}`);
+    const unknownSessionReq = await requestBase(COLLECTOR_BASE, "/api/v1/sessions/s_s2_missing/requests");
+    const unknownSessionGraph = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/s_s2_missing/graph?traceId=${traceAId}`);
+    const postRequests = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/requests`, { method: "POST" });
+    const postGraph = await requestBase(COLLECTOR_BASE, graphUrlA, { method: "POST" });
+    const replay = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/replay`);
+    const stream = await requestBase(COLLECTOR_BASE, "/api/v1/stream");
+    const ws = await requestBase(COLLECTOR_BASE, "/ws/v1/events");
+    const links = await requestBase(COLLECTOR_BASE, `/api/v1/sessions/${S2_SESSION}/links`, { method: "POST" });
+
+    const sessionsRes = await requestBase(COLLECTOR_BASE, "/api/v1/sessions");
+    const sessionsParsed = sessionsRes.ok ? parseJson(sessionsRes.text) : { ok: false };
+    const agentSession = findSession(sessionsParsed.ok ? sessionsParsed.value?.sessions : null, S2_SESSION);
+    const regressionPage = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+    const regressionEvents = Array.isArray(regressionPage.value.events) ? regressionPage.value.events : [];
+    const regressionProblems = wrapperProblems(validate, regressionEvents, "s_s2agent page");
+
+    const sortedByStartA = requests.map((item) => item.startedAtNs);
+    const requestsSorted = sortedByStartA.every((value, index) => index === 0 || value >= sortedByStartA[index - 1]);
+
+    const s2ReadChecks = [
+      {
+        ok: requestsRes.ok && requestsRes.status === 200 && requestsBody.sessionId === S2_SESSION &&
+          requests.length === 2,
+        label: "requests: 200, sessionId echo, 2 request groups",
+        detail: show(requestsRes.text),
+      },
+      {
+        ok: requestA.spanCount === 4 && requestA.rootSpanId === rootA.spanId &&
+          requestA.rootKind === "controller" && requestA.nodeKey === S2_CONTROLLER_NODE_KEY &&
+          requestA.status === "OK" && requestA.confidence === "LOST" && requestA.hasError === false &&
+          requestA.startedAtNs === rootA.startNs && requestA.durNs === rootA.durNs,
+        label: "requests[case A]: spanCount 4, controller root, OK/LOST, no error, startedAtNs/durNs match the root",
+        detail: show(requestA),
+      },
+      {
+        ok: requestB.spanCount === 4 && requestB.rootSpanId === rootB.spanId &&
+          requestB.startedAtNs === rootB.startNs && requestB.durNs === rootB.durNs,
+        label: "requests[case B]: second independent 4-span trace with its own root",
+        detail: show(requestB),
+      },
+      {
+        ok: requestsSorted && requests[0]?.traceId === traceAId,
+        label: "requests sorted by startedAtNs ascending (older cancel first)",
+        detail: requests.map((item) => item.startedAtNs).join(","),
+      },
+      {
+        ok: graphRes1.ok && graphRes1.status === 200 && graphIssues.length === 0,
+        label: "graph[case A]: 4 nodes / 3 edges, exact chain, SQL rowsAffected 0 / transaction UNKNOWN",
+        detail: graphIssues.slice(0, 6).join(" || ") || `${graph1.nodes?.length} nodes, ${graph1.edges?.length} edges`,
+      },
+      {
+        ok: graphRes2.ok && graphRes2.status === 200 && graphRes2.text === graphRes1.text,
+        label: "two identical graph GETs return byte-identical bodies",
+        detail: graphRes2.text === graphRes1.text ? "identical" : show(graphRes2.text),
+      },
+      {
+        ok: graphPageBefore.text === graphPageAfter.text && regressionPage.value.nextSeq === 8,
+        label: "graph reads leave events/seq unchanged (8 events before and after)",
+        detail: `same=${graphPageBefore.text === graphPageAfter.text} nextSeq=${regressionPage.value.nextSeq}`,
+      },
+      ...envelopeChecks(badGraphNoParam, 400, "bad_request", "graph missing traceId", []),
+      ...envelopeChecks(unknownTrace, 404, "not_found", "graph unknown traceId", []),
+      ...envelopeChecks(unknownSessionReq, 404, "not_found", "requests unknown session", []),
+      ...envelopeChecks(unknownSessionGraph, 404, "not_found", "graph unknown session", []),
+      {
+        ok: postRequests.status === 405 && postGraph.status === 405,
+        label: "POST requests/graph -> 405",
+        detail: `requests=${postRequests.status} graph=${postGraph.status}`,
+      },
+      {
+        ok: replay.status === 404 && stream.status === 404 && ws.status === 404 && links.status === 404,
+        label: "replay/stream/ws/links stay unregistered -> 404",
+        detail: `replay=${replay.status} stream=${stream.status} ws=${ws.status} links=${links.status}`,
+      },
+      {
+        ok: sessionsRes.ok && sessionsRes.status === 200 && Boolean(agentSession) &&
+          agentSession.eventCount === 8,
+        label: "S1 regression: sessions lists s_s2agent with eventCount=8",
+        detail: show(agentSession),
+      },
+      {
+        ok: regressionPage.res.status === 200 && regressionEvents.length === 8 &&
+          regressionEvents.map((entry) => entry.seq).join(",") === "1,2,3,4,5,6,7,8" &&
+          regressionProblems.length === 0,
+        label: "S1 regression: events wrapper keeps seq 1..8, schema-valid events, nextSeq=8",
+        detail: regressionProblems.length ? regressionProblems.slice(0, 3).join(" || ") : show(regressionPage.value.nextSeq),
+      },
+    ];
+    record(
+      "S2-4",
+      "requests/graph over the runtime 4-span chain + 400/404/405 + S1 sessions/events regression",
+      s2ReadChecks.every((c) => c.ok),
+      s2ReadChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s "http://127.0.0.1:8601/api/v1/sessions/${S2_SESSION}/requests" ; curl -s "http://127.0.0.1:8601/api/v1/sessions/${S2_SESSION}/graph?traceId=<traceId>"`,
+    );
+
+    /* ---------------- S2-2 demo defect (DB after cancel + unknown id) ---------------- */
+    const ordersAfter = await tryRequest(8080, "/api/orders", { method: "GET" });
+    const ordersAfterBody = ordersAfter.ok ? parseJson(ordersAfter.text) : { ok: false };
+    const afterRows = ordersAfterBody.ok && Array.isArray(ordersAfterBody.value?.data)
+      ? ordersAfterBody.value.data
+      : [];
+    const afterSeed = afterRows[0] ?? {};
+    const unknownCancel = await tryRequest(8080, "/api/orders/999/cancel", { method: "POST" });
+    const unknownBody = unknownCancel.ok ? parseJson(unknownCancel.text) : { ok: false };
+    const defectChecks = [
+      {
+        ok: cancel1.ok && cancel1.status === 200 && deepEqual(cancel1Body.value, { data: true }),
+        label: "POST /api/orders/1/cancel -> 200 {data:true}",
+        detail: cancel1.ok ? show(cancel1.text) : String(cancel1.error),
+      },
+      {
+        ok: ordersAfter.ok && ordersAfter.status === 200 && afterRows.length === 1 &&
+          afterSeed.id === 1 && afterSeed.status === "CREATED" &&
+          typeof afterSeed.amount === "number" && afterSeed.amount === 100,
+        label: "GET /api/orders after cancel -> row 1 STILL CREATED (real 0-row UPDATE in H2)",
+        detail: ordersAfter ? show(ordersAfter.text) : "timeout",
+      },
+      {
+        ok: unknownCancel.ok && unknownCancel.status === 404 && deepEqual(unknownBody.value, { data: false }),
+        label: "POST /api/orders/999/cancel -> 404 {data:false} (existence check 0 rows)",
+        detail: unknownCancel.ok ? show(unknownCancel.text) : String(unknownCancel.error),
+      },
+      {
+        ok: h2Embedded && ordersBeforeBody.ok,
+        label: "0 rows is a runtime H2/MyBatis fact (embedded H2 in the fat jar, no MySQL), not a fixture",
+        detail: h2Line || "missing h2 lib in the demo fat jar",
+      },
+      {
+        ok: true,
+        label: "coverage limit: existence check countById is deliberately not instrumented (4-span chain stays exact)",
+        detail: "documented in test-report as an S2 collection-scope limit, not a synthesized span",
+      },
+    ];
+    record(
+      "S2-2",
+      "demo H2/MyBatis 0-row defect: 200 true + STILL CREATED + unknown 404",
+      defectChecks.every((c) => c.ok),
+      defectChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
+      `curl -s "http://localhost:8080/api/orders" ; curl -s -X POST "http://localhost:8080/api/orders/1/cancel" ; curl -s "http://localhost:8080/api/orders"`,
+    );
+
+    /* ---------------- unknown id with agent (documented coverage limit) ---------------- */
+    const unknownPoll = await pollUntil(async () => {
+      const page = await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+      const spans = Array.isArray(page.value.events) ? page.value.events.map((entry) => entry.event) : [];
+      return page.res.ok && spans.length > spansB.length ? page : null;
+    }, 4000, 300);
+    const afterUnknownPage = unknownPoll ?? await getEventsPage(S2_SESSION, "?afterSeq=0&limit=200");
+    const afterUnknownSpans = Array.isArray(afterUnknownPage.value.events)
+      ? afterUnknownPage.value.events.map((entry) => entry.event)
+      : [];
+    const extraSpans = afterUnknownSpans.filter((span) => !spansB.some((known) => known.spanId === span.spanId));
+    const extraKinds = extraSpans.map((span) => `${span.kind}:${span.status}`).join(",");
+    const unknownChainOk = extraSpans.length === 0 ||
+      (extraSpans.length === 2 &&
+        extraSpans.some((span) => span.kind === "controller" && span.status === "OK" &&
+          deepEqual(span.return, { type: S2_RESPONSE_ENTITY_TYPE, value: 404 })) &&
+        extraSpans.some((span) => span.kind === "service" && span.status === "RETURNED_FALSE") &&
+        !extraSpans.some((span) => span.kind === "mapper" || span.kind === "sql"));
+    record(
+      "S2-3b",
+      "unknown id 999 chain (coverage limit: 0 or 2 spans, never a faked mapper/sql)",
+      unknownChainOk,
+      [
+        `unknown cancel -> ${unknownCancel.status} ${show(unknownCancel.text)}`,
+        `extra spans after the unknown id: ${extraSpans.length}${extraSpans.length ? ` (${extraKinds})` : " (not collected / delayed)"}`,
+        "case A above is unaffected: its trace still has exactly 4 spans and 0 rows",
+      ],
+      `curl -s -X POST "http://localhost:8080/api/orders/999/cancel"`,
+    );
+
+    /* ---------------- S2-5 fail-open ---------------- */
     await stopServer(collector);
     const collectorFreed = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
     await sleep(500);
@@ -1769,24 +2477,25 @@ async function checkS1E(validate) {
     const failOpenMs = Date.now() - startedAt;
     const failOpenBody = failOpenCancel.ok ? parseJson(failOpenCancel.text) : { ok: false };
     const aliveOrders = await tryRequest(8080, "/api/orders", { method: "GET" });
-    const unknownCancel = await tryRequest(8080, "/api/orders/999/cancel", { method: "POST" });
-    const unknownBody = unknownCancel.ok ? parseJson(unknownCancel.text) : { ok: false };
-    await sleep(1000);
-
+    const stderrSeen = await pollUntil(async () => {
+      return /\[traceboard-agent\]\s+ingest_rejected=\d+\s+status=(io_error|\d+)/.test(demo.log.text) ? true : null;
+    }, 10000, 300);
+    const rejectedLine = (demo.log.text.match(/\[traceboard-agent\]\s+ingest_rejected=[^\r\n]*/) ?? ["not found"])[0];
+    const appException = /APPLICATION FAILED TO START|Exception in thread|premain failed/.test(demo.log.text);
     const failChecks = [
       { ok: Boolean(collectorFreed), label: "collector stopped, 8601 free", detail: collectorFreed ? "no LISTENING socket" : listeningOn(8601).lines.join(" | ") },
       { ok: failOpenCancel.ok && failOpenCancel.status === 200 && deepEqual(failOpenBody.value, { data: true }), label: "POST cancel with collector down -> 200 {data:true}", detail: failOpenCancel.ok ? show(failOpenCancel.text) : String(failOpenCancel.error) },
       { ok: failOpenMs < 3000, label: "fail-open latency < 3000ms", detail: `${failOpenMs}ms` },
-      { ok: aliveOrders.ok && aliveOrders.status === 200, label: "demo process alive after collector stop", detail: `GET /api/orders -> ${aliveOrders.status}` },
-      { ok: unknownCancel.ok && unknownCancel.status === 404 && unknownBody.value?.data === false, label: "S0 regression: unknown id still 404 {data:false}", detail: unknownCancel.ok ? show(unknownCancel.text) : String(unknownCancel.error) },
-      { ok: /\[traceboard-agent\]\s+ingest_rejected=\d+\s+status=(io_error|\d+)/.test(demo.log.text), label: "sender counted the rejected send on stderr (not silent)", detail: (demo.log.text.match(/\[traceboard-agent\]\s+ingest_rejected=[^\r\n]*/) ?? ["not found"])[0] },
+      { ok: aliveOrders.ok && aliveOrders.status === 200, label: "demo process alive after collector stop (no restart needed)", detail: `GET /api/orders -> ${aliveOrders.status}` },
+      { ok: Boolean(stderrSeen), label: "agent stderr counts the rejected send (ingest_rejected, not silent)", detail: rejectedLine },
+      { ok: !appException, label: "no application exception / no premain failure in the demo log", detail: appException ? "exception marker found" : "clean log" },
     ];
     record(
-      "S1-E2",
-      "fail-open: collector stopped, cancel still 200 fast, demo alive",
+      "S2-5",
+      "fail-open: collector stopped, cancel still 200 fast, demo alive, stderr ingest_rejected",
       failChecks.every((c) => c.ok),
       failChecks.map((c) => `${c.ok ? "ok " : "BAD"} ${c.label} :: ${c.detail}`),
-      `stop collector, then: curl -X POST http://localhost:8080/api/orders/1/cancel`,
+      `stop collector, then: curl -s -X POST "http://localhost:8080/api/orders/1/cancel"`,
     );
   } finally {
     await stopServer(demo);
@@ -1794,8 +2503,284 @@ async function checkS1E(validate) {
     const freed8080 = await pollUntil(() => listeningOn(8080).lines.length === 0, 30000, 400);
     const freed8601 = await pollUntil(() => listeningOn(8601).lines.length === 0, 30000, 400);
     console.log(`        demo/collector stopped; 8080 ${freed8080 ? "free" : "STILL LISTENING"}, 8601 ${freed8601 ? "free" : "STILL LISTENING"}`);
-    activeServer = null;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* S2-7 S2 fixture + expected facts                                    */
+/* ------------------------------------------------------------------ */
+
+function checkS2Fixture(validate) {
+  section("S2-7 S2 fixture + expected facts");
+  const checks = [];
+  const meta = readTextFileMeta(S2_EVENTS_REL);
+  checks.push({ ok: meta.lines.length === 4, label: "events.ndjson: exactly 4 non-empty lines", detail: `lines=${meta.lines.length}` });
+  checks.push({ ok: !meta.hasBom, label: "events.ndjson: UTF-8 without BOM", detail: `hasBom=${meta.hasBom}` });
+  checks.push({ ok: meta.crCount === 0, label: "events.ndjson: no CR bytes", detail: `\\r count=${meta.crCount}` });
+  checks.push({
+    ok: meta.endsWithNewline,
+    label: "events.ndjson: trailing LF at EOF",
+    detail: `lastByte=0x${meta.buffer.length ? meta.buffer[meta.buffer.length - 1].toString(16) : "??"}`,
+  });
+  checks.push({ ok: meta.emptyLineCount === 0, label: "events.ndjson: no empty lines", detail: `empty=${meta.emptyLineCount}` });
+
+  let events = [];
+  try {
+    events = meta.lines.map((line) => JSON.parse(line));
+  } catch (error) {
+    checks.push({ ok: false, label: "events.ndjson: every line parses", detail: error.message });
+  }
+  const invalid = [];
+  if (validate && events.length === 4) {
+    events.forEach((event, index) => {
+      if (!validate(event)) {
+        invalid.push(`line ${index + 1}: ${(validate.errors ?? []).slice(0, 2).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ")}`);
+      }
+    });
+  }
+  checks.push({
+    ok: Boolean(validate) && events.length === 4 && invalid.length === 0,
+    label: "4/4 events validate against the frozen schema (Ajv 2020-12 strict)",
+    detail: invalid.length ? invalid.join(" || ") : "4/4 valid",
+  });
+  checks.push({
+    ok: events.length === 4 && events.every((event) =>
+      !Object.prototype.hasOwnProperty.call(event, "seq") &&
+      !Object.prototype.hasOwnProperty.call(event, "values") &&
+      !Object.prototype.hasOwnProperty.call(event, "reason")),
+    label: "no seq/values/reason fields inside the events",
+    detail: "absent on 4/4",
+  });
+
+  const chainIssues = events.length === 4 ? chainProblems(events, { fixture: true }) : ["events did not parse"];
+  checks.push({
+    ok: chainIssues.length === 0,
+    label: "chain: single LOST root, controller->service->mapper->sql, OK, nested, 0 rows/UNKNOWN, exact flags",
+    detail: chainIssues.slice(0, 6).join(" || ") || "conformant",
+  });
+
+  /* -------- expected-facts consumer (globalAssertions.chain + 6 facts) -------- */
+  let factsDoc = null;
+  try {
+    factsDoc = JSON.parse(readFileSync(abs(S2_FACTS_REL), "utf8"));
+  } catch (error) {
+    checks.push({ ok: false, label: "expected-facts.json parses", detail: error.message });
+  }
+  if (factsDoc && events.length === 4) {
+    const sorted = sortedByStart(events);
+    const roots = events.filter((event) => event.parentSpanId === null);
+    const root = roots[0] ?? {};
+    const byId = new Map(events.map((event) => [event.spanId, event]));
+    const sqlEvent = events.find((event) => event.kind === "sql") ?? {};
+    const sqlEffect = Array.isArray(sqlEvent.sideEffects) ? sqlEvent.sideEffects[0] ?? {} : {};
+
+    checks.push({
+      ok: factsDoc.caseId === "s2-zero-row-chain" && factsDoc.stage === "S2" &&
+        factsDoc.sources?.chain?.file === S2_EVENTS_REL &&
+        factsDoc.sources.chain.lineCount === 4 && factsDoc.sources.chain.eventCount === 4,
+      label: "expected-facts: caseId/stage/source file+counts match the fixture",
+      detail: `${factsDoc.caseId} / ${factsDoc.stage} / ${factsDoc.sources?.chain?.file}`,
+    });
+
+    const globalFails = [];
+    const assertions = factsDoc.globalAssertions?.chain ?? {};
+    for (const [key, expected] of Object.entries(assertions)) {
+      let ok = false;
+      let actual = "";
+      switch (key) {
+        case "sessionId":
+          ok = events.every((event) => event.sessionId === expected);
+          actual = [...new Set(events.map((event) => event.sessionId))].join(",");
+          break;
+        case "eventCount":
+          ok = events.length === expected;
+          actual = String(events.length);
+          break;
+        case "traceId":
+          ok = events.every((event) => event.traceId === expected);
+          actual = [...new Set(events.map((event) => event.traceId))].join(",");
+          break;
+        case "rootSpanId":
+          ok = roots.length === 1 && roots[0].spanId === expected;
+          actual = roots.map((event) => event.spanId).join(",");
+          break;
+        case "rootEventId":
+          ok = events.every((event) => event.rootEventId === expected);
+          actual = [...new Set(events.map((event) => event.rootEventId))].join(",");
+          break;
+        case "rootEventIdPrefix":
+          ok = events.every((event) => String(event.rootEventId).startsWith(expected));
+          actual = String(root.rootEventId);
+          break;
+        case "rootEventIdSuffixIsRootSpanId":
+          ok = expected === true && roots.length === 1 && String(root.rootEventId).endsWith(root.spanId);
+          actual = `${root.rootEventId} / ${root.spanId}`;
+          break;
+        case "singleRoot":
+          ok = expected === true && roots.length === 1;
+          actual = `roots=${roots.length}`;
+          break;
+        case "rootKind":
+          ok = roots.length === 1 && root.kind === expected;
+          actual = String(root.kind);
+          break;
+        case "rootParentSpanId":
+          ok = roots.length === 1 && root.parentSpanId === expected;
+          actual = String(root.parentSpanId);
+          break;
+        case "confidenceAllLost":
+          ok = expected === true && events.every((event) => event.confidence === "LOST");
+          actual = [...new Set(events.map((event) => event.confidence))].join(",");
+          break;
+        case "statusAllOk":
+          ok = expected === true && events.every((event) => event.status === "OK");
+          actual = [...new Set(events.map((event) => event.status))].join(",");
+          break;
+        case "noExceptions":
+        case "noThrewStatus":
+          ok = expected === true && events.every((event) => event.status !== "THREW");
+          actual = `threw=${events.filter((event) => event.status === "THREW").length}`;
+          break;
+        case "noReason":
+          ok = expected === true && events.every((event) => !Object.prototype.hasOwnProperty.call(event, "reason"));
+          actual = "reason absent";
+          break;
+        case "noValues":
+          ok = expected === true && events.every((event) => !Object.prototype.hasOwnProperty.call(event, "values"));
+          actual = "values absent";
+          break;
+        case "parentChain":
+          ok = Array.isArray(expected) && expected.length === sorted.length &&
+            expected.every((spanId, index) => sorted[index].spanId === spanId) &&
+            expected.slice(1).every((spanId, index) => sorted[index + 1].parentSpanId === sorted[index].spanId);
+          actual = sorted.map((event) => `${event.spanId}<-${event.parentSpanId}`).join(",");
+          break;
+        case "kindChain":
+          ok = Array.isArray(expected) && expected.join(",") === sorted.map((event) => event.kind).join(",");
+          actual = sorted.map((event) => event.kind).join(",");
+          break;
+        case "startNsNonDecreasing":
+          ok = expected === true && sorted.every((event, index) => index === 0 || event.startNs >= sorted[index - 1].startNs);
+          actual = sorted.map((event) => event.startNs).join(",");
+          break;
+        case "intervalContainment":
+        case "intervalNested":
+          ok = expected === true && events.filter((event) => event.parentSpanId !== null).every((event) => {
+            const parent = byId.get(event.parentSpanId);
+            return parent && event.startNs >= parent.startNs &&
+              event.startNs + event.durNs <= parent.startNs + parent.durNs;
+          });
+          if (key === "intervalNested") {
+            ok = ok && sorted.slice(1).every((event, index) =>
+              event.startNs >= sorted[index].startNs &&
+              event.startNs + event.durNs <= sorted[index].startNs + sorted[index].durNs);
+          }
+          actual = `${events.filter((event) => event.parentSpanId !== null).length} child spans`;
+          break;
+        case "durNsPositive":
+          ok = expected === true && events.every((event) => event.durNs > 0);
+          actual = sorted.map((event) => event.durNs).join(",");
+          break;
+        case "threadAllEqual":
+          ok = events.every((event) => event.thread?.name === expected);
+          actual = [...new Set(events.map((event) => event.thread?.name))].join(",");
+          break;
+        case "flagsRootExact":
+          ok = roots.length === 1 && deepEqual(root.flags, expected);
+          actual = show(root.flags);
+          break;
+        case "flagsChildrenExact":
+          ok = events.filter((event) => event.parentSpanId !== null).every((event) => deepEqual(event.flags, expected));
+          actual = show(events.find((event) => event.parentSpanId !== null)?.flags);
+          break;
+        case "flagsLostBackendOnlyOnRoot":
+          ok = expected === true &&
+            Array.isArray(root.flags) && root.flags.includes(S2_FLAG_LOST_BACKEND) &&
+            events.filter((event) => event.parentSpanId !== null)
+              .every((event) => !Array.isArray(event.flags) || !event.flags.includes(S2_FLAG_LOST_BACKEND));
+          actual = show(root.flags);
+          break;
+        case "sqlRowsAffectedZero":
+          ok = expected === true && sqlEffect.rowsAffected === 0;
+          actual = String(sqlEffect.rowsAffected);
+          break;
+        case "sqlTransaction":
+          ok = sqlEffect.transaction === expected;
+          actual = String(sqlEffect.transaction);
+          break;
+        default:
+          ok = false;
+          actual = "unknown assertion key";
+      }
+      if (!ok) globalFails.push(`chain.${key} expected=${show(expected)} actual=${actual}`);
+    }
+    checks.push({
+      ok: Object.keys(assertions).length === 28 && globalFails.length === 0,
+      label: "globalAssertions.chain fully evaluated (28 keys, no unknown keys)",
+      detail: globalFails.length ? globalFails.slice(0, 5).join(" || ") : `${Object.keys(assertions).length} keys, 0 failures`,
+    });
+
+    const factList = Array.isArray(factsDoc.facts) ? factsDoc.facts : [];
+    const factFails = [];
+    for (const fact of factList) {
+      if (fact.source !== "chain") {
+        factFails.push(`${fact.id}: unknown source ${fact.source}`);
+        continue;
+      }
+      const matches = events.filter((event) => event.kind === fact.kind && event.nodeKey === fact.nodeKey);
+      if (matches.length !== 1) {
+        factFails.push(`${fact.id}: matches=${matches.length}`);
+        continue;
+      }
+      if (matches[0].status !== fact.status) factFails.push(`${fact.id}: status=${matches[0].status} expected=${fact.status}`);
+      const lookup = factPathValue(matches[0], events, fact.assert?.path);
+      if (!lookup.found || !deepEqual(lookup.value, fact.assert?.value)) {
+        factFails.push(`${fact.id}: ${fact.assert?.path}=${lookup.found ? show(lookup.value) : "not found"} expected=${show(fact.assert?.value)}`);
+      }
+      if (typeof fact.summary !== "string" || fact.summary.trim().length === 0) factFails.push(`${fact.id}: empty summary`);
+    }
+    checks.push({
+      ok: factList.length === 6 && factFails.length === 0,
+      label: "6 facts locate a unique event and deep-equal their assertion (incl. #trace.* derived)",
+      detail: factFails.length ? factFails.slice(0, 5).join(" || ") : `facts=${factList.length}, 0 failures`,
+    });
+
+    /* -------- negative mutations (schema + chain invariants) -------- */
+    const seqRejected = validate ? validate({ ...events[0], seq: 1 }) === false : false;
+    checks.push({ ok: seqRejected, label: "negative: event carrying seq is rejected by the schema", detail: seqRejected ? "rejected" : "accepted (BAD)" });
+
+    const doubleRoot = events.map((event, index) => index === 1 ? { ...event, parentSpanId: null } : event);
+    const doubleRootProblems = chainProblems(doubleRoot, { fixture: true });
+    checks.push({ ok: doubleRootProblems.length > 0, label: "negative: a second root is rejected by the chain invariants", detail: doubleRootProblems.slice(0, 2).join(" || ") || "accepted (BAD)" });
+
+    const broken = events.map((event, index) => index === 2 ? { ...event, parentSpanId: "ffffffffffffffff" } : event);
+    const brokenProblems = chainProblems(broken, { fixture: true });
+    checks.push({ ok: brokenProblems.length > 0, label: "negative: a broken parent chain is rejected", detail: brokenProblems.slice(0, 2).join(" || ") || "accepted (BAD)" });
+
+    const exact = events.map((event, index) => index === 2 ? { ...event, confidence: "EXACT" } : event);
+    const exactProblems = chainProblems(exact, { fixture: true });
+    checks.push({ ok: exactProblems.length > 0, label: "negative: confidence=EXACT in the LOST chain is rejected", detail: exactProblems.slice(0, 2).join(" || ") || "accepted (BAD)" });
+  }
+
+  /* -------- S0/S1 frozen fixtures (S2 plan-review §2 second block) -------- */
+  const freeze = s2FreezeSections();
+  checks.push({ ok: freeze.s2.length === 9, label: "S2 plan-review records 9 S2 freeze hashes", detail: `found=${freeze.s2.length}` });
+  checks.push({ ok: freeze.s0s1.length === 7, label: "S2 plan-review records 7 S0/S1 frozen fixture hashes", detail: `found=${freeze.s0s1.length}` });
+  for (const entry of freeze.s0s1) {
+    const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
+    checks.push({ ok: actual === entry.hash, label: `S0/S1 fixture unchanged (${entry.rel})`, detail: `actual=${actual}` });
+  }
+  const s1Batch = readTextFileMeta(S1_BATCH_REL);
+  const s1BatchValid = Boolean(validate) && s1Batch.lines.length === 2 &&
+    s1Batch.lines.every((line) => validate(JSON.parse(line)));
+  checks.push({ ok: s1BatchValid, label: "S1 fake batch is still schema-valid (2/2) after the S2 changes", detail: `lines=${s1Batch.lines.length}` });
+
+  gate(
+    "S2-7",
+    "S2 fixture: 4 schema-valid events, chain facts, expected-facts, negatives, S0/S1 fixtures unchanged",
+    checks,
+    `sha256sum "${S2_EVENTS_REL}" "${S2_FACTS_REL}" ; node tools/verify/verify.mjs`,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -2160,52 +3145,221 @@ function checkS1B(builds, validate) {
 }
 
 /* ------------------------------------------------------------------ */
-/* S1-G regression + drift                                             */
+/* S2-1 build artifacts                                                */
+/* ------------------------------------------------------------------ */
+
+function checkS2Artifacts() {
+  section("S2-1 build artifacts");
+  const checks = [];
+  const agentJar = abs(AGENT_JAR_REL);
+  const collectorJar = abs(COLLECTOR_JAR_REL);
+
+  checks.push({ ok: resultById("V2a")?.ok === true, label: "root reactor mvn package with JDK21 (agent + collector)", detail: "see V2a" });
+  checks.push({ ok: resultById("V2b")?.ok === true, label: "demo backend mvn package with JDK8 (H2 + MyBatis)", detail: "see V2b" });
+  checks.push({ ok: resultById("V2c-1")?.ok === true && resultById("V2c-2")?.ok === true, label: "workbench npm ci + npm run build", detail: "see V2c-1/V2c-2" });
+  checks.push({ ok: existsSync(abs(DEMO_JAR_REL)), label: "demo-shop-backend-0.1.0-SNAPSHOT.jar exists", detail: DEMO_JAR_REL });
+
+  let major = null;
+  if (existsSync(agentJar) && existsSync(JDK21_JAVAP)) {
+    const result = runExe(JDK21_JAVAP, ["-verbose", "-classpath", agentJar, "io.traceboard.agent.TraceAgent"]);
+    const match = result.stdout.match(/major version:\s*(\d+)/);
+    major = match ? Number(match[1]) : null;
+  }
+  checks.push({ ok: major === 52, label: "agent jar class major version 52 (Java 8)", detail: `major=${major ?? "?"}` });
+
+  if (existsSync(agentJar)) {
+    const manifest = runExe("unzip", ["-p", agentJar, "META-INF/MANIFEST.MF"]);
+    const premain = (manifest.stdout || "").split(/\r?\n/).find((line) => /^Premain-Class:/i.test(line.trim())) ?? "";
+    checks.push({
+      ok: manifest.code === 0 && /io\.traceboard\.agent\.TraceAgent/.test(premain),
+      label: "agent manifest Premain-Class: io.traceboard.agent.TraceAgent",
+      detail: premain.trim() || `unzip exit=${manifest.code}`,
+    });
+  } else {
+    checks.push({ ok: false, label: "agent jar readable", detail: "missing" });
+  }
+
+  const agentEntries = existsSync(agentJar) ? zipEntries(agentJar) : { ok: false, entries: [] };
+  const shaded = agentEntries.entries.filter((entry) => entry.startsWith("io/traceboard/agent/shaded/net/bytebuddy/") && entry.endsWith(".class"));
+  const unrelocated = agentEntries.entries.filter((entry) => entry.startsWith("net/bytebuddy/"));
+  checks.push({
+    ok: agentEntries.ok && shaded.length > 0 && unrelocated.length === 0,
+    label: "agent jar shades Byte Buddy (no unrelocated net/bytebuddy)",
+    detail: `shaded=${shaded.length} unrelocated=${unrelocated.length}`,
+  });
+
+  const schemaInJar = existsSync(collectorJar)
+    ? runExe("unzip", ["-p", collectorJar, "BOOT-INF/classes/schema/traceboard.event.v1.json"])
+    : { code: 1, stdout: "" };
+  const jarSchemaHash = schemaInJar.code === 0 ? sha256Text(schemaInJar.stdout) : "unreadable";
+  const repoSchemaHash = sha256File(abs(SCHEMA_REL));
+  checks.push({
+    ok: schemaInJar.code === 0 && jarSchemaHash === repoSchemaHash,
+    label: "collector jar schema byte-identical to the repo schema",
+    detail: `jar=${jarSchemaHash.slice(0, 12)} repo=${repoSchemaHash.slice(0, 12)}`,
+  });
+  const collectorEntries = existsSync(collectorJar) ? zipEntries(collectorJar) : { ok: false, entries: [] };
+  const schemaCopies = collectorEntries.entries.filter((entry) => entry.endsWith("schema/traceboard.event.v1.json"));
+  checks.push({
+    ok: schemaCopies.length === 1,
+    label: "collector jar contains exactly one schema copy",
+    detail: schemaCopies.join(",") || "none",
+  });
+
+  const distIndex = abs(`${WORKBENCH_DIST_REL}/index.html`);
+  checks.push({ ok: existsSync(distIndex), label: "workbench dist/index.html exists after the build", detail: WORKBENCH_DIST_REL });
+
+  gate(
+    "S2-1",
+    "build: root JDK21, demo JDK8 H2/MyBatis, agent 52/shaded/premain, collector schema parity, workbench build",
+    checks,
+    `JAVA_HOME="${JDK21_HOME}" mvn -B -q -DskipTests package && (cd "demo/buggy-shop-boot-vue/backend" && JAVA_HOME="${JDK8_HOME}" mvn -B -q -DskipTests package) && (cd "workbench" && npm ci && npm run build)`,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* S2-6 workbench dist facts                                           */
+/* ------------------------------------------------------------------ */
+
+function checkS2Workbench() {
+  section("S2-6 workbench dist");
+  const checks = [];
+  const files = distTextFiles(WORKBENCH_DIST_REL);
+  const all = files.map((file) => file.text).join("\n");
+  const findIn = (token) => files.filter((file) => file.text.includes(token)).map((file) => file.rel).join(",") || "not found";
+
+  const tokens = [
+    "0 行事实链",
+    "requests",
+    "graph",
+    "rowsAffected",
+    "未采集",
+    "事实摘要",
+    "traceId",
+    "事实摘要，不是缺陷结论",
+    "游离后端请求（无前端根）",
+    "每 5 秒刷新（非实时）",
+    "s2-panel",
+    "s2-session",
+    "s2-refresh",
+    "s2-requests",
+    "s2-chain",
+  ];
+  for (const token of tokens) {
+    checks.push({ ok: all.includes(token), label: `dist contains "${token}"`, detail: findIn(token) });
+  }
+  checks.push({
+    ok: all.includes("S1 walking skeleton（假数据，非 S2 事实链）") && all.includes("发送假点击/请求"),
+    label: "S1 fake panel retained and folded as secondary (S1 walking skeleton label present)",
+    detail: findIn("S1 walking skeleton"),
+  });
+  checks.push({
+    ok: all.includes("Fixture 事实摘要") && all.includes("case-a-zero-rows · 只读"),
+    label: "S0 FixturePanel retained",
+    detail: findIn("Fixture 事实摘要"),
+  });
+  checks.push({
+    ok: !/new EventSource|new WebSocket|sendBeacon/.test(all) &&
+      !/["'`]\/api\/v1\/stream|["'`]\/ws\/v1\/events|["'`]\/api\/v1\/sessions\/[^"'`]*\/replay/.test(all),
+    label: "no SSE/WebSocket/replay/stream artifact in the built workbench",
+    detail: "none",
+  });
+  const pkg = readFileSync(abs("workbench/package.json"), "utf8");
+  checks.push({
+    ok: !/"(d3|echarts|cytoscape|vis-network|chart\.js|three|sigma)"/.test(pkg) &&
+      !/\bd3\.|cytoscape\(|echarts\.init|vis\.Network/.test(all),
+    label: "no graph library in package.json or dist (indented list, no canvas graph)",
+    detail: "none",
+  });
+  checks.push({
+    ok: !/<canvas/i.test(all),
+    label: "no canvas graph element in dist",
+    detail: "none",
+  });
+  checks.push({
+    ok: !/["'`]\/api\/v1\/replay|["'`]\/api\/v1\/timeline|id:\s*["']timeline/.test(all),
+    label: "no replay/timeline route or panel id in dist (S3 boundary)",
+    detail: "none",
+  });
+
+  gate(
+    "S2-6",
+    "workbench dist: S2 fact-chain markers/selectors, S1 fake panel + S0 fixture panel retained, no graph lib/S3",
+    checks,
+    `(cd "workbench" && npm ci && npm run build) && grep -Rho "0 行事实链\\|事实摘要，不是缺陷结论\\|s2-chain" "workbench/dist" | sort -u`,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* S2-L drift: S2 G1 baseline + S0 freeze + S1 fixture bytes           */
 /* ------------------------------------------------------------------ */
 
 function resultById(id) {
   return RESULTS.find((item) => item.id === id) ?? null;
 }
 
-function checkS1G(builds) {
-  section("S1-G regression + freeze drift");
+function checkS2Drift() {
+  section("S2-L drift: S2 G1 baseline + S0 freeze + S1 fixture bytes");
   const checks = [];
-  const updatedContracts = new Set([
+  const reviewText = readFileSync(abs(S2_PLAN_REVIEW_REL), "utf8");
+  checks.push({
+    ok: /结论：\s*\*\*G1: PASS\*\*/.test(reviewText) || reviewText.includes("G1: PASS"),
+    label: "S2 plan-review records G1: PASS (freeze is the authority)",
+    detail: "G1: PASS",
+  });
+
+  const freeze = s2FreezeSections();
+  checks.push({ ok: freeze.s2.length === 9, label: "9 S2 G1 freeze hashes recorded", detail: `found=${freeze.s2.length}` });
+  const s2Map = new Map(freeze.s2.map((entry) => [entry.rel, entry.hash]));
+  for (const entry of freeze.s2) {
+    const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
+    checks.push({
+      ok: actual === entry.hash,
+      label: `S2 freeze intact ${entry.rel}`,
+      detail: actual === entry.hash ? "hash matches" : `actual=${actual} baseline=${entry.hash}`,
+    });
+  }
+
+  checks.push({ ok: freeze.s0s1.length === 7, label: "7 S0/S1 frozen fixture hashes recorded", detail: `found=${freeze.s0s1.length}` });
+  for (const entry of freeze.s0s1) {
+    const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
+    checks.push({
+      ok: actual === entry.hash,
+      label: `S1/S0 fixture bytes unchanged ${entry.rel}`,
+      detail: actual === entry.hash ? "hash matches" : `actual=${actual} baseline=${entry.hash}`,
+    });
+  }
+
+  const contractSet = new Set([
     "docs/contracts/api.v1.md",
     "docs/contracts/transport.v1.md",
     "docs/contracts/event-model.v1.md",
   ]);
-
-  const s1Baseline = parseFreezeBaseline(S1_PLAN_REVIEW_REL, /^#{2,3} 8\. G1 冻结基线/m);
-  checks.push({ ok: s1Baseline.length === 10, label: "10 S1 G1 baseline hashes recorded in S1 plan-review.md", detail: `found=${s1Baseline.length}` });
-  const s1Map = new Map(s1Baseline.map((entry) => [entry.rel, entry.hash]));
-  for (const entry of s1Baseline) {
-    const fileAbs = abs(entry.rel);
-    const actual = existsSync(fileAbs) ? sha256File(fileAbs) : "missing";
-    checks.push({ ok: actual === entry.hash, label: `S1 freeze ${entry.rel}`, detail: `actual=${actual} baseline=${entry.hash}` });
-  }
-
   const s0Baseline = parseFreezeBaseline(PLAN_REVIEW_REL);
   checks.push({ ok: s0Baseline.length === 7, label: "7 S0 G1 baseline hashes recorded in S0 plan-review.md", detail: `found=${s0Baseline.length}` });
   const drifted = [];
   for (const entry of s0Baseline) {
-    const fileAbs = abs(entry.rel);
-    const actual = existsSync(fileAbs) ? sha256File(fileAbs) : "missing";
-    if (updatedContracts.has(entry.rel)) {
-      const expected = s1Map.get(entry.rel);
-      const ok = actual === expected && actual !== entry.hash;
+    const actual = existsSync(abs(entry.rel)) ? sha256File(abs(entry.rel)) : "missing";
+    if (contractSet.has(entry.rel)) {
+      const expected = s2Map.get(entry.rel);
+      const ok = actual === expected;
       checks.push({
         ok,
-        label: `S0->S1 contract update ${entry.rel} (allowed only via S1 G1 freeze)`,
-        detail: `s0=${entry.hash.slice(0, 12)} s1=${actual.slice(0, 12)}`,
+        label: `S0 contract updated only through S1/S2 G1 freeze (${entry.rel})`,
+        detail: `s0=${entry.hash.slice(0, 12)} s2=${String(actual).slice(0, 12)}`,
       });
       if (!ok) drifted.push(entry.rel);
     } else {
       const ok = actual === entry.hash;
-      checks.push({ ok, label: `S0 frozen unchanged ${entry.rel}`, detail: `actual=${actual} s0=${entry.hash}` });
+      checks.push({ ok, label: `S0 frozen unchanged ${entry.rel}`, detail: actual === entry.hash ? "hash matches" : `actual=${actual} s0=${entry.hash}` });
       if (!ok) drifted.push(entry.rel);
     }
   }
+  checks.push({
+    ok: drifted.length === 0,
+    label: "no unexplained drift outside the S2 G1 freeze",
+    detail: drifted.length ? drifted.join(",") : "clean",
+  });
 
   const priorIds = ["V1", "V1b", "V1c", "V4b"];
   checks.push({
@@ -2219,28 +3373,24 @@ function checkS1G(builds) {
     label: "S0 builds still green (root/demo/workbench/demo frontend)",
     detail: buildIds.map((id) => `${id}=${resultById(id)?.ok ? "PASS" : "FAIL"}`).join(","),
   });
-  checks.push({
-    ok: drifted.length === 0,
-    label: "no unexplained drift (only the 3 S1-updated contracts differ from S0)",
-    detail: drifted.length ? drifted.join(",") : "clean",
-  });
 
   gate(
-    "S1-G",
-    "regression: case-A valid, S0 builds green, S1 G1 freeze baseline intact",
+    "S2-L",
+    "drift: S2 G1 hashes intact, S0 freeze intact, S1 fixture bytes intact, case-A valid, S0 builds green",
     checks,
-    `sha256sum "schema/traceboard.event.v1.json" "docs/contracts/api.v1.md" "docs/contracts/transport.v1.md" "docs/contracts/event-model.v1.md" "${S1_BATCH_REL}"`,
+    `sha256sum "schema/traceboard.event.v1.json" "docs/contracts/api.v1.md" "docs/contracts/event-model.v1.md" "docs/contracts/transport.v1.md" "fixtures/s2-zero-row-chain/events.ndjson" "fixtures/s1-walking-skeleton/frontend-fake-batch.ndjson"`,
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* S1-H scope / security                                               */
+/* S2-8 scope / security                                               */
 /* ------------------------------------------------------------------ */
 
-function checkS1H() {
-  section("S1-H scope / security");
+function checkS2Scope() {
+  section("S2-8 scope / security");
   const checks = [];
 
+  /* -------- collector: exactly 6 routes, read-only derivations, no S3/DB/stream -------- */
   const collectorFiles = dirTextFiles("server/collector/src");
   const collectorCode = collectorFiles.map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
   const routes = [];
@@ -2254,25 +3404,26 @@ function checkS1H() {
     "GET /api/v1/meta",
     "GET /api/v1/sessions",
     "GET /api/v1/sessions/{sessionId}/events",
+    "GET /api/v1/sessions/{sessionId}/requests",
+    "GET /api/v1/sessions/{sessionId}/graph",
     "POST /ingest/v1/events",
   ];
   checks.push({
     ok: routes.slice().sort().join("|") === expectedRoutes.slice().sort().join("|"),
-    label: "collector registers exactly the 4 S1 routes (no graph/replay/stream/links)",
+    label: "collector registers exactly the 6 S2 routes (requests/graph implemented, no replay/stream/ws/links)",
     detail: routes.sort().join(", "),
   });
-  const reservedRouteLeak = collectorCode.filter((file) => /["']\/[^"']*(graph|replay|links|stream)[^"']*["']/.test(file.text));
+  const reservedRouteLeak = collectorCode.filter((file) => /["']\/[^"']*(replay|links|stream|\/ws)[^"']*["']/.test(file.text));
   checks.push({
     ok: reservedRouteLeak.length === 0,
-    label: "no reserved route string in collector mapping annotations",
+    label: "no reserved replay/stream/ws/links path string in collector code",
     detail: reservedRouteLeak.map((f) => f.rel).join(",") || "none",
   });
-
   const collectorForbidden = [
-    { name: "s2-db", re: /JdbcTemplate|java\.sql|javax\.sql|@Repository|spring-data-jpa|mybatis|hibernate/i },
-    { name: "s2-persistence", re: /FileOutputStream|Files\.write|java\.nio\.file|RandomAccessFile/ },
-    { name: "s2-correlation", re: /traceparent|clickId|mergeRootEvent/i },
-    { name: "s2-stream", re: /SseEmitter|EventSource|WebSocket|@ServerEndpoint/ },
+    { name: "db", re: /JdbcTemplate|java\.sql|javax\.sql|@Repository|spring-data-jpa|mybatis|hibernate/i },
+    { name: "persistence", re: /FileOutputStream|Files\.write|java\.nio\.file|RandomAccessFile/ },
+    { name: "correlation", re: /traceparent|clickId|mergeRootEvent/i },
+    { name: "stream", re: /SseEmitter|new EventSource|WebSocket|@ServerEndpoint/i },
     { name: "cors", re: /@CrossOrigin|Access-Control-Allow/ },
   ];
   const collectorHits = [];
@@ -2282,92 +3433,64 @@ function checkS1H() {
     }
   }
   checks.push({ ok: collectorHits.length === 0, label: "collector has no DB/persistence/correlation/SSE-WS/CORS code", detail: collectorHits.join(",") || "none" });
+  const collectorSources = collectorCode.map((file) => file.text).join("\n");
+  checks.push({
+    ok: /snapshot\(\)/.test(collectorSources) && !/@Cacheable|Caffeine|caffeine|ConcurrentHashMap<[^>]*Span/.test(collectorSources),
+    label: "requests/graph derive at read time from the snapshot (no derive cache)",
+    detail: "TraceDeriver reads snapshot().events() on every GET",
+  });
 
+  /* -------- agent: exactly 4 points, no extra targets, no S3 probes -------- */
   const agentFiles = dirTextFiles("agent/src");
   const agentCode = agentFiles.map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
+  const agentSources = agentCode.map((file) => file.text).join("\n");
   const traceAgent = agentCode.find((f) => f.rel.endsWith("TraceAgent.java"))?.text ?? "";
   const typeMatchers = (traceAgent.match(/\.type\(/g) ?? []).length;
-  const adviceSites = (traceAgent.match(/Advice\.to\(/g) ?? []).length;
-  checks.push({
-    ok: typeMatchers === 1 && adviceSites === 1 &&
-      /named\("cancel"\)/.test(traceAgent) && /takesArguments\(long\.class\)/.test(traceAgent) &&
-      traceAgent.includes("com.example.shop.controller.OrderController") &&
-      !/com\.example\.shop\.(service|mapper|repository)/.test(traceAgent),
-    label: "agent instruments exactly one type/method (OrderController#cancel(long))",
-    detail: `.type=${typeMatchers} Advice.to=${adviceSites}`,
-  });
-  const agentForbidden = [
-    { name: "s2-sql", re: /java\.sql|PreparedStatement|ResultSet|rowsAffected/ },
-    { name: "s2-correlation", re: /traceparent|clickId|correlat(?:e|ion)/ },
-    { name: "s2-targets", re: /com\.example\.shop\.(service|mapper|repository)/ },
+  const transformSites = (traceAgent.match(/\.transform\(/g) ?? []).length;
+  const agentTargets = [
+    "com.example.shop.controller.OrderController",
+    "com.example.shop.service.OrderService",
+    "org.apache.ibatis.binding.MapperProxy",
+    "org.apache.ibatis.executor.statement.PreparedStatementHandler",
   ];
-  const agentHits = [];
+  const adviceClasses = ["ControllerAdvice.class", "ServiceAdvice.class", "MapperAdvice.class", "SqlAdvice.class"];
+  checks.push({
+    ok: typeMatchers === 4 && transformSites === 4 &&
+      agentTargets.every((target) => traceAgent.includes(target)) &&
+      adviceClasses.every((name) => traceAgent.includes(name)),
+    label: "agent instruments exactly 4 types/advices (controller/service/MapperProxy/PreparedStatementHandler)",
+    detail: `.type=${typeMatchers} .transform=${transformSites}`,
+  });
+  const shopClasses = [...new Set(agentSources.match(/com\.example\.shop\.[A-Za-z0-9_.]+/g) ?? [])].sort();
+  const expectedShopClasses = [
+    "com.example.shop.controller.OrderController",
+    "com.example.shop.mapper.OrderMapper",
+    "com.example.shop.service.OrderService",
+  ];
+  checks.push({
+    ok: deepEqual(shopClasses, expectedShopClasses),
+    label: "no other com.example.shop target is instrumented (no repository/other controller)",
+    detail: shopClasses.join(","),
+  });
+  checks.push({
+    ok: /isTargetMapperMethod/.test(agentSources) && /MAPPER_METHOD\s*=\s*"cancelById"/.test(agentSources) &&
+      !/countById/.test(agentSources) && /mappedStatement/.test(agentSources) &&
+      /@Advice\.Return\(readOnly = true\)\s+int\s+rowsAffected/.test(agentSources),
+    label: "mapper filter is cancelById only; SQL filter reads mappedStatement and the real @Return rows",
+    detail: "countById never instrumented",
+  });
+  const agentS3 = [];
   for (const file of agentCode) {
-    for (const { name, re } of agentForbidden) {
-      if (re.test(file.text)) agentHits.push(`${file.rel} [${name}]`);
+    for (const { name, re } of [
+      { name: "traceparent/clickId", re: /traceparent|clickId|correlat(?:e|ion)/ },
+      { name: "browser/sdk", re: /EventSource|WebSocket|sendBeacon|addEventListener\("click"/ },
+      { name: "values/reason", re: /"values"|"reason"|getMessage\(\)/ },
+    ]) {
+      if (re.test(file.text)) agentS3.push(`${file.rel} [${name}]`);
     }
   }
-  checks.push({ ok: agentHits.length === 0, label: "agent has no SQL/row/service/correlation probing", detail: agentHits.join(",") || "none" });
+  checks.push({ ok: agentS3.length === 0, label: "agent has no S3 SDK/correlation/field-diff code", detail: agentS3.join(",") || "none" });
 
-  const workbenchFiles = dirTextFiles("workbench/src");
-  const wbText = workbenchFiles.map((f) => f.text).join("\n");
-  const wbCode = workbenchFiles.map((f) => stripComments(f.text)).join("\n");
-  const apiText = workbenchFiles.find((f) => f.rel.endsWith("src/api.ts"))?.text ?? "";
-  const apiCode = stripComments(apiText);
-  checks.push({
-    ok: !/\bEventSource\b|new WebSocket|setInterval/.test(wbCode),
-    label: "workbench has no SSE/WebSocket/interval polling",
-    detail: /\bEventSource\b|new WebSocket|setInterval/.test(wbCode) ? "stream API found" : "none",
-  });
-  checks.push({
-    ok: !/<canvas/i.test(wbCode) && !/from\s+["'](d3|echarts|cytoscape|vis-network|chart\.js|three)/.test(wbCode),
-    label: "workbench has no graph/canvas library or canvas element",
-    detail: "none",
-  });
-  checks.push({
-    ok: !/\bTimeline\b|\bid=["']timeline|import[^;]*\bReplay\b|id=["']replay/.test(wbCode),
-    label: "workbench has no timeline/replay view component",
-    detail: "none",
-  });
-  checks.push({
-    ok: !/rowCount|rowsAffected|sideEffects/.test(collectorCode.map((file) => file.text).join("\n")),
-    label: "collector collects no row counts/side effects (no S2 probes)",
-    detail: "none",
-  });
-  const workbenchPkg = readFileSync(abs("workbench/package.json"), "utf8");
-  checks.push({
-    ok: !/"(d3|echarts|cytoscape|vis-network|chart\.js|three|sigma)"/.test(workbenchPkg),
-    label: "workbench package.json has no graph/timeline dependency",
-    detail: "dependencies: vue, pinia only",
-  });
-  const fakeBatchText = workbenchFiles.find((f) => f.rel.endsWith("src/s1/fakeBatch.ts"))?.text ?? "";
-  const panelText = workbenchFiles.find((f) => f.rel.endsWith("components/S1Panel.vue"))?.text ?? "";
-  const agentSessionRead = /(?:fetchEventsPage|readBack|readOnce)\s*\(\s*["'`]s_s1|sessionId\s*[:=]\s*["']s_s1/.test(panelText + apiText);
-  checks.push({
-    ok: /S1_SESSION_ID\s*=\s*"s_wb_demo"/.test(fakeBatchText) && /readBack\(S1_SESSION_ID\)/.test(panelText) && !agentSessionRead,
-    label: "workbench reads only s_wb_demo (the agent session is never queried)",
-    detail: agentSessionRead ? "agent session used in a read call" : "s_wb_demo readback only",
-  });
-  checks.push({
-    ok: wbText.includes("no correlation yet") && /假/.test(wbText),
-    label: "workbench labels the skeleton honestly (no correlation yet / fake)",
-    detail: "banner present",
-  });
-  checks.push({
-    ok: apiCode.includes('"/ingest/v1/events"') && apiCode.includes('"/api/v1/sessions"') &&
-      !/["'`]https?:\/\//.test(apiCode),
-    label: "workbench API client uses relative paths only (proxy, no CORS/absolute URL)",
-    detail: apiCode.includes('"/ingest/v1/events"') ? "relative" : "missing",
-  });
-
-  const appYml = readFileSync(abs("server/collector/src/main/resources/application.yml"), "utf8");
-  checks.push({
-    ok: /address:\s*127\.0\.0\.1/.test(appYml) && /port:\s*8601/.test(appYml) && !/0\.0\.0\.0/.test(appYml),
-    label: "collector binds 127.0.0.1:8601 only",
-    detail: "application.yml loopback",
-  });
-
-  const agentSources = agentCode.map((f) => f.text).join("\n");
   const failOpen = (agentSources.match(/catch\s*\(\s*Throwable/g) ?? []).length;
   checks.push({
     ok: failOpen >= 4 && !/\bretry\b|for\s*\(\s*int\s+attempt/i.test(agentSources) &&
@@ -2376,7 +3499,133 @@ function checkS1H() {
     label: "agent fail-open: Throwable guards, bounded queue 16, 300/700ms, no retries",
     detail: `catch(Throwable)=${failOpen}`,
   });
+  checks.push({
+    ok: /FLAG_CHAIN\s*=\s*"S2_ZERO_ROW_CHAIN"/.test(agentSources) && /FLAG_LOST_BACKEND\s*=\s*"LOST_BACKEND"/.test(agentSources) &&
+      /if\s*\(frame\.root\)/.test(agentSources),
+    label: "agent flags S2_ZERO_ROW_CHAIN everywhere and LOST_BACKEND only on the root",
+    detail: "SpanEmitter root gate",
+  });
 
+  /* -------- workbench: S2 panel only, no S3/graph library/stream -------- */
+  const workbenchFiles = dirTextFiles("workbench/src");
+  const wbCode = workbenchFiles.map((f) => stripComments(f.text)).join("\n");
+  const apiText = workbenchFiles.find((f) => f.rel.endsWith("src/api.ts"))?.text ?? "";
+  const apiCode = stripComments(apiText);
+  const s2PanelText = workbenchFiles.find((f) => f.rel.endsWith("components/S2Panel.vue"))?.text ?? "";
+  const s2StoreText = workbenchFiles.find((f) => f.rel.endsWith("stores/s2.ts"))?.text ?? "";
+  const s1PanelText = workbenchFiles.find((f) => f.rel.endsWith("components/S1Panel.vue"))?.text ?? "";
+  const fakeBatchText = workbenchFiles.find((f) => f.rel.endsWith("src/s1/fakeBatch.ts"))?.text ?? "";
+  checks.push({
+    ok: !/new EventSource|new WebSocket|sendBeacon/.test(wbCode),
+    label: "workbench has no SSE/WebSocket/beacon channel",
+    detail: "none",
+  });
+  checks.push({
+    ok: /POLL_INTERVAL_MS\s*=\s*5000/.test(s2PanelText) &&
+      /document\.visibilityState\s*===\s*"visible"/.test(s2PanelText) &&
+      s2PanelText.includes("每 5 秒刷新（非实时）"),
+    label: "workbench polls every 5s only while visible (manual refresh + non-realtime label)",
+    detail: "POLL_INTERVAL_MS=5000 + visibility gate",
+  });
+  checks.push({
+    ok: !/<canvas/i.test(wbCode) && !/from\s+["'](d3|echarts|cytoscape|vis-network|chart\.js|three|sigma)/.test(wbCode),
+    label: "workbench has no graph/canvas library or canvas element",
+    detail: "none",
+  });
+  checks.push({
+    ok: !/\bTimeline\b|\bid=["']timeline|\bReplay\b|\bid=["']replay/.test(wbCode),
+    label: "workbench has no timeline/replay view component",
+    detail: "none",
+  });
+  checks.push({
+    ok: /S2_DEFAULT_SESSION_ID\s*=\s*"s_s2agent"/.test(s2StoreText) &&
+      s2PanelText.includes('id="s2-panel"') && s2PanelText.includes('id="s2-session"') &&
+      s2PanelText.includes('id="s2-refresh"') && s2PanelText.includes('id="s2-requests"') &&
+      s2PanelText.includes('id="s2-chain"'),
+    label: "S2 panel keeps the stable #s2-* selectors and defaults to s_s2agent",
+    detail: "5 selectors present",
+  });
+  checks.push({
+    ok: /S1_SESSION_ID\s*=\s*"s_wb_demo"/.test(fakeBatchText) && /readBack\(S1_SESSION_ID\)/.test(s1PanelText),
+    label: "S1 fake panel is retained (s_wb_demo read-back path kept)",
+    detail: "S1Panel readBack intact",
+  });
+  checks.push({
+    ok: apiCode.includes('"/ingest/v1/events"') && apiCode.includes('"/api/v1/sessions"') &&
+      !/["'`]https?:\/\//.test(apiCode),
+    label: "workbench API client uses relative paths only (proxy, no CORS/absolute URL)",
+    detail: apiCode.includes('"/ingest/v1/events"') ? "relative" : "missing",
+  });
+  const workbenchPkg = readFileSync(abs("workbench/package.json"), "utf8");
+  checks.push({
+    ok: !/"(d3|echarts|cytoscape|vis-network|chart\.js|three|sigma)"/.test(workbenchPkg),
+    label: "workbench package.json has no graph/timeline dependency",
+    detail: "dependencies: vue, pinia only",
+  });
+  const viteConfig = readFileSync(abs("workbench/vite.config.ts"), "utf8");
+  const proxy = (name) => new RegExp(`["']${name}["']\\s*:\\s*\\{[\\s\\S]*?target:\\s*["']http://127\\.0\\.0\\.1:8601["']`).test(viteConfig);
+  checks.push({
+    ok: proxy("/api") && proxy("/ingest") && !/0\.0\.0\.0/.test(viteConfig),
+    label: "Vite dev proxy /api + /ingest -> http://127.0.0.1:8601 (loopback only)",
+    detail: "proxy unchanged",
+  });
+
+  /* -------- demo: H2 embedded only, real defect, no MySQL -------- */
+  const demoPom = readFileSync(abs("demo/buggy-shop-boot-vue/backend/pom.xml"), "utf8");
+  checks.push({
+    ok: /mybatis-spring-boot-starter/.test(demoPom) && /<mybatis-spring-boot\.version>2\.3\.1</.test(demoPom) &&
+      /<artifactId>h2<\/artifactId>/.test(demoPom) && /<scope>runtime<\/scope>/.test(demoPom) &&
+      !/mysql-connector|jdbc:mysql|com\.mysql|mariadb/i.test(demoPom) && !/<h2\.version>/.test(demoPom),
+    label: "demo pom: MyBatis starter 2.3.1 + H2 runtime (Boot-managed version), no MySQL driver",
+    detail: "pom.xml",
+  });
+  const demoSrc = dirTextFiles("demo/buggy-shop-boot-vue/backend/src");
+  const demoText = demoSrc.map((file) => file.text).join("\n");
+  const demoAppYml = demoSrc.find((file) => file.rel.endsWith("application.yml"))?.text ?? "";
+  checks.push({
+    ok: /jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1/.test(demoAppYml) && /org\.h2\.Driver/.test(demoAppYml) &&
+      /mode:\s*always/.test(demoAppYml) && !/jdbc:mysql|mysql-connector|com\.mysql/i.test(demoText),
+    label: "demo config: embedded H2 only (jdbc:h2:mem:shop, DB_CLOSE_DELAY=-1), no MySQL URL/driver",
+    detail: "application.yml",
+  });
+  const mapperText = demoSrc.find((file) => file.rel.endsWith("mapper/OrderMapper.java"))?.text ?? "";
+  const serviceText = demoSrc.find((file) => file.rel.endsWith("service/OrderService.java"))?.text ?? "";
+  checks.push({
+    ok: /status='PAID'/.test(mapperText) && /countById/.test(mapperText) &&
+      /orderMapper\.cancelById\([^)]*\)\s*;/.test(serviceText) &&
+      !/(?:int|long|Integer)\s+\w+\s*=\s*orderMapper\.cancelById/.test(serviceText) &&
+      !/if\s*\(\s*orderMapper\.cancelById/.test(serviceText),
+    label: "demo defect is real: UPDATE ... AND status='PAID', service existence check then ignores the row count",
+    detail: "OrderMapper#cancelById / OrderService#cancel",
+  });
+  checks.push({
+    ok: !existsSync(abs("demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/store/InMemoryOrderStore.java")),
+    label: "InMemoryOrderStore removed (single DB fact source)",
+    detail: "absent",
+  });
+  checks.push({
+    ok: existsSync(abs("demo/buggy-shop-boot-vue/backend/src/main/resources/schema.sql")) &&
+      existsSync(abs("demo/buggy-shop-boot-vue/backend/src/main/resources/data.sql")) &&
+      /CREATE TABLE IF NOT EXISTS orders/.test(readFileSync(abs("demo/buggy-shop-boot-vue/backend/src/main/resources/schema.sql"), "utf8")) &&
+      /'CREATED'/.test(readFileSync(abs("demo/buggy-shop-boot-vue/backend/src/main/resources/data.sql"), "utf8")),
+    label: "schema.sql/data.sql present with the CREATED seed",
+    detail: "resources/schema.sql + data.sql",
+  });
+
+  /* -------- one schema copy, loopback collector, mirrors, data hygiene -------- */
+  const schemaCopies = walk(abs("."), { skip: new Set(["node_modules", ".git", "target", "dist", "work"]) })
+    .filter((file) => path.basename(file) === "traceboard.event.v1.json");
+  checks.push({
+    ok: schemaCopies.length === 1 && relOf(schemaCopies[0]) === SCHEMA_REL,
+    label: "exactly one schema copy in the repository (no second schema)",
+    detail: schemaCopies.map(relOf).join(","),
+  });
+  const appYml = readFileSync(abs("server/collector/src/main/resources/application.yml"), "utf8");
+  checks.push({
+    ok: /address:\s*127\.0\.0\.1/.test(appYml) && /port:\s*8601/.test(appYml) && !/0\.0\.0\.0/.test(appYml),
+    label: "collector binds 127.0.0.1:8601 only",
+    detail: "application.yml loopback",
+  });
   const mirrorHits = [];
   for (const file of ["workbench/package-lock.json", "demo/buggy-shop-boot-vue/frontend/package-lock.json", "tools/verify/package-lock.json"]) {
     const text = readFileSync(abs(file), "utf8");
@@ -2400,28 +3649,27 @@ function checkS1H() {
     label: "no custom Maven repository/mirror in poms (Maven Central default)",
     detail: "none",
   });
-
-  const s1FixtureText = readFileSync(abs(S1_BATCH_REL), "utf8") + readFileSync(abs(S1_AGENT_SPAN_REL), "utf8");
+  const fixtureText = readFileSync(abs(S2_EVENTS_REL), "utf8") + readFileSync(abs(S1_BATCH_REL), "utf8") + readFileSync(abs(S1_AGENT_SPAN_REL), "utf8");
   checks.push({
-    ok: !/[\w.+-]+@[\w-]+\.[\w.]+/.test(s1FixtureText) && !/\b1[3-9]\d{9}\b/.test(s1FixtureText),
-    label: "S1 fixtures contain no email/phone-like real data",
+    ok: !/[\w.+-]+@[\w-]+\.[\w.]+/.test(fixtureText) && !/\b1[3-9]\d{9}\b/.test(fixtureText),
+    label: "fixtures contain no email/phone-like real data",
     detail: "none",
   });
 
   gate(
-    "S1-H",
-    "scope/security: no S2 features, loopback only, fail-open, no secrets/mirrors",
+    "S2-8",
+    "scope/security: 6 routes + 4 agent points exactly, no S3/SDK/persistence/stream, H2 embedded only, no secrets/mirrors",
     checks,
-    `grep -rnE "EventSource|WebSocket|JdbcTemplate|traceparent|clickId" agent/src server/collector/src workbench/src`,
+    `grep -rnE "EventSource|WebSocket|traceparent|clickId|JdbcTemplate|SseEmitter" agent/src server/collector/src workbench/src demo/buggy-shop-boot-vue/backend/src`,
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* S1-I cleanup                                                        */
+/* S2-9 cleanup                                                        */
 /* ------------------------------------------------------------------ */
 
-function checkS1I() {
-  section("S1-I cleanup");
+function checkS2Cleanup() {
+  section("S2-9 cleanup");
   const checks = [];
   for (const port of S1_PORTS) {
     const state = listeningOn(port);
@@ -2436,21 +3684,27 @@ function checkS1I() {
   const leftover = nowPids.filter((pid) => !BASELINE.javaPids.includes(pid));
   checks.push({
     ok: leftover.length === 0,
-    label: "no java.exe process left behind by this run",
+    label: "no java.exe process left behind by this run (collector/demo/Vite stopped)",
     detail: leftover.length ? `pids=${leftover.join(",")}` : `none (baseline=${BASELINE.javaPids.join(",") || "0"})`,
   });
 
   const status = gitStatusLines();
+  // Entries ending in "/" are directory prefixes; every other entry must match exactly
+  // (so the S2-AMD-01 exception can never widen to a directory).
   const allowed = [
     "agent/",
     "server/",
     "workbench/",
+    "demo/buggy-shop-boot-vue/backend/",
+    DEMO_APP_REL, // S2-AMD-01: exact file only
     "pom.xml",
     "docs/contracts/api.v1.md",
     "docs/contracts/transport.v1.md",
     "docs/contracts/event-model.v1.md",
     "docs/plans/stages/S1/",
+    "docs/plans/stages/S2/",
     "fixtures/s1-walking-skeleton/",
+    "fixtures/s2-zero-row-chain/",
     "tools/verify/",
     "README.md",
     ".gitattributes",
@@ -2458,30 +3712,35 @@ function checkS1I() {
   const forbidden = [
     "schema/",
     "fixtures/case-a-zero-rows/",
-    "demo/",
+    `${DEMO_FRONTEND_REL}/`,
     "docs/contracts/status-semantics.md",
     "docs/plans/stages/S0/",
     "docs/plans/00-master-plan.md",
     "docs/plans/SOLO-PLAN.md",
   ];
+  const isDirPattern = (entry) => entry.endsWith("/");
+  const pathMatches = (rel, entry) => (isDirPattern(entry) ? rel.startsWith(entry) : rel === entry);
+  const s2Amd01Exception = (rel) => rel === DEMO_APP_REL;
   const unexpected = [];
   const forbiddenHits = [];
   const staged = [];
+  const statusRels = [];
   for (const line of status.lines) {
     const index = `${line[0] ?? " "}${line[1] ?? " "}`;
-    const rel = line.slice(3).trim().replace(/^"|"$/g, "").split("/").join("/");
+    const rel = line.slice(3).trim().replace(/^"|"$/g, "").split("\\").join("/");
+    statusRels.push(rel);
     if (index[0] !== " " && index[0] !== "?") staged.push(line);
-    if (!allowed.some((prefix) => rel === prefix || rel.startsWith(prefix))) unexpected.push(line);
-    if (forbidden.some((prefix) => rel === prefix || rel.startsWith(prefix))) forbiddenHits.push(line);
+    if (!allowed.some((entry) => pathMatches(rel, entry))) unexpected.push(line);
+    if (forbidden.some((entry) => pathMatches(rel, entry)) && !s2Amd01Exception(rel)) forbiddenHits.push(line);
   }
   checks.push({
     ok: status.ok && forbiddenHits.length === 0,
-    label: "no git change under frozen/foreign paths (schema, case-A, demo, S0 docs)",
+    label: "no git change under frozen/foreign paths (schema, case-A/S1 fixtures, demo frontend except S2-AMD-01 src/App.vue, S0 docs)",
     detail: forbiddenHits.slice(0, 4).join(" | ") || "none",
   });
   checks.push({
     ok: status.ok && unexpected.length === 0,
-    label: "git status only shows expected S1 product/test paths",
+    label: "git status only shows expected S2 product/test paths",
     detail: unexpected.slice(0, 4).join(" | ") || `${status.lines.length} expected entries`,
   });
   checks.push({
@@ -2490,9 +3749,119 @@ function checkS1I() {
     detail: staged.slice(0, 4).join(" | ") || "all changes untracked/unstaged",
   });
 
+  /* ---------------- S2-AMD-01: the single allowlisted demo-frontend text change ---------------- */
+  const demoAppAbs = abs(DEMO_APP_REL);
+  const demoAppText = existsSync(demoAppAbs) ? readFileSync(demoAppAbs, "utf8") : "";
+  const headApp = gitShowFile(DEMO_APP_REL);
+  const workSections = vueSections(demoAppText);
+  const headSections = headApp.ok ? vueSections(headApp.text) : null;
+  const workTags = workSections ? templateTagInventory(workSections.body) : [];
+  const headTags = headSections ? templateTagInventory(headSections.body) : [];
+
+  checks.push({
+    ok: allowed.includes(DEMO_APP_REL) && !allowed.includes(`${DEMO_FRONTEND_REL}/`) &&
+      forbidden.includes(`${DEMO_FRONTEND_REL}/`) && !DEMO_APP_REL.endsWith("/"),
+    label: "S2-AMD-01: only the exact file demo frontend src/App.vue is allowlisted (directory prefix stays forbidden)",
+    detail: `exact=${DEMO_APP_REL}; prefix ${DEMO_FRONTEND_REL}/ excluded from allowed`,
+  });
+
+  const changedUnderFrontend = statusRels.filter(
+    (rel) => rel === DEMO_FRONTEND_REL || rel.startsWith(`${DEMO_FRONTEND_REL}/`),
+  );
+  const otherDemoFrontendChanges = changedUnderFrontend.filter((rel) => !s2Amd01Exception(rel));
+  checks.push({
+    ok: status.ok && otherDemoFrontendChanges.length === 0,
+    label: "demo frontend: no file besides src/App.vue is changed/frozen (S2-AMD-01 scope)",
+    detail: otherDemoFrontendChanges.length
+      ? `unexpected=${otherDemoFrontendChanges.slice(0, 4).join(" | ")}`
+      : `changed=[${changedUnderFrontend.join(",") || "none"}] others=0`,
+  });
+
+  const demoFrontendSources = existsSync(abs(`${DEMO_FRONTEND_REL}/src`))
+    ? walk(abs(`${DEMO_FRONTEND_REL}/src`)).map((file) => ({ rel: relOf(file), text: readFileSync(file, "utf8") }))
+    : [];
+  const demoDistFiles = distTextFiles(DEMO_DIST_REL);
+  const staleCopyHits = [];
+  for (const file of [...demoFrontendSources, ...demoDistFiles]) {
+    for (const stale of AMD01_STALE_TOKENS) {
+      if (file.text.includes(stale)) staleCopyHits.push(`${file.rel} :: ${stale}`);
+    }
+  }
+  const missingBannerSource = AMD01_BANNER_TOKENS.filter((token) => !demoAppText.includes(token));
+  const missingBannerDist = demoDistFiles.length === 0
+    ? ["dist missing"]
+    : AMD01_BANNER_TOKENS.filter((token) => !demoDistFiles.some((file) => file.text.includes(token)));
+  checks.push({
+    ok: missingBannerSource.length === 0 && missingBannerDist.length === 0 && staleCopyHits.length === 0,
+    label: "S2-AMD-01 copy: case-A banner present, stale S0 “无缺陷/无采集/S0 demo 骨架” copy absent (demo frontend src + dist)",
+    detail: [
+      missingBannerSource.length ? `source missing=${missingBannerSource.join(",")}` : "source banner ok",
+      missingBannerDist.length ? `dist missing=${missingBannerDist.join(",")}` : `dist banner ok (${demoDistFiles.length} files)`,
+      staleCopyHits.length ? `stale=${staleCopyHits.slice(0, 3).join(" | ")}` : "stale copy absent",
+    ].join("; "),
+  });
+
+  const templateOnlyProblems = [];
+  if (!headApp.ok) {
+    templateOnlyProblems.push(`git show HEAD:${DEMO_APP_REL} failed :: ${lastLines(headApp.stderr, 1).join(" ")}`);
+  }
+  if (!workSections) templateOnlyProblems.push("working tree <template> block not found");
+  if (headApp.ok && !headSections) templateOnlyProblems.push("HEAD <template> block not found");
+  if (workSections && headSections) {
+    if (workSections.prefix !== headSections.prefix) templateOnlyProblems.push("script/pre-template section changed");
+    if (workSections.suffix !== headSections.suffix) templateOnlyProblems.push("post-template section changed");
+    if (!deepEqual(workTags, headTags)) {
+      templateOnlyProblems.push(`template elements/attributes changed :: ${workTags.length} vs HEAD ${headTags.length} tags`);
+    }
+  }
+  checks.push({
+    ok: headApp.ok && Boolean(workSections) && Boolean(headSections) && templateOnlyProblems.length === 0,
+    label: "App.vue diff is text/template only (script/fetch/button/toast/SDK unchanged; no element/attribute edits)",
+    detail: templateOnlyProblems.length
+      ? templateOnlyProblems.slice(0, 3).join(" | ")
+      : `script+style byte-identical to HEAD; ${workTags.length} template tags identical; text nodes only`,
+  });
+
+  const demoCodeFiles = demoFrontendSources.filter((file) => /\.(ts|vue|js)$/i.test(file.rel));
+  const sdkCallHits = [];
+  const fetchTargets = [];
+  for (const file of demoCodeFiles) {
+    const code = stripComments(file.text);
+    for (const { name, re } of [
+      { name: "collector ingest", re: /\/ingest\b|:8601\b/ },
+      { name: "SDK/correlation", re: /traceboard|traceparent|clickId/i },
+      { name: "browser push", re: /new\s+EventSource|new\s+WebSocket|sendBeacon/ },
+    ]) {
+      if (re.test(code)) sdkCallHits.push(`${file.rel} [${name}]`);
+    }
+    for (const match of code.matchAll(/fetch\(\s*["'`]([^"'`]+)/g)) {
+      fetchTargets.push({ rel: file.rel, target: match[1] });
+    }
+  }
+  const nonApiFetches = fetchTargets.filter((item) => !item.target.startsWith("/api/"));
+  checks.push({
+    ok: sdkCallHits.length === 0 && nonApiFetches.length === 0 && fetchTargets.length > 0,
+    label: "demo frontend still calls no SDK/collector (every fetch targets /api via the Vite proxy)",
+    detail: sdkCallHits.length || nonApiFetches.length
+      ? [...sdkCallHits, ...nonApiFetches.map((item) => `${item.rel} fetch(${item.target})`)].slice(0, 4).join(" | ")
+      : `${fetchTargets.length} fetch calls, targets: ${[...new Set(fetchTargets.map((item) => item.target))].join(", ")}`,
+  });
+
+  // Verifier outputs only (V8d already proves the product snapshot is unchanged).
+  const snapshotNow = sourceSnapshot();
+  const touched = [];
+  for (const [rel, hash] of Object.entries(SNAPSHOT)) {
+    if (snapshotNow[rel] !== hash) touched.push(rel);
+  }
+  checks.push({
+    ok: touched.length === 0,
+    label: "no product file modified by this verify run (only build outputs / verify outputs changed)",
+    detail: touched.length ? touched.slice(0, 5).join(",") : `${Object.keys(SNAPSHOT).length} product files stable`,
+  });
+
   gate(
-    "S1-I",
-    "cleanup: ports free, no java processes, git status limited to expected S1 paths",
+    "S2-9",
+    "cleanup: ports free, no java processes, git untouched, no product writes by verify",
     checks,
     `netstat -ano | grep -E ":(${S1_PORTS.join("|")})\\s" ; tasklist | grep -i java ; git status --porcelain`,
   );
@@ -2517,14 +3886,22 @@ function checkV6() {
 
   const workbenchFiles = distTextFiles(WORKBENCH_DIST_REL);
   const workbenchAll = workbenchFiles.map((f) => f.text).join("\n");
-  const wbTokens = ["app-shell", "前端图", "请求分图", "Fixture 事实摘要"].map((token) => ({
+  // S0 markers kept: AppShell + the read-only FixturePanel. The S0 placeholder panels
+  // ("前端图（占位）"/"请求分图（占位）", both labelled "未实现（S1 不做）") are deliberately
+  // superseded by the S2 request/fact-chain panel (dispatch S2 §4.6), so they are not asserted.
+  const wbTokens = ["app-shell", "Fixture 事实摘要", "case-a-zero-rows · 只读"].map((token) => ({
     ok: workbenchAll.includes(token),
     label: `workbench dist contains "${token}"`,
     detail: workbenchFiles.filter((f) => f.text.includes(token)).map((f) => f.rel).join(",") || "not found",
   }));
+  wbTokens.push({
+    ok: !workbenchAll.includes("图渲染尚未实现"),
+    label: "stale S0/S1 placeholder copy removed (no \"图渲染尚未实现\")",
+    detail: workbenchAll.includes("图渲染尚未实现") ? "stale placeholder still present" : "absent",
+  });
   record(
     "V6a",
-    "workbench dist contains AppShell markers",
+    "workbench dist contains the retained S0 AppShell + FixturePanel markers (placeholders superseded by S2)",
     wbTokens.every((t) => t.ok),
     wbTokens.map((t) => `${t.ok ? "ok " : "BAD"} ${t.label} :: ${t.detail}`),
     `(cd "workbench" && npm run build)`,
@@ -2656,9 +4033,10 @@ function checkV6() {
 /* V7 frozen drift                                                     */
 /* ------------------------------------------------------------------ */
 
-// The S0-only drift gate was superseded by S1-G: it now checks the S1 G1 baseline
-// (10 files) plus S0 regression (all S0 files unchanged except the three S1-updated
-// contracts). Nothing to run here.
+// The S0-only drift gate is superseded by S2-L: it checks the S2 G1 baseline
+// (9 files: schema + 3 contracts + 3 S2 fixtures + s2-plan + dispatch), the S0 freeze
+// (contracts updated only through the S1/S2 G1 chain, everything else byte-identical)
+// and the S0/S1 fixture bytes. Nothing to run here.
 
 /* ------------------------------------------------------------------ */
 /* V8 hygiene                                                          */
@@ -2853,7 +4231,7 @@ function sourceSnapshot() {
 async function main() {
   const startedAt = new Date();
   console.log("==============================================");
-  console.log("TraceBoard S0 + S1 verifier");
+  console.log("TraceBoard S0 + S1 + S2 verifier");
   console.log(`repo: ${REPO}`);
   console.log(`started: ${startedAt.toISOString()}`);
   console.log("==============================================");
@@ -2888,21 +4266,25 @@ async function main() {
   checkV1c(v1.parsed, v1.validate);
   checkV4b(v1.parsed);
 
+  checkS2Fixture(v1.validate);
+
   const builds = checkV2();
   checkV3();
 
   checkS1A(v1.validate);
   checkS1B(builds, v1.validate);
+  checkS2Artifacts();
 
   await checkS1CDF(v1.validate);
-  await checkS1E(v1.validate);
+  await checkS2E2E(v1.validate);
 
   checkV6();
+  checkS2Workbench();
   checkV8();
 
-  checkS1G(builds);
-  checkS1H();
-  checkS1I();
+  checkS2Drift();
+  checkS2Scope();
+  checkS2Cleanup();
 
   section("SUMMARY");
   const failed = RESULTS.filter((r) => !r.ok);
@@ -2913,7 +4295,7 @@ async function main() {
     for (const item of failed) console.log(`  - ${item.id}: ${item.title}`);
   }
   const verdict = failed.length === 0 ? "PASS" : "FAIL";
-  console.log(`S1 TEST: ${verdict}`);
+  console.log(`S2 TEST: ${verdict}`);
 
   if (process.argv.includes("--json")) {
     console.log(
@@ -2932,8 +4314,10 @@ async function main() {
 }
 
 process.on("exit", () => {
-  if (activeServer?.child?.pid) {
-    spawnSync("taskkill", ["/PID", String(activeServer.child.pid), "/T", "/F"], { windowsHide: true });
+  for (const server of activeServers) {
+    if (server?.child?.pid) {
+      spawnSync("taskkill", ["/PID", String(server.child.pid), "/T", "/F"], { windowsHide: true });
+    }
   }
   for (const dir of tmpDirs) {
     try {

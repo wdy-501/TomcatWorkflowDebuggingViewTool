@@ -4,3 +4,18 @@ server:
 spring:
   application:
     name: demo-shop-backend
+  datasource:
+    # Embedded H2 only (no MySQL / external DB service). DB_CLOSE_DELAY=-1 keeps the
+    # in-memory database alive for the whole JVM lifetime (s2-plan.md 6.1).
+    url: "jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1"
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  sql:
+    init:
+      mode: always
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true

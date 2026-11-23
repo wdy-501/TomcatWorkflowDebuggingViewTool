@@ -124,7 +124,8 @@ function formatWallClock(ms: number): string {
     </header>
 
     <p class="s1-panel__disclaimer">
-      S1 walking skeleton：前端假事件；仅一条真实后端 controller span 由 agent 直连 collector，工作台不展示/不关联；无图/无回放
+      S1 walking skeleton：假数据，非 S2 事实链。前端假事件；仅一条真实后端 controller span 由 agent 直连 collector，
+      工作台不展示/不关联；无图、不做关联判断
     </p>
     <p class="s1-panel__banner">
       <code>walking skeleton: fake frontend events; one real backend controller span; no correlation yet</code>
@@ -215,8 +216,8 @@ function formatWallClock(ms: number): string {
       </div>
 
       <p class="s1-panel__footnote">
-        说明：agent 的真实 controller span 属于会话 <code>s_s1_agent</code>，本面板按 S1 边界不展示、不关联；
-        service / mapper / SQL 未采集，查询不是回放。
+        说明：agent 的真实 controller span 属于会话 <code>s_s1agent</code>，本面板按 S1 边界不展示，
+        且与 S2 事实链无关联；service / mapper / SQL 未采集，查询只读取已存事件，不重跑程序。
       </p>
     </template>
   </section>

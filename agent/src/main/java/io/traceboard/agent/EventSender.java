@@ -69,6 +69,13 @@ final class EventSender {
         }
     }
 
+    /**
+     * @return events dropped so far (queue full / closed); reported in span flags, never silent
+     */
+    long droppedCount() {
+        return dropped.get();
+    }
+
     private void countDropped() {
         long n = dropped.incrementAndGet();
         if (n == 1L || n % 100L == 0L) {

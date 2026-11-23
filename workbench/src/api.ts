@@ -1,13 +1,18 @@
 /**
- * S1 API client: ingest a fake click/fetch batch and read the stored events back.
+ * API client for the workbench.
+ *
+ * S1: ingest a fake click/fetch batch and read the stored events back.
+ * S2: read the per-trace request list and the derived single-trace graph
+ *     (api.v1.md §8.1/§8.2) — both read-only.
  *
  * Rules enforced here:
  * - Relative paths only: /ingest and /api are proxied by the Vite dev server to
  *   http://127.0.0.1:8601 (see vite.config.ts). No direct collector URL, no CORS.
- * - Query read is a bounded, explicit read (api.v1.md §7.2), not replay and not
- *   a subscription. No SSE/WebSocket/polling lives in this file.
+ * - Query reads are bounded, explicit reads (api.v1.md §7.2, §8), not replay
+ *   and not a subscription. No push channel lives in this file.
  * - Types mirror the frozen contracts: event v1 body, query wrapper
- *   {"seq":N,"event":{...}}, sessions list, ingest result, error envelope.
+ *   {"seq":N,"event":{...}}, sessions list, ingest result, request summaries,
+ *   derived graph, error envelope.
  */
 
 export type Confidence = "EXACT" | "INFERRED" | "LOST" | "MANUAL";
@@ -296,5 +301,172 @@ export async function fetchEventsPage(
   return {
     events,
     nextSeq: asNumber(record.nextSeq, afterSeq),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// S2: requests + graph (read-only derivations, api.v1.md §8.1/§8.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One trace grouped by the collector. `confidence` is the root span's
+ * confidence; an orphan trace (no root) reports "LOST", never a guessed value.
+ */
+export interface RequestSummary {
+  traceId: string;
+  rootSpanId: string | null;
+  rootKind: string | null;
+  nodeKey: string | null;
+  status: string;
+  confidence: string;
+  spanCount: number;
+  startedAtNs: number;
+  durNs: number;
+  hasError: boolean;
+}
+
+export interface RequestsResponse {
+  sessionId: string;
+  requests: RequestSummary[];
+}
+
+/**
+ * A side effect exactly as stored. `rowsAffected` is `null` when the event did
+ * not carry a numeric value — the UI must render "未采集" for that and must
+ * never substitute 0 (missing is not the same fact as zero rows).
+ */
+export interface SideEffectItem {
+  type: string;
+  sqlId: string | null;
+  rowsAffected: number | null;
+  transaction: string | null;
+}
+
+/** One graph node; fields mirror the frozen §8.2 shape (11 fields). */
+export interface GraphNode {
+  spanId: string;
+  parentSpanId: string | null;
+  kind: string;
+  nodeKey: string;
+  status: string;
+  return: EventReturn | null;
+  sideEffects: SideEffectItem[];
+  startNs: number;
+  durNs: number;
+  thread: EventThread | null;
+  flags: string[];
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  count: number;
+}
+
+export interface GraphResponse {
+  sessionId: string;
+  traceId: string;
+  rootEventId: string | null;
+  confidence: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+function toRequestSummary(value: unknown): RequestSummary {
+  const record = isRecord(value) ? value : {};
+  return {
+    traceId: asString(record.traceId, ""),
+    rootSpanId: typeof record.rootSpanId === "string" ? record.rootSpanId : null,
+    rootKind: typeof record.rootKind === "string" ? record.rootKind : null,
+    nodeKey: typeof record.nodeKey === "string" ? record.nodeKey : null,
+    status: asString(record.status, ""),
+    confidence: asString(record.confidence, ""),
+    spanCount: asNumber(record.spanCount, 0),
+    startedAtNs: asNumber(record.startedAtNs, 0),
+    durNs: asNumber(record.durNs, 0),
+    hasError: record.hasError === true,
+  };
+}
+
+function toSideEffectItem(value: unknown): SideEffectItem {
+  const record = isRecord(value) ? value : {};
+  return {
+    type: asString(record.type, ""),
+    sqlId: typeof record.sqlId === "string" ? record.sqlId : null,
+    rowsAffected:
+      typeof record.rowsAffected === "number" && Number.isFinite(record.rowsAffected)
+        ? record.rowsAffected
+        : null,
+    transaction: typeof record.transaction === "string" ? record.transaction : null,
+  };
+}
+
+function toGraphNode(value: unknown): GraphNode {
+  const record = isRecord(value) ? value : {};
+  const rawThread = isRecord(record.thread) ? record.thread : null;
+  const rawReturn = isRecord(record.return) ? record.return : null;
+  const rawSideEffects = Array.isArray(record.sideEffects) ? record.sideEffects : [];
+  return {
+    spanId: asString(record.spanId, ""),
+    parentSpanId: typeof record.parentSpanId === "string" ? record.parentSpanId : null,
+    kind: asString(record.kind, ""),
+    nodeKey: asString(record.nodeKey, ""),
+    status: asString(record.status, ""),
+    return: rawReturn
+      ? { type: asString(rawReturn.type, ""), value: rawReturn.value }
+      : null,
+    sideEffects: rawSideEffects.filter(isRecord).map(toSideEffectItem),
+    startNs: asNumber(record.startNs, 0),
+    durNs: asNumber(record.durNs, 0),
+    thread: rawThread
+      ? { id: asNumber(rawThread.id, 0), name: asString(rawThread.name, "") }
+      : null,
+    flags: asStringArray(record.flags),
+  };
+}
+
+function toGraphEdge(value: unknown): GraphEdge {
+  const record = isRecord(value) ? value : {};
+  return {
+    from: asString(record.from, ""),
+    to: asString(record.to, ""),
+    count: asNumber(record.count, 1),
+  };
+}
+
+/**
+ * GET /api/v1/sessions/{sessionId}/requests — per-trace summaries, already
+ * sorted by `startedAtNs` (collector contract). Read-only; no pagination (S2).
+ */
+export async function fetchRequests(sessionId: string): Promise<RequestsResponse> {
+  const path = `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/requests`;
+  const payload = await requestJson(path);
+  const record = isRecord(payload) ? payload : {};
+  const raw = Array.isArray(record.requests) ? record.requests : [];
+  return {
+    sessionId: asString(record.sessionId, sessionId),
+    requests: raw.filter(isRecord).map(toRequestSummary),
+  };
+}
+
+/**
+ * GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex> — derived nodes/edges
+ * for one trace (`nodes` sorted by `startNs` by the collector). 400 on a bad
+ * traceId, 404 on unknown session/trace; both surface as CollectorHttpError.
+ */
+export async function fetchGraph(sessionId: string, traceId: string): Promise<GraphResponse> {
+  const params = new URLSearchParams({ traceId });
+  const path = `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/graph?${params.toString()}`;
+  const payload = await requestJson(path);
+  const record = isRecord(payload) ? payload : {};
+  const rawNodes = Array.isArray(record.nodes) ? record.nodes : [];
+  const rawEdges = Array.isArray(record.edges) ? record.edges : [];
+  return {
+    sessionId: asString(record.sessionId, sessionId),
+    traceId: asString(record.traceId, traceId),
+    rootEventId: typeof record.rootEventId === "string" ? record.rootEventId : null,
+    confidence: asString(record.confidence, ""),
+    nodes: rawNodes.filter(isRecord).map(toGraphNode),
+    edges: rawEdges.filter(isRecord).map(toGraphEdge),
   };
 }

@@ -1,10 +1,13 @@
 # HTTP API 契约 v1（api.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S2 增补：2026-11-24）
 > 变更记录：**2026-11-23 S1 增补**——ingest 与两个只读查询转为 IMPLEMENTED，meta `capabilities.ingestEvents=true`；
->   S0 的矩阵/端点章节按原样保留为历史（§2、§3、§4、§6），S1 当前权威定义在 **§7**。graph/replay/stream/links 仍为 RESERVED。
+>   S0 的矩阵/端点章节按原样保留为历史（§2、§3、§4、§6），S1 当时权威定义在 **§7**。graph/replay/stream/links 当时仍为 RESERVED。
 >   **2026-11-23 G1 第 1 轮**：§7.5 补一句“agent controller span 为游离后端根”，指向 `event-model.v1.md` §5 第 2 条例外（仅文档）。
-> 范围：collector HTTP API + demo 应用 API（附录）。S0 只实现 3 个 collector 端点，其余全部 RESERVED。
+>   **2026-11-24 S2 增补**：新增 `GET .../requests` 与 `GET .../graph?traceId=` 两个**只读派生**查询为 IMPLEMENTED（§2.2 矩阵、§8 定义）；
+>   `replay`/`stream`/`ws`/`links` **仍为 RESERVED**（不注册路由）。meta `capabilities` 5 键**不变**（`ingestEvents=true`、`realtime=false`、`replay=false`）。
+>   demo 后端植入 0 行缺陷（H2+MyBatis），行为见**附录 B**；附录 A 保留 S0 历史。§2.1/§7 保留为 S1 历史。
+> 范围：collector HTTP API + demo 应用 API（附录）。S2 的写入面仍只有 `POST /ingest/v1/events`，其余 collector 端点全部只读。
 > 关联：`transport.v1.md`（ingest 线上格式与 202/400/413/415、查询通路 C）、`event-model.v1.md`（事件体）。
 
 ## 1. 约定
@@ -21,7 +24,8 @@
 
 - 状态图例：**IMPLEMENTED**（该阶段必须可验证）、**PLACEHOLDER**（端点存在但固定返回 501）、**RESERVED**（不实现、不得出现在代码路由中）。
   S1 起：`POST /ingest/v1/events`、`GET /api/v1/sessions`、`GET /api/v1/sessions/{sessionId}/events` 为 IMPLEMENTED；
-  graph/replay/stream/links 仍为 RESERVED（S1 代码不得注册这些路由）。
+  **S2 起**：另有 `GET /api/v1/sessions/{sessionId}/requests`、`GET /api/v1/sessions/{sessionId}/graph?traceId=` 转为 IMPLEMENTED（§8）；
+  `replay`/`stream`/`ws`/`links` 在 S1/S2 均为 RESERVED（S2 代码同样不得注册这些路由）。
 
 ## 2. S0 实现矩阵（S0 历史，冻结，不改写）
 
@@ -42,7 +46,7 @@
 
 除上表 3 个 S0 端点外，collector 不暴露任何写接口；未知路径返回 404（Boot 默认即可），方法不匹配返回 405。
 
-### 2.1 S1 实现矩阵（当前权威）
+### 2.1 S1 实现矩阵（S1 当时权威；S2 起以 §2.2 为准）
 
 | 方法 | 路径 | S1 状态 | 说明 |
 |---|---|---|---|
@@ -59,6 +63,26 @@
 
 S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不存在 graph/replay/stream/links 路由，
 未知路径 404、方法不匹配 405（Boot 默认响应体可接受）。
+
+### 2.2 S2 实现矩阵（当前权威）
+
+| 方法 | 路径 | S2 状态 | 说明 |
+|---|---|---|---|
+| GET | `/actuator/health` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/meta` | **IMPLEMENTED** | `capabilities` 5 键与 S1 完全相同（`ingestEvents=true`，`realtime=false`，`replay=false`；§8.3） |
+| POST | `/ingest/v1/events` | **IMPLEMENTED** | 与 S1 完全一致，无改动（§7.1、`transport.v1.md` §4.5） |
+| GET | `/api/v1/sessions` | **IMPLEMENTED** | 不变（§7.2） |
+| GET | `/api/v1/sessions/{sessionId}/events` | **IMPLEMENTED** | 不变，只读分页，**不是回放**（§7.2） |
+| GET | `/api/v1/sessions/{sessionId}/requests` | **IMPLEMENTED**（S2 新增） | 按 trace 分组的请求摘要，读时派生，只读（§8.1） |
+| GET | `/api/v1/sessions/{sessionId}/graph?traceId=<32hex>` | **IMPLEMENTED**（S2 由 RESERVED 转正） | 单 trace 的节点/边派生视图，只读（§8.2） |
+| GET | `/api/v1/sessions/{sessionId}/replay` | RESERVED | 不注册路由；`capabilities.replay` 仍为 `false` |
+| GET | `/api/v1/stream` | RESERVED | SSE 不实现 |
+| WS | `/ws/v1/events` | RESERVED | WebSocket 不实现 |
+| POST | `/api/v1/sessions/{sessionId}/links` | RESERVED | 手工关联不实现（S4） |
+
+- S2 的写入面仍只有 `POST /ingest/v1/events`；requests/graph 是**读时派生**，不落 DB/文件、不缓存、不改写事件、不消耗 `seq`。
+- **查询 ≠ 回放**：requests/graph 不重新执行程序、不发 HTTP 写请求、不触发 SQL、不提供虚拟时钟；`capabilities.replay` 保持 `false`。
+- 未注册路径 404、方法不匹配 405（Boot 默认响应体可接受）；错误信封见 `transport.v1.md` §4.3。
 
 ## 3. S0 已实现端点（S0 历史；S1 现状见 §7）
 
@@ -169,6 +193,9 @@ GET /api/v1/sessions/{sessionId}/replay?fromNs=0&toNs=1000000000
 
 ### 4.2 派生图（只读）
 
+> S0 历史草案（保留对照）。**S2 起 graph 已 IMPLEMENTED**：`traceId` 必填、响应增加 `sessionId/rootEventId/confidence`、
+> 节点字段固定，权威定义见 **§8.2**；本节示例不作为实现依据。
+
 ```http
 GET /api/v1/sessions/{sessionId}/graph
 → 200 {"nodes":[],"edges":[]}
@@ -205,6 +232,9 @@ POST /api/v1/sessions/{sessionId}/links
 | GET | `/api/v1/sessions/{sessionId}/graph` | — | 仍 RESERVED |
 | GET | `/api/v1/stream`、WS `/ws/v1/events` | — | 仍 RESERVED |
 | POST | `/api/v1/sessions/{sessionId}/links` | — | 仍 RESERVED |
+
+> S2 变更：上表 `graph` 行已由 RESERVED 转为 **IMPLEMENTED**（`GET .../graph?traceId=`，§8.2），并新增 `GET .../requests`（§8.1）；
+> 上表其余 RESERVED 行在 S2 仍不注册路由。
 
 ## 5. 端口、同源与代理
 
@@ -377,7 +407,195 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/
 期望：`ingestEvents=true` / `202 accepted=2`（重发 → `dropped=2`）/ `s_wb_demo` 计数 2 / 2 条 `{seq,event}` 且 `nextSeq=2` /
 `405` / `404` / `400`。
 
-## 附录 A：demo 应用 API（非 TraceBoard API，S0 骨架）
+## 8. S2 实现（0 行事实链的只读派生）
+
+> S2 只新增两个**只读**查询：`requests`（按 trace 分组）与 `graph`（单 trace 节点/边）。二者都是**读时派生**：
+> 输入是内存 append-only 事件流，输出不改写、不持久化、不缓存、不消耗 `seq`，两次相同 GET 结果一致。
+> S2 **不是**回放、**不是**实时推送；`replay`/`stream`/`ws`/`links` 仍 RESERVED（路由不存在）。
+> 本节的 `requests`/`graph` 形状以本文件为准；`fixtures/s2-zero-row-chain/**` 是唯一的离线样例。
+
+### 8.1 `GET /api/v1/sessions/{sessionId}/requests`（IMPLEMENTED，只读）
+
+```http
+GET /api/v1/sessions/s_s2agent/requests HTTP/1.1
+Host: 127.0.0.1:8601
+```
+
+`200 OK`：
+
+```json
+{"sessionId":"s_s2agent","requests":[
+  {"traceId":"9f8e7d6c5b4a39281706f5e4d3c2b1a0","rootSpanId":"1a2b3c4d5e6f7a80","rootKind":"controller",
+   "nodeKey":"com.example.shop.controller.OrderController#cancel","status":"OK","confidence":"LOST",
+   "spanCount":4,"startedAtNs":1000000000,"durNs":8000000,"hasError":false}]}
+```
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `sessionId` | string | 路径参数的逐字回显（回显用于客户端断言，不参与分组） |
+| `requests[].traceId` | string | 分组键，`^[0-9a-f]{32}$` |
+| `requests[].rootSpanId` | string \| null | 该 trace 中 `parentSpanId=null` 的 span；无根时 `null`（诚实缺口） |
+| `requests[].rootKind` | string \| null | 根 span 的 `kind`；无根时 `null` |
+| `requests[].nodeKey` | string \| null | 根 span 的 `nodeKey`；无根时 `null` |
+| `requests[].status` | string | 该 trace **聚合最严重级**（见下）；无根时仍按全部 span 聚合 |
+| `requests[].confidence` | string | 根 span 的 `confidence`；**无根时固定 `"LOST"`**（不伪造 `EXACT`） |
+| `requests[].spanCount` | int | 该 trace 已存储事件数（ingest 幂等之后的真实条数，≥1） |
+| `requests[].startedAtNs` | int | 该 trace 的最小 `startNs` |
+| `requests[].durNs` | int | `max(startNs+durNs) − min(startNs)`，`≥0`；根存在且区间包含成立时等于根 `durNs` |
+| `requests[].hasError` | boolean | 该 trace 是否存在 `status="THREW"` 的 span |
+
+- **聚合优先级**（最严重优先）：`THREW > UNKNOWN > NOT_COLLECTED_POLICY > NOT_COLLECTED_LOST > NOT_COLLECTED_NO_DEBUG_INFO > TRUNCATED > RETURNED_FALSE > OK`。
+- **多根/无根的确定性**：一个 trace 出现多个 `parentSpanId=null` 的 span 时（S2 ingest 不拒绝，属上游数据异常），
+  取 `startNs` 最小者；同值时取 `spanId` 字典序最小者；不合并、不推断。**无根的 trace 仍然列出**（`root*`/`nodeKey` 为 `null`、`confidence="LOST"`），
+  不静默丢弃；S2 运行时 agent 总会写游离后端根（`kind=controller` + `LOST`），无根只可能是手工/异常数据。
+- **排序**：`startedAtNs` 升序；同值时 `traceId` 字典序。空会话返回 `{"sessionId":"...","requests":[]}`。
+- **无分页**（S2）；不提供 `afterSeq`/`limit` 参数，未识别的额外查询参数被忽略。
+- 只允许 `GET`；`POST/PUT/PATCH/DELETE` → `405`；未知 `sessionId` → `404` 错误信封 `{"error":"not_found",...}`。
+- 字段对照：dispatch §4.3 的示例列 7 个字段；本节**增加** `sessionId`（顶层）、`durNs`、`hasError`（均为只读派生，不改变 dispatch 语义），见 `s2-plan.md` 偏离 D1。
+
+### 8.2 `GET /api/v1/sessions/{sessionId}/graph?traceId=<32hex>`（IMPLEMENTED，只读）
+
+```http
+GET /api/v1/sessions/s_s2agent/graph?traceId=9f8e7d6c5b4a39281706f5e4d3c2b1a0 HTTP/1.1
+Host: 127.0.0.1:8601
+```
+
+`200 OK`：
+
+```json
+{"sessionId":"s_s2agent","traceId":"9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+ "rootEventId":"click_lost_1a2b3c4d5e6f7a80","confidence":"LOST",
+ "nodes":[
+  {"spanId":"1a2b3c4d5e6f7a80","parentSpanId":null,"kind":"controller",
+   "nodeKey":"com.example.shop.controller.OrderController#cancel","status":"OK",
+   "return":{"type":"org.springframework.http.ResponseEntity","value":200},"sideEffects":[],
+   "startNs":1000000000,"durNs":8000000,"thread":{"id":44,"name":"http-nio-8080-exec-1"},
+   "flags":["S2_ZERO_ROW_CHAIN","LOST_BACKEND"]},
+  {"spanId":"2b3c4d5e6f7a8091","parentSpanId":"1a2b3c4d5e6f7a80","kind":"service",
+   "nodeKey":"com.example.shop.service.OrderService#cancel","status":"OK",
+   "return":{"type":"boolean","value":true},"sideEffects":[],
+   "startNs":1001000000,"durNs":6500000,"thread":{"id":44,"name":"http-nio-8080-exec-1"},
+   "flags":["S2_ZERO_ROW_CHAIN"]},
+  {"spanId":"3c4d5e6f7a8091a2","parentSpanId":"2b3c4d5e6f7a8091","kind":"mapper",
+   "nodeKey":"com.example.shop.mapper.OrderMapper#cancelById","status":"OK",
+   "return":{"type":"int","value":0},"sideEffects":[],
+   "startNs":1002000000,"durNs":5000000,"thread":{"id":44,"name":"http-nio-8080-exec-1"},
+   "flags":["S2_ZERO_ROW_CHAIN"]},
+  {"spanId":"4d5e6f7a8091a2b3","parentSpanId":"3c4d5e6f7a8091a2","kind":"sql",
+   "nodeKey":"OrderMapper.cancelById","status":"OK","return":null,
+   "sideEffects":[{"type":"sql","sqlId":"OrderMapper.cancelById","rowsAffected":0,"transaction":"UNKNOWN"}],
+   "startNs":1003000000,"durNs":3000000,"thread":{"id":44,"name":"http-nio-8080-exec-1"},
+   "flags":["S2_ZERO_ROW_CHAIN"]}],
+ "edges":[{"from":"1a2b3c4d5e6f7a80","to":"2b3c4d5e6f7a8091","count":1},
+          {"from":"2b3c4d5e6f7a8091","to":"3c4d5e6f7a8091a2","count":1},
+          {"from":"3c4d5e6f7a8091a2","to":"4d5e6f7a8091a2b3","count":1}]}
+```
+
+**顶层字段**
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `sessionId` | string | 路径参数回显 |
+| `traceId` | string | 请求参数回显（`^[0-9a-f]{32}$`） |
+| `rootEventId` | string \| null | 根 span 的 `rootEventId`（S2 为 `click_lost_<根spanId>`）；无根时 `null` |
+| `confidence` | string | 根 span 的 `confidence`；无根时固定 `"LOST"` |
+
+**`nodes[]`（每条固定 11 个字段，字段恒出现）**
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `spanId` | string | 事件 `spanId`（16 hex，trace 内唯一） |
+| `parentSpanId` | string \| null | 事件 `parentSpanId` 原样（根为 `null`） |
+| `kind` | string | 事件 `kind` 原样（S2 链为 `controller/service/mapper/sql`） |
+| `nodeKey` | string | 事件 `nodeKey` 原样（不做 `class#method(descriptor)` 归一） |
+| `status` | string | 事件 `status` 原样（**不**聚合到节点；`OK` 含 0/false 返回值） |
+| `return` | object \| null | 事件 `return` 原样（无则 `null`；不补默认值） |
+| `sideEffects` | array | 事件 `sideEffects` 原样；事件无该字段时为 `[]`（不推断） |
+| `startNs` | int | 原样 |
+| `durNs` | int | 原样 |
+| `thread` | object \| null | 事件 `thread` 原样；事件无该字段时为 `null`（不伪造线程） |
+| `flags` | array\<string\> | 事件 `flags` 原样；事件无该字段时为 `[]` |
+
+**`edges[]`**
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `from` | string | 父 `spanId` |
+| `to` | string | 子 `spanId` |
+| `count` | int | 同一 `(from,to)` 对的出现次数；**S2 恒为 1**（`spanId` 唯一、父子对唯一） |
+
+- 命名对照：`from` = 父 `spanId`，`to` = 子 `spanId`；dispatch §4.4 草案曾用 `parentSpanId`/`childSpanId` 命名，本节为 S2 权威（见 `s2-plan.md` 偏离 D2）。
+- **不聚合**：S2 一个 span 一个节点，同一方法执行 N 次会出现 N 个同 `nodeKey` 节点（×N 聚合/`count`>1 属后续检查点，S2 不实现也不暗示）。
+- **排序**：`nodes` 按 `startNs` 升序，同值按 `spanId` 字典序；`edges` 按父节点在 `nodes` 中的位置排序，父相同再按子节点位置。
+- 父 `spanId` 不在本 trace 内：该节点**照常列出**（诚实缺口），只是**不产生边**；不补节点、不猜父。
+- **派生一致**：事件快照不变时，两次相同 GET 的响应逐字一致；事件数/`seq`/存储不被修改（无缓存、无写入、无重排存储）。
+- 未识别的额外查询参数被忽略。
+
+**参数与错误**
+
+| 判定顺序 | 状态码 | 条件 | 响应体 |
+|---|---|---|---|
+| 1 | `400` | `traceId` 缺失、空、或不符合 `^[0-9a-f]{32}$`（含大写/长度错/非 hex） | 错误信封 `error="bad_request"` |
+| 2 | `404` | `sessionId` 从未接收过事件 | 错误信封 `error="not_found"` |
+| 3 | `404` | 会话存在但其中无该 `traceId` | 错误信封 `error="not_found"` |
+| 4 | `200` | 命中 | 上述形状 |
+
+- 只允许 `GET`；写动词 → `405`（Boot 默认响应体可接受）；不静默回落默认 `traceId`、不返回空图冒充命中。
+- S2 **不注册** `/replay`、`/stream`、`/ws/v1/events`、`/links`（请求 404）；graph 不是回放：不重放执行、不重建前端链、不提供虚拟时钟。
+
+### 8.3 `GET /api/v1/meta`（S2 取值：与 S1 完全相同）
+
+```json
+{"service":"traceboard-collector","version":"0.1.0-SNAPSHOT","apiVersion":"v1",
+ "schema":{"id":"urn:traceboard:schema:event:v1","version":"traceboard.event.v1","dialect":"2020-12"},
+ "capabilities":{"health":true,"meta":true,"ingestEvents":true,"realtime":false,"replay":false}}
+```
+
+- S2 **不新增能力键**、不改 5 键取值：requests/graph 是只读查询能力，不是 `realtime`/`replay` 能力。
+- `ingestEvents=true` 仍表示“ingest 已落地”；`realtime=false`/`replay=false` 必须保持（无 SSE/WS/回放）。
+
+### 8.4 S2 状态码汇总（新增部分；ingest 的 202/400/413/415 见 §7.4，不变）
+
+| 码 | 场景（S2） |
+|---|---|
+| `200` | requests/graph 派生成功 |
+| `400` | graph 缺失/非法 `traceId` |
+| `404` | 未知 session（requests/graph）；session 内无该 trace（graph）；未注册的 RESERVED 路由 |
+| `405` | requests/graph 收到非 GET 方法 |
+
+错误信封（`transport.v1.md` §4.3）：`{"error":"<code>","message":"<≤200 字符、不含内部路径/凭据>","apiVersion":"v1"}`。
+
+### 8.5 S2 明确未实现（仍 RESERVED / 不在 S2 范围）
+
+- `GET .../replay`、`GET /api/v1/stream`（SSE）、`WS /ws/v1/events`、`POST .../links`：代码中不得注册路由；`capabilities.replay/realtime=false`。
+- 无实时订阅/长连接/服务端推送；工作台只用“手动刷新 + 低频轮询”（非实时）。
+- 无 ×N 聚合、无节点合并、无调用次数详情；`edges.count` 在 S2 恒 1。
+- 无 `values[]`/字段 diff/参数值/异常 payload/栈；无前端 SDK/`traceparent`/clickId 传播/关联引擎（链是 `confidence=LOST` 的游离后端请求）。
+- 无 CORS/鉴权/429/持久化/缓存/淘汰/采样；collector 重启即清空。
+- demo 的 0 行是**真实 H2 SQL 事实**（附录 B），不是本 API 计算出来的结论；API 只回放已采集事实。
+
+### 8.6 S2 冒烟命令
+
+```bash
+curl -s "http://127.0.0.1:8601/api/v1/meta"
+curl -s -X POST "http://127.0.0.1:8601/ingest/v1/events" \
+  -H "Content-Type: application/x-ndjson; charset=utf-8" \
+  --data-binary @"fixtures/s2-zero-row-chain/events.ndjson"
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s2agent/requests"
+curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s2agent/graph?traceId=9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_missing/requests"                                   # 404
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_s2agent/graph"                                          # 400
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_s2agent/graph?traceId=00000000000000000000000000000000"  # 404
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://127.0.0.1:8601/api/v1/sessions/s_s2agent/requests"                               # 405
+curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/s_s2agent/replay"                                         # 404（未注册）
+```
+
+期望：capabilities 5 键不变 / `202 accepted=4`（重发 → `dropped=4`）/ requests 1 条 `spanCount=4`、`status=OK`、`confidence=LOST` /
+graph 4 节点 3 边（按 `startNs` 排序、`return`/`sideEffects` 原样）/ `404` / `400` / `404` / `405` / `404`。
+
+## 附录 A：demo 应用 API（非 TraceBoard API，S0 历史）
+
+> **S2 起 demo 已改为 H2+MyBatis 并植入 0 行缺陷**：当前权威行为见**附录 B**；本附录保留 S0 内存版历史（不得据此实现 S2）。
 
 | 方法 | 路径 | 响应 | 说明 |
 |---|---|---|---|
@@ -387,3 +605,23 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8601/api/v1/sessions/
 
 - demo 后端是**无缺陷、无采集**的普通 Boot 2.7 应用；0 行案例只存在于 fixture（S2 才在 demo 植入缺陷）。
 - 失败分支口径：未知 `id` 返回 `404 {"data":false}`（D13 最小约定，仅供手测）；其它失败分支（未知路径、方法不允许、内部错误）S0 不承诺，保持 Boot 默认 404/405/500 即可，不写业务错误协议。
+
+## 附录 B：S2 demo 0 行行为（当前权威；非 TraceBoard API）
+
+> **这是 demo 应用故意植入的缺陷（主计划 §5 案例 A），不是 TraceBoard 的 bug。** TraceBoard 只记录事实，不判定业务对错。
+
+| 方法 | 路径 | 响应 | 行为 |
+|---|---|---|---|
+| GET | `/api/orders` | `200 {"data":[{"id":1,"orderNo":"SO-0001","status":"CREATED","amount":100.00}]}` | 来自 H2 表 `orders`（`schema.sql` + `data.sql` 初始化，`spring.sql.init.mode=always`）；不是内存 Map |
+| POST | `/api/orders/1/cancel` | `200 {"data":true}` | 先做存在性检查（`countById`，1 行 → 存在）；执行 `UPDATE orders SET status='CANCELLED' WHERE id=#{id} AND status='PAID'` → **影响 0 行**（`id=1` 是 `CREATED`）；Service **忽略**影响行数仍返回 `true`；Controller 返回 200 |
+| POST | `/api/orders/{id}/cancel`（未知 `id`） | `404 {"data":false}` | 存在性检查 0 行 → Service 返回 `false`，**不执行** `cancelById`；该请求的链只有 controller + service（`RETURNED_FALSE`），无 mapper/sql |
+| demo 前端 | `http://localhost:5174` | — | **不改**：2xx 显示“操作成功”并刷新列表，列表仍是 `CREATED`（与 0 行并存 = 案例 A 的事实组合） |
+
+- 技术事实（实现约束，不是本 API 契约的扩展）：
+  - Boot **2.7.18** + `org.mybatis.spring.boot:mybatis-spring-boot-starter:2.3.1` + H2（Boot 2.7.18 管理 **2.1.214**，`runtime` scope）；
+    JDBC URL `jdbc:h2:mem:shop;DB_CLOSE_DELAY=-1`（`MODE=MySQL` 可选，不强制）。
+  - 表：`orders(id BIGINT PK, order_no VARCHAR, status VARCHAR, amount DECIMAL(10,2))`；seed 仅 `1, SO-0001, CREATED, 100.00`。
+  - mapper XML：`mapper/OrderMapper.xml`（`cancelById` 的 WHERE 含 `status='PAID'`）；删除 S0 的 `InMemoryOrderStore`。
+  - **无 MySQL/外部数据库服务依赖**；H2 仅嵌入式；demo 后端 JDK8 独立构建，端口 8080。
+- 0 行必须是**运行时 DB/SQL 事实**：`fixtures/s2-zero-row-chain/**` 只用于确定性测试，禁止用它冒充运行时证据。
+- 已知文案瑕疵：demo 前端页头仍写 S0 口径“无缺陷”（S2 登记，S3 接 SDK 时统一修正）；不影响本附录行为口径。

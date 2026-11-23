@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  */
 final class AgentConfig {
 
-    static final String DEFAULT_SESSION_ID = "s_s1agent";
+    static final String DEFAULT_SESSION_ID = "s_s2agent";
 
     private static final Pattern SESSION_ID = Pattern.compile("^s_[A-Za-z0-9_-]+$");
     private static final Pattern TRACE_ID = Pattern.compile("^[0-9a-f]{32}$");

@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS orders (
+    id BIGINT PRIMARY KEY,
+    order_no VARCHAR(32) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL
+);

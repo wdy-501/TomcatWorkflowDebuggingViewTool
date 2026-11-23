@@ -6,22 +6,30 @@ import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.dynamic.DynamicType;
+import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
 
 /**
- * S1 java agent: instruments exactly ONE demo method and emits one controller span per call.
+ * S2 java agent: instruments exactly FOUR demo points and emits the 0-row fact chain.
  *
- * <p>Target: {@code com.example.shop.controller.OrderController#cancel(long)} only. No service,
- * mapper, SQL, JDBC or other controller method is touched. The agent is fail-open: every
- * {@code Throwable} is swallowed and the host application is never blocked or broken.</p>
+ * <pre>
+ * controller  com.example.shop.controller.OrderController#cancel(long)               -> root span
+ * service     com.example.shop.service.OrderService#cancel(long)                     -> child
+ * mapper      org.apache.ibatis.binding.MapperProxy#invoke  (filter: OrderMapper#cancelById) -> child
+ * sql         org.apache.ibatis.executor.statement.PreparedStatementHandler#update
+ *             (filter: mapped statement id .OrderMapper.cancelById)                  -> child (rowsAffected)
+ * </pre>
  *
- * <p>Start with:
- * {@code -javaagent:traceboard-agent-0.1.0-SNAPSHOT.jar -Dtraceboard.ingestUrl=... -Dtraceboard.sessionId=...}</p>
+ * <p>Nothing else is instrumented. The agent is fail-open: every {@code Throwable} is swallowed and
+ * the host application is never blocked or broken.</p>
  */
 public final class TraceAgent {
 
-    static final String TARGET_TYPE = "com.example.shop.controller.OrderController";
+    static final String CONTROLLER_TYPE = "com.example.shop.controller.OrderController";
+    static final String SERVICE_TYPE = "com.example.shop.service.OrderService";
+    static final String MAPPER_PROXY_TYPE = "org.apache.ibatis.binding.MapperProxy";
+    static final String STATEMENT_HANDLER_TYPE = "org.apache.ibatis.executor.statement.PreparedStatementHandler";
 
     private TraceAgent() {
         // utility class, never instantiated
@@ -39,8 +47,10 @@ public final class TraceAgent {
             }
             SpanEmitter.init(config);
             install(inst);
-            log("premain installed: target=" + TARGET_TYPE + "#cancel(long), ingestUrl="
-                    + config.ingestUrl() + ", sessionId=" + config.sessionId());
+            log("premain installed: targets=" + CONTROLLER_TYPE + "#cancel(long), "
+                    + SERVICE_TYPE + "#cancel(long), " + MAPPER_PROXY_TYPE + "#invoke, "
+                    + STATEMENT_HANDLER_TYPE + "#update; ingestUrl=" + config.ingestUrl()
+                    + ", sessionId=" + config.sessionId());
         } catch (Throwable t) {
             log("premain failed, continuing without instrumentation (fail-open): " + t);
         }
@@ -50,6 +60,8 @@ public final class TraceAgent {
         AgentBuilder builder = new AgentBuilder.Default()
                 .disableClassFormatChanges()
                 .with(AgentBuilder.RedefinitionStrategy.DISABLED)
+                // org.apache.ibatis.* MUST stay instrumentable (mapper + sql points); only JDK,
+                // Spring, Byte Buddy and the agent itself are excluded.
                 .ignore(ElementMatchers.nameStartsWith("java.")
                         .or(ElementMatchers.nameStartsWith("jdk."))
                         .or(ElementMatchers.nameStartsWith("sun."))
@@ -58,21 +70,34 @@ public final class TraceAgent {
                         .or(ElementMatchers.nameStartsWith("net.bytebuddy."))
                         .or(ElementMatchers.nameStartsWith("io.traceboard.agent."))
                         .or(ElementMatchers.isSynthetic()))
-                .type(ElementMatchers.named(TARGET_TYPE))
-                .transform(new AgentBuilder.Transformer() {
-                    @Override
-                    public DynamicType.Builder<?> transform(DynamicType.Builder<?> builder,
-                                                            TypeDescription typeDescription,
-                                                            ClassLoader classLoader,
-                                                            JavaModule module,
-                                                            java.security.ProtectionDomain protectionDomain) {
-                        return builder.visit(Advice.to(CancelAdvice.class)
-                                .on(ElementMatchers.named("cancel")
-                                        .and(ElementMatchers.takesArguments(long.class))));
-                    }
-                })
+                .type(ElementMatchers.named(CONTROLLER_TYPE))
+                .transform(advice(ControllerAdvice.class,
+                        ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))
+                .type(ElementMatchers.named(SERVICE_TYPE))
+                .transform(advice(ServiceAdvice.class,
+                        ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))
+                .type(ElementMatchers.named(MAPPER_PROXY_TYPE))
+                .transform(advice(MapperAdvice.class,
+                        ElementMatchers.named("invoke").and(ElementMatchers.takesArguments(3))))
+                .type(ElementMatchers.named(STATEMENT_HANDLER_TYPE))
+                .transform(advice(SqlAdvice.class,
+                        ElementMatchers.named("update").and(ElementMatchers.takesArguments(1))))
                 .with(new LoggingListener());
         builder.installOn(inst);
+    }
+
+    private static AgentBuilder.Transformer advice(final Class<?> adviceClass,
+                                                   final ElementMatcher<? super net.bytebuddy.description.method.MethodDescription> methodMatcher) {
+        return new AgentBuilder.Transformer() {
+            @Override
+            public DynamicType.Builder<?> transform(DynamicType.Builder<?> builder,
+                                                    TypeDescription typeDescription,
+                                                    ClassLoader classLoader,
+                                                    JavaModule module,
+                                                    java.security.ProtectionDomain protectionDomain) {
+                return builder.visit(Advice.to(adviceClass).on(methodMatcher));
+            }
+        };
     }
 
     static void log(String message) {
@@ -84,7 +109,7 @@ public final class TraceAgent {
     }
 
     /**
-     * Byte Buddy listener: proves in the log whether the transform actually hit the target type.
+     * Byte Buddy listener: proves in the log whether the transform actually hit each target type.
      */
     private static final class LoggingListener implements AgentBuilder.Listener {
 

@@ -15,7 +15,7 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Agent</name>
-  <description>S1 -javaagent: Byte Buddy instrumentation of exactly one demo controller method, fail-open NDJSON sender</description>
+  <description>S2 -javaagent: Byte Buddy instrumentation of exactly four demo points (controller/service/MyBatis mapper/MyBatis sql), fail-open NDJSON sender</description>
 
   <properties>
     <!-- S1 decision: agent bytecode must stay Java 8 (class file major version 52). -->

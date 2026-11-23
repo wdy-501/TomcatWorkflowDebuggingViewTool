@@ -62,8 +62,11 @@ onMounted(loadOrders);
 <template>
   <div class="page">
     <header class="header">
-      <h1>BuggyShop · 取消订单</h1>
-      <p class="subtitle">S0 demo 骨架：无采集、无缺陷、无 SDK；接口经 Vite proxy <code>/api</code> 转发到 8080</p>
+      <h1>BuggyShop · 取消订单（案例 A）</h1>
+      <p class="subtitle">
+        S2 demo · 案例 A 故意缺陷：取消返回成功，但数据库 UPDATE 0 行；订单仍为 CREATED。
+        后端由 Java agent 采集；前端无 SDK。接口经 Vite proxy <code>/api</code> 转发到 8080
+      </p>
     </header>
 
     <section class="card">

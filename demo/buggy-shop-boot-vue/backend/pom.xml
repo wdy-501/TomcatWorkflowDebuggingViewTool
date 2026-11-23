@@ -18,17 +18,30 @@
   <packaging>jar</packaging>
 
   <name>demo-shop-backend</name>
-  <description>S0 demo shop backend (Boot 2.7.18 / Java 8): in-memory orders, no defect, no capture</description>
+  <description>S2 demo shop backend (Boot 2.7.18 / Java 8): H2 + MyBatis, intentional case-A 0-row cancel defect</description>
 
   <properties>
     <java.version>1.8</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Boot 2.7.18 does not manage the MyBatis starter: pin it explicitly (s2-plan.md 6.1). -->
+    <mybatis-spring-boot.version>2.3.1</mybatis-spring-boot.version>
   </properties>
 
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.mybatis.spring.boot</groupId>
+      <artifactId>mybatis-spring-boot-starter</artifactId>
+      <version>${mybatis-spring-boot.version}</version>
+    </dependency>
+    <!-- Embedded only; version managed by Boot 2.7.18 (= 2.1.214), never pinned by hand. -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>runtime</scope>
     </dependency>
   </dependencies>
 

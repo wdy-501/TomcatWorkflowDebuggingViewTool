@@ -4,10 +4,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * S0 demo shop backend: plain Spring Boot 2.7 application, in-memory data only.
+ * S2 demo shop backend: Boot 2.7 application over an embedded H2 database (MyBatis).
  *
- * <p>No database, no MyBatis, no TraceBoard dependency, no capture. The 0-row defect
- * is introduced in S2 and must not exist yet.</p>
+ * <p>The case-A 0-row defect is intentionally present (api.v1.md Appendix B): the cancel UPDATE
+ * matches only {@code status='PAID'} rows while the seeded order is {@code CREATED}. There is no
+ * TraceBoard dependency and no capture inside the demo itself; spans come from the java agent.</p>
  */
 @SpringBootApplication
 public class ShopApplication {
