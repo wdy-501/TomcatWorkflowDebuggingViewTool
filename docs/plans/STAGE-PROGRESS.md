@@ -19,7 +19,7 @@
 | **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | ✅ 已验收 | tag `s6-baseline`；`docs/plans/stages/S6/`；archive `stage-S6-2026-11-24/`；75/75；行级 100→0/×3、ASYNC/no-debug/loop fold、perf 1.037 |
 | **S7** | 第二栈：选择 React18/Webpack5 前端（Tomcat 留 S8 候选） | ✅ 已验收 | tag `s7-baseline`；`docs/plans/stages/S7/`；archive `stage-S7-2026-11-24/`；75+35 PASS；A 7 span/B 3 span；基础级 |
 | **S8** | 第三栈/矩阵：Tomcat 8.5 + SSM WAR + 本地三栈矩阵 | ✅ 已验收 | tag `s8-baseline`；`docs/plans/stages/S8/`；archive `stage-S8-2026-11-24/`；18 PASS；A 4-span EXACT/0 行；B 零 fetch |
-| **S9** | 云端 Boot：上传/沙箱/DB/预览/保留/启动诊断 | ⬜ 未开始 | 任务 #33；云端（后置） |
+| **S9** | 云端 Boot：上传/沙箱/DB/预览/保留/启动诊断 | ⛔ 阻塞（无容器/云运行时） | `docs/plans/stages/S9/BLOCKED.md`；需 Docker/WSL 或云凭证；不伪造云端 |
 | **S10** | 云端 WAR/发布：安全审查、发布/回滚/用户测试 | ⬜ 未开始 | 任务 #34；云端（后置） |
 
 ## 2. 多 agent 流水线执行记录
