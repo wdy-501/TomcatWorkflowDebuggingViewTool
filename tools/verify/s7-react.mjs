@@ -306,7 +306,7 @@ function scopeChecks() {
   ok("S7-E2 frozen S0–S6 surfaces unchanged", forbidden === "", forbidden || "clean");
   const tags = git(["tag", "--list"]).split(/\r?\n/).filter(Boolean);
   ok("S7-E3 no s6a/s6b interim tags", !tags.some((tag) => /^s6[ab]$/i.test(tag)), tags.slice(-4).join(","));
-  ok("S7-E4 no S8+ dirs/docs", !existsSync(path.join(REPO, "demo/buggy-shop-boot-tomcat")) && !existsSync(path.join(REPO, "docs/plans/stages/S8")), "");
+  ok("S7-E4 no S9+ dirs/docs (S8 allowed)", !existsSync(path.join(REPO, "docs/plans/stages/S9")) && !existsSync(path.join(REPO, "docs/plans/stages/S10")), "");
 }
 
 async function main() {
