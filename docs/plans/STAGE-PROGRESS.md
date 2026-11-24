@@ -20,7 +20,7 @@
 | **S7** | 第二栈：选择 React18/Webpack5 前端（Tomcat 留 S8 候选） | ✅ 已验收 | tag `s7-baseline`；`docs/plans/stages/S7/`；archive `stage-S7-2026-11-24/`；75+35 PASS；A 7 span/B 3 span；基础级 |
 | **S8** | 第三栈/矩阵：Tomcat 8.5 + SSM WAR + 本地三栈矩阵 | ✅ 已验收 | tag `s8-baseline`；`docs/plans/stages/S8/`；archive `stage-S8-2026-11-24/`；18 PASS；A 4-span EXACT/0 行；B 零 fetch |
 | **S9** | 云端 Boot 上传/沙箱/DB/预览/保留/诊断 | ⏸ **不做**（用户确认无上传，仅内置展示） | 不实现；无用户 JAR/WAR、无云端执行 |
-| **S10** | 云端 WAR/发布：安全审查、发布/回滚/用户测试 | ⬜ 未开始 | 任务 #34；云端（后置） |
+| **S10** | 云端 WAR/发布/安全/回滚/用户测试 | ⏸ **不做**（依赖 S9） | 不实现；站点仅静态展示 |
 
 ## 2. 多 agent 流水线执行记录
 
