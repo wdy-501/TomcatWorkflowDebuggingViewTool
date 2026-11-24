@@ -77,13 +77,12 @@
 
 > 2026-11-24｜源码/本地/GitHub 发布准备
 
-- 私有源码仓库：`wdy-501/TomcatWorkflowDebuggingViewTool`，`master` 已同步，最新交接提交 `e9d4f54`；`s0–s8` tags 已推送。
-- 本地站点：`http://127.0.0.1:5180/`，A/B/L2/回放/资产/截图 PASS；`site/traceboard/ACCEPTANCE.md`。
-- Windows portable zip：本地构建/启动/停止实测；`dist/release/`（不提交 git）。
-- app-image EXE：本地 jpackage 构建/启动 3 服务实测；本机测试含 Oracle runtime，不得上传；发布版需 Temurin 构建。
-- Release workflow：`.github/workflows/release.yml`（手动触发），用 Temurin 构建 portable + EXE + 双 SHA256；尚未运行。
-- 阻塞：GitHub 浏览器未登录/无 `gh`；Release 未创建；License 未选。
-- Qoder Site：未部署，按用户要求最后一步；私有仓库链接不能放公开站点。
+- 私有源码仓库：已切换 public；`wdy-501/TomcatWorkflowDebuggingViewTool`，MIT；`master` 已同步，`s0–s8` tags + `v0.1.0`。
+- GitHub Release `v0.1.0` 已验证：portable zip / exe zip / 双 SHA256 共 4 资产，public。
+- 本地站点：`http://127.0.0.1:5180/`，A/B/L2/回放/资产/截图 PASS；已加 GitHub/Release 链接；`site/traceboard/ACCEPTANCE.md`。
+- Windows portable zip：本地构建/启动/停止实测；app-image EXE 本地构建/启动 3 服务实测；发布版为 Actions Temurin 构建。
+- 阻塞：Qoder Site 未部署（等用户切换有 Sites 能力的账号）；当前账号不重试。
+- S9/S10 按用户确认不做；站点只静态展示内置程序。
 
 ## 5. 恢复方法（目标暂停后）
 

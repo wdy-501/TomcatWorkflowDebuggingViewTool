@@ -17,17 +17,18 @@
 | 回放 | PASS | 滑到 2/5 显示 `40% · 2 / 5`，可见节点 2 个 |
 | 节点切换 | PASS | A→SQL、B→js_method、L2→service 详情随案例更新 |
 | 控制台错误 | PASS | 无 console 消息 |
-| 外部依赖 | PASS | `index.html`/assets 无 `http(s)://`、CDN、`@import` |
-| 源码/发布产物 | PASS | `index.html`、`app.js`、`styles.css` 与 `dist/` 逐字节一致 |
+| 外部依赖 | PASS | 无外部脚本/字体/CDN；GitHub/Release 仅文本链接，非资源依赖 |
+| 源码/发布产物 | PASS | `index.html`、`app.js`、`styles.css` 与 `dist/` 一致（外链改动后需重建 dist） |
 | 截图 | PASS | `site/traceboard/evidence/site-local-case-{a,b,l2}.png` |
+| GitHub/Release 链接 | PASS | 仓库 public + MIT；Release v0.1.0 的 4 个资产已由 GitHub API 核验 |
 
 真实浏览器点击过案例 B（不再依赖程序化事件）；截图已成功采集。
 
 ## 2. 边界（必须保留）
 
-- 数据是 S6/S7/S8 验收快照，非实时 collector；无上传、无 Cookie、无外部资源。
-- Qoder Sites 未发布；当前账号不执行 `prepare_site`/`publish_site`。
-- GitHub/Release 按钮尚未添加（需要真实仓库 URL）。
+- 数据是 S6/S7/S8 验收快照，非实时 collector；无上传、无 Cookie。
+- GitHub 已 public + MIT；Release v0.1.0 资产已核验。
+- Qoder Sites 未发布；仍需切换有 Sites 能力的账号后部署。
 - EXE 尚未构建；依赖 launcher `ui` + Temurin/jpackage。
 
 ## 3. 验收门

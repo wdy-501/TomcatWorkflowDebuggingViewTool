@@ -18,10 +18,12 @@
 ## 发布/GitHub 状态
 
 - **本地验收 PASS**：A/B/L2、详情、回放、资产、截图均通过；报告 `ACCEPTANCE.md`，证据 `evidence/`。
-- **当前不做 Qoder Site 发布**：先完成本地 + GitHub 个人项目（源码/Release/EXE），计划书完成后再由用户切换账号部署站点。
-- GitHub 链接：只在真实可访问仓库 URL 存在后加入；**private 仓库不能放到公开站点**（评委打不开），比赛默认 public；禁止占位死链。
-- GitHub Pages 工作流 `.github/workflows/pages.yml` 已准备（未提交/未推送），只做静态快照兜底。
-- 站点最终只展示内置程序的预置快照，不上传、不运行 Java、不做 S9。
+- **GitHub 已 public**：<https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool>（MIT）。
+- **Release v0.1.0 已实际存在**：4 个资产（portable zip、exe zip、双 SHA256）：
+  <https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases/tag/v0.1.0>
+- 站点介绍已加入 GitHub 源码 / Windows 包链接；本地复验通过。
+- **Qoder Site 仍未部署**：按约定最后一步；当前账号切换后再用新 action/slug 发布。
+- 私有 Pages 失败工作流已删除；不重加。
 - 不伪造 `published: true`，不另建 Qoder 站点。
 
 ## 文件

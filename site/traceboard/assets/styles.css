@@ -73,6 +73,12 @@ main { max-width: 1480px; margin: 0 auto; padding: clamp(26px, 4vw, 54px) clamp(
 h1 { margin: 0; font-size: calc(clamp(32px, 4.6vw, 64px) * var(--site-type)); line-height: 1.04; letter-spacing: -.035em; font-weight: 650; max-width: 880px; }
 .intro-copy { margin: 0; color: var(--site-muted); font-size: calc(14px * var(--site-type)); max-width: 460px; }
 .intro-copy strong { color: var(--site-fg); font-weight: 600; }
+.intro-links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; }
+.cta { display: inline-flex; align-items: center; min-height: 34px; padding: 0 13px; border: 1px solid var(--site-border); border-radius: 999px; color: var(--site-fg); text-decoration: none; font-size: 11px; transition: border-color calc(180ms * var(--site-motion)), background calc(180ms * var(--site-motion)); }
+.cta:hover, .cta:focus-visible { border-color: var(--site-accent); background: rgba(240,179,90,.08); }
+.cta-primary { background: var(--site-accent); color: var(--site-on-accent); border-color: var(--site-accent); font-weight: 650; }
+.cta-primary:hover, .cta-primary:focus-visible { background: #ffd28a; color: var(--site-on-accent); }
+.cta-note { color: var(--site-muted); font: 9px var(--mono); }
 .intro-metrics { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
 .intro-metrics div { min-width: 138px; display: flex; align-items: baseline; gap: 9px; padding: 10px 14px; border: 1px solid var(--site-border); border-radius: calc(var(--site-radius) * .7); background: rgba(17,24,34,.55); }
 .intro-metrics strong { font: 650 20px/1 var(--mono); color: var(--ok); }
