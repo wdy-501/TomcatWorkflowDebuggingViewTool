@@ -1,10 +1,10 @@
 # TraceBoard 阶段进度看板（S0–S10）
 
-> 更新时间：2026-11-24｜最新已验收：S5（`s5-baseline`）｜当前阶段：S6b（异步/无调试/折叠）🟡
-> 最近门禁：S0–S5 70/70；S6a 独立门禁 PASS；S6b 独立 E2E PASS、L2 perf ratio 1.037；统一全量门禁迁移待完成
+> 更新时间：2026-11-24｜最新已验收：S6（`s6-baseline`）｜下一阶段：S7
+> 最近门禁：S0–S6 全量 **75 PASS / 0 FAIL**（`S6 TEST (full S0–S6): PASS`）；S6b perf ratio 1.037
 > 权威计划：[SOLO-PLAN.md](SOLO-PLAN.md)、[00-master-plan.md](00-master-plan.md)
 > 用途：目标暂停/恢复/换账号后，以本文件 + git tag/阶段备份为准，不依赖聊天上下文。
-> 当前分支：`master`｜最新已验收 tag：`s5-baseline`
+> 当前分支：`master`｜最新已验收 tag：`s6-baseline`
 
 ## 1. 总览
 
@@ -16,7 +16,7 @@
 | **S3** | 前端事实与回放：runtime SDK + 案例 B 确认没发 + traceparent EXACT + 只读回放 | ✅ 已验收 | tag `s3-baseline`；`docs/plans/stages/S3/`；archive `stage-S3-2026-11-23/` |
 | **S4** | 本地接入与详情：launcher IDEA/JAR、preview/SDK 注入、握手诊断、节点详情/×N/缺口 | ✅ 已验收 | tag `s4-baseline`；`docs/plans/stages/S4/`；archive `stage-S4-2026-11-23/`；61/61 PASS；flake 修复 8/8；浏览器详情/×3/缺口 + preview 注入 |
 | **S5** | L1 与前端浅层：参数/字段、脱敏/截断、sourcemap、Vite/Vue 浅层、性能基线 | ✅ 已验收 | tag `s5-baseline`；`docs/plans/stages/S5/`；archive `stage-S5-2026-11-23/`；70/70；L1 100→0/脱敏/截断；manifest/source；perf 1.29 WARN |
-| **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | 🟡 S6b 编码完成 | S6a：行级/×3 E2E PASS；S6b：async（ASYNC_INHERITED）、no-debug（NOT_COLLECTED_NO_DEBUG_INFO）、loop fold（VALUES_CAPPED=82/TOTAL=102）E2E PASS；L2 perf ratio 1.037；待统一门禁迁移 + 浏览器 + S6 验收/tag |
+| **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | ✅ 已验收 | tag `s6-baseline`；`docs/plans/stages/S6/`；archive `stage-S6-2026-11-24/`；75/75；行级 100→0/×3、ASYNC/no-debug/loop fold、perf 1.037 |
 | **S7** | 第二栈：Tomcat WAR/SSM 或 React/Webpack 二选一 | ⬜ 未开始 | 任务 #31；扩展 |
 | **S8** | 第三栈/矩阵：另一栈 + 本地矩阵/兼容报告 | ⬜ 未开始 | 任务 #32；扩展 |
 | **S9** | 云端 Boot：上传/隔离/DB/预览/保留/启动诊断 | ⬜ 未开始 | 任务 #33；云端（后置） |
@@ -49,23 +49,24 @@
 3. ✅ G2：更新 README 为 S5，写 `acceptance.md`/`progress.md`，生成 `docs/plans/archive/stage-S5-2026-11-23/`。
 4. ✅ 提交 S5 + tag `s5-baseline`；下一阶段 S6（需新分发书）。
 
-## 4.1 S6 当前（S6 未验收，不跨阶段）
+## 4.1 S6 收尾记录
 
-- ✅ S6a：行级 `local 100→0`、×3 逐次 E2E PASS；S6a-only 门禁 PASS。
-- ✅ S6b：async `[100,0,100]` + `ASYNC_INHERITED`；no-debug `NOT_COLLECTED_NO_DEBUG_INFO`/reason/无 values；loop `TRUNCATED` 20 values + `VALUES_CAPPED=82`/`VALUES_TOTAL=102`；L2 perf ratio **1.037**。
-- ⏳ 剩余：统一全量 `verify.mjs` 迁移（18 个 S5/S6a copy/hash/count/whitelist 门禁 + S6B-A..F）→ 浏览器 async/no-debug/fold → S6 验收 + 备份 + tag `s6-baseline`。
+1. ✅ S6a：行级 `local 100→0`、×3 逐次 E2E PASS；S6a-only 门禁 PASS。
+2. ✅ S6b：async `[100,0,100]` + `ASYNC_INHERITED`；no-debug `NOT_COLLECTED_NO_DEBUG_INFO`/reason/无 values；loop `TRUNCATED` 20 values + `VALUES_CAPPED=82`/`VALUES_TOTAL=102`；L2 perf ratio **1.037**。
+3. ✅ 全量 S0–S6 75/75；浏览器 async/no-debug/loop 截图；S6 验收/备份/tag `s6-baseline`。
+4. 下一阶段 S7（Tomcat WAR/SSM 或 React/Webpack 二选一；需新分发书）。
 
 ## 5. 恢复方法（目标暂停后）
 
 1. 读本文件 + `SOLO-PLAN.md` 当前阶段行；不要依赖聊天记忆。
 2. 查 `git log --oneline --decorate -10` 与 `git tag` 确认最后验收点。
 3. 查 `docs/plans/stages/Sx/` 的 `progress.md`、`acceptance.md`、`test-report.md`。
-4. 未验收阶段（当前 S6）先完成剩余动作，不跨阶段；验收后才开始 Sx+1。
+4. 未验收阶段（当前 S7）先完成剩余动作，不跨阶段；验收后才开始 Sx+1。
 5. 每个阶段结束：更新本看板 + 新备份 + tag。
 
 ## 6. 关键入口
 
 - 总计划：[SOLO-PLAN.md](SOLO-PLAN.md)｜主计划：[00-master-plan.md](00-master-plan.md)｜索引：[README.md](README.md)
-- S5 计划/评审/测试：[s5-plan.md](stages/S5/s5-plan.md)、[plan-review.md](stages/S5/plan-review.md)、[test-report.md](stages/S5/test-report.md)
+- S6 计划/评审/测试：[s6a-plan.md](stages/S6/s6a-plan.md)、[s6b-plan.md](stages/S6/s6b-plan.md)、[test-report.md](stages/S6/test-report.md)
 - 启动器指南：[docs/guides/local-launcher.md](../guides/local-launcher.md)｜前端浅层插件：[docs/guides/frontend-shallow-plugin.md](../guides/frontend-shallow-plugin.md)
-- 阶段备份：`docs/plans/archive/stage-S0...stage-S5`
+- 阶段备份：`docs/plans/archive/stage-S0...stage-S6`

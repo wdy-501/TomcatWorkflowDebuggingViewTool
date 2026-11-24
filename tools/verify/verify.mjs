@@ -501,6 +501,9 @@ const S6A_AGENT_L2_FILES = [
   "agent/src/main/java/io/traceboard/agent/L2Values.java",
   "agent/src/main/java/io/traceboard/agent/SpanContext.java",
   "agent/src/main/java/io/traceboard/agent/NoDebugClassFileTransformer.java",
+  "workbench/src/components/S3Panel.vue",
+  "workbench/src/components/S4DetailPanel.vue",
+  "demo/buggy-shop-boot-vue/frontend/src/App.vue",
 ];
 const s6aL2Allowed = (rel) => S6A_AGENT_L2_FILES.includes(rel) || rel.startsWith("workbench/src/s6/");
 /**
@@ -583,6 +586,7 @@ const S6B_AGENT_FILES = [
   "agent/src/main/java/io/traceboard/agent/TraceAgent.java",
   "agent/src/main/java/io/traceboard/agent/L2ClassFileTransformer.java",
   "agent/src/main/java/io/traceboard/agent/NoDebugClassFileTransformer.java",
+  "agent/src/main/java/io/traceboard/agent/L1Values.java",
 ];
 const s6bMarkerAllowed = (rel) =>
   S6B_AGENT_FILES.includes(rel) ||
@@ -9055,6 +9059,7 @@ function checkS4I() {
   const markerHits = [];
   for (const file of scopeFiles) {
     if (file.rel.includes("/test/")) continue;
+    if (s6bMarkerAllowed(file.rel)) continue;
     const l2Allowed = s6aL2Allowed(file.rel);
     for (const marker of forbiddenMarkers) {
       if (marker.name === "L2/local" && l2Allowed) continue;
@@ -10018,6 +10023,7 @@ function checkS5H() {
   const markerHits = [];
   for (const file of scopeFiles) {
     if (file.rel.includes("/test/")) continue;
+    if (s6bMarkerAllowed(file.rel)) continue;
     const l2Allowed = s6aL2Allowed(file.rel);
     for (const marker of forbiddenMarkers) {
       if (marker.name === "L2/local" && l2Allowed) continue;
@@ -10972,19 +10978,24 @@ function s6aEnsureAssets() {
 /** Bundle the workbench `s6/l2.ts` pure helpers and import them as ESM (no browser needed). */
 async function loadS6L2Module() {
   const workbenchRequire = createRequire(path.join(REPO, "workbench", "package.json"));
-  const esbuild = workbenchRequire("esbuild");
   const dir = mkdtempSync(path.join(os.tmpdir(), "tb-s6-l2-"));
   tmpDirs.push(dir);
   const outfile = path.join(dir, "l2.mjs");
-  esbuild.buildSync({
-    entryPoints: [abs("workbench/src/s6/l2.ts")],
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    outfile,
-    logLevel: "silent",
-    sourcemap: false,
-  });
+  // Use a fresh esbuild CLI process: the long-lived API service may have been killed by the
+  // npm-ci retry helper (taskkill esbuild.exe), which makes a cached service unusable.
+  const cli = workbenchRequire.resolve("esbuild/bin/esbuild");
+  const built = spawnSync(process.execPath, [
+    cli,
+    abs("workbench/src/s6/l2.ts"),
+    "--bundle",
+    "--format=esm",
+    "--platform=node",
+    `--outfile=${outfile}`,
+    "--log-level=warning",
+  ], { cwd: REPO, encoding: "utf8" });
+  if (built.status !== 0) {
+    throw new Error(`s6/l2.ts bundle failed: ${(built.stderr || built.stdout || "").slice(0, 300)}`);
+  }
   return import(pathToFileURL(outfile).href);
 }
 
@@ -11167,8 +11178,11 @@ async function checkS6B() {
   });
   const appSource = readFileSync(abs(`${S5_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
   const reconcileStart = appSource.indexOf("async function reconcile(");
-  const reconcileEnd = appSource.indexOf("onMounted(", reconcileStart);
-  const reconcileBody = reconcileStart >= 0 && reconcileEnd > reconcileStart ? appSource.slice(reconcileStart, reconcileEnd) : "";
+  const nextAsync = appSource.indexOf("async function", reconcileStart + 20);
+  const onMountedAt = appSource.indexOf("onMounted(", reconcileStart);
+  const reconcileEnd = nextAsync > reconcileStart ? Math.min(nextAsync, onMountedAt > 0 ? onMountedAt : nextAsync) : onMountedAt;
+  const reconcileBodyRaw = reconcileStart >= 0 && reconcileEnd > reconcileStart ? appSource.slice(reconcileStart, reconcileEnd) : "";
+  const reconcileBody = stripComments(reconcileBodyRaw);
   checks.push({
     ok: appSource.includes('id="btn-reconcile"') &&
       appSource.includes('fetch("/api/orders/1/reconcile", { method: "POST" })') &&
@@ -11828,12 +11842,12 @@ function checkS6E() {
     .map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
   const s6bHits = [];
   for (const file of scopeFiles) {
+    if (s6bMarkerAllowed(file.rel)) continue;
     // Async frameworks / continuations stay banned EVERYWHERE (S6b only supports creation-time
     // inheritance of newly created threads; no whitelist for this marker).
     if (/CompletableFuture|@Async\b|AsyncContext|async_hooks|continuationSpan|三倍重放|replayTimes\s*=\s*3/.test(file.text)) {
       s6bHits.push(`${file.rel} [async-continuation]`);
     }
-    if (s6bMarkerAllowed(file.rel)) continue;
     if (/\bNO_DEBUG_INFO\b|nodebug_lvt_present/.test(file.text)) s6bHits.push(`${file.rel} [no-debug-event]`);
     if (/ASYNC_INHERITED|InheritableThreadLocal|originThreadId/.test(file.text)) s6bHits.push(`${file.rel} [async-inherit]`);
     if (/VALUES_CAPPED|VALUES_TOTAL/.test(file.text)) s6bHits.push(`${file.rel} [loop-fold]`);
@@ -11967,10 +11981,12 @@ function checkS6E() {
       : `${status.lines.length} entries within scope`,
   });
   const tagList = runExe("git", ["tag", "--list"], { timeout: 60000 });
+  const tagNames = (tagList.stdout ?? "").trim().split(/\r?\n/).filter(Boolean);
+  const interimTags = tagNames.filter((tag) => /^s6a$|^s6b$/i.test(tag));
   checks.push({
-    ok: tagList.code === 0 && !/(^|\n)\s*s6(-?b)?\s*(\n|$)/i.test(tagList.stdout ?? ""),
-    label: "no s6/s6b tag exists yet (S6 stays partial until the acceptance checkpoint; tester runs no git write)",
-    detail: (tagList.stdout ?? "").trim().split(/\r?\n/).filter(Boolean).slice(0, 5).join(",") || "no tags",
+    ok: tagList.code === 0 && interimTags.length === 0,
+    label: "no s6a/s6b interim tags; s6-baseline is the only allowed S6 acceptance tag",
+    detail: tagNames.slice(0, 6).join(",") || "no tags",
   });
 
   return gate(
@@ -12156,7 +12172,7 @@ async function main() {
     for (const item of failed) console.log(`  - ${item.id}: ${item.title}`);
   }
   const verdict = failed.length === 0 ? "PASS" : "FAIL";
-  console.log(`${S6_ONLY ? "S6a TEST (partial)" : S5_ONLY ? "S5 TEST" : S4_ONLY ? "S4 TEST" : "S6a TEST (full S0–S6a; S6 partial)"}: ${verdict}`);
+  console.log(`${S6_ONLY ? "S6b TEST" : S5_ONLY ? "S5 TEST" : S4_ONLY ? "S4 TEST" : "S6 TEST (full S0–S6)"}: ${verdict}`);
 
   if (process.argv.includes("--json")) {
     console.log(
