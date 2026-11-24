@@ -73,6 +73,18 @@
 3. ✅ 门禁：S8 18/18；S0–S6 75/75；S7 35/35（E4 迁移允许 S8）。已知限制：JUL manager 开关、无截图、仅本机 8.5/JDK8。
 4. ✅ 矩阵 `S8/matrix.md` 三栈+云端未做；备份/tag `s8-baseline`；下一阶段 S9 云端（后置），不开始。
 
+## 4.4 交付/发布状态（非阶段验收）
+
+> 2026-11-24｜源码/本地/GitHub 发布准备
+
+- 私有源码仓库：`wdy-501/TomcatWorkflowDebuggingViewTool`，`master` 已同步，最新交接提交 `e9d4f54`；`s0–s8` tags 已推送。
+- 本地站点：`http://127.0.0.1:5180/`，A/B/L2/回放/资产/截图 PASS；`site/traceboard/ACCEPTANCE.md`。
+- Windows portable zip：本地构建/启动/停止实测；`dist/release/`（不提交 git）。
+- app-image EXE：本地 jpackage 构建/启动 3 服务实测；本机测试含 Oracle runtime，不得上传；发布版需 Temurin 构建。
+- Release workflow：`.github/workflows/release.yml`（手动触发），用 Temurin 构建 portable + EXE + 双 SHA256；尚未运行。
+- 阻塞：GitHub 浏览器未登录/无 `gh`；Release 未创建；License 未选。
+- Qoder Site：未部署，按用户要求最后一步；私有仓库链接不能放公开站点。
+
 ## 5. 恢复方法（目标暂停后）
 
 1. 读本文件 + `SOLO-PLAN.md` 当前阶段行；不要依赖聊天记忆。
