@@ -35,25 +35,31 @@ import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 /**
- * S6a L2 transformer: the ONE class the Byte Buddy advices never touch
+ * S6a/S6b L2 transformer: the ONE class the Byte Buddy advices never touch
  * ({@code com.example.shop.service.L2DemoService}, explicitly ignored in {@link TraceAgent}).
  *
- * <p>It instruments exactly one method, {@code reconcileAmount(long,double,int)}, and only when
- * the class file carries debug information with a {@code local:D} local variable table entry. The
- * probes are inserted at source-line boundaries inside the inclusive live range of that entry
- * ({@code lvtStart <= offset < lvtStart + lvtLength}); init probe offset == LVT start. Every line
- * that ends with a jump/return/throw/switch gets no probe (unreachable or duplicate values are
- * handled by the frame-local previous-value de-duplication in {@link SpanContext#recordLocal}).
+ * <p>S6a instruments {@code reconcileAmount(long,double,int)} only when the class file carries
+ * debug information with a {@code local:D} local variable table entry; exactly 2 probes are
+ * installed (init line + assign line) and any other count is fail-open. S6b adds
+ * {@code reconcileLoop(long,int)}: the same boundary rules apply inside the inclusive live range of
+ * the {@code local:D} entry, at least 2 probes are required (JDK8 emits 4 candidates: init baseline,
+ * increment, if/reset, anchor) and the actual count is logged, never hard-coded.</p>
  *
- * <p>Fail-open by construction: any mismatch (class/method/descriptor/local table/return shape)
- * or any {@code Throwable} returns the ORIGINAL bytes and only bumps a counter - no event, no
- * guessed value, never a half-instrumented class.</p>
+ * <p>Every line that ends with a jump/return/throw/switch gets no probe (unreachable or duplicate
+ * values are handled by the frame-local previous-value de-duplication in
+ * {@link SpanContext#recordLocal}). Each method is either fully instrumented or left untouched;
+ * any mismatch (class/method/descriptor/local table/return shape) or any {@code Throwable} returns
+ * the ORIGINAL bytes whenever no method could be instrumented - no event, no guessed value, never a
+ * half-instrumented method.</p>
  */
 final class L2ClassFileTransformer implements ClassFileTransformer {
 
     static final String TARGET_CLASS = "com.example.shop.service.L2DemoService";
     static final String TARGET_METHOD = "reconcileAmount";
     static final String TARGET_DESCRIPTOR = "(JDI)D";
+    /** S6b: second instrumented method (loop value folding). */
+    static final String LOOP_METHOD = "reconcileLoop";
+    static final String LOOP_DESCRIPTOR = "(JI)D";
 
     private static final String LOCAL_OWNER = "io/traceboard/agent/SpanContext";
     private static final String RECORD_DESC = "(ILjava/lang/String;Ljava/lang/Object;)V";
@@ -65,6 +71,12 @@ final class L2ClassFileTransformer implements ClassFileTransformer {
     private static final String SYSTEM_OWNER = "java/lang/System";
     private static final String NANO_DESC = "()J";
     private static final String THROWABLE_CLASS = "java/lang/Throwable";
+
+    /** S6a method: exactly 2 probes expected (init + assign). */
+    private static final Target AMOUNT = new Target(TARGET_METHOD, TARGET_DESCRIPTOR, 2, true, "enterL2");
+    /** S6b loop method: >=2 probes required, actual count logged (JDK8: 4). */
+    private static final Target LOOP = new Target(LOOP_METHOD, LOOP_DESCRIPTOR, 2, false, "enterL2Loop");
+    private static final Target[] TARGETS = {AMOUNT, LOOP};
 
     private static final AtomicLong ERRORS = new AtomicLong();
     private static final AtomicLong NO_METHOD = new AtomicLong();
@@ -94,34 +106,60 @@ final class L2ClassFileTransformer implements ClassFileTransformer {
         }
     }
 
+    /**
+     * Instruments each target method independently. A method that fails a check stays untouched
+     * (its probes are never half-installed); when no method changes, the original bytes are used.
+     */
     private byte[] instrument(byte[] original) {
         // No SKIP_DEBUG: the local variable table is the only source of truth here.
         ClassNode node = new ClassNode();
         new ClassReader(original).accept(node, 0);
-        MethodNode method = findTargetMethod(node);
+        boolean changed = false;
+        for (Target target : TARGETS) {
+            try {
+                changed |= instrumentMethod(node, target);
+            } catch (Throwable failure) {
+                long n = ERRORS.incrementAndGet();
+                if (n == 1L || n % 100L == 0L) {
+                    TraceAgent.log("l2_transform_error=" + n + " method=" + target.method
+                            + " cause=" + failure.getClass().getName());
+                }
+                return null;
+            }
+        }
+        if (!changed) {
+            return null;
+        }
+        ClassWriter writer = new FrameComputingClassWriter();
+        node.accept(writer);
+        return writer.toByteArray();
+    }
+
+    private boolean instrumentMethod(ClassNode node, Target target) {
+        MethodNode method = findTargetMethod(node, target);
         if (method == null) {
             count(NO_METHOD, "l2_no_method");
-            return null;
+            return false;
         }
         if (method.localVariables == null || method.localVariables.isEmpty()) {
             count(NO_LVT, "l2_no_lvt");
-            return null;
+            return false;
         }
         LocalVariableNode local = findLocalVariable(method);
         if (local == null || local.start == null || local.end == null) {
             count(NO_LVT, "l2_no_lvt");
-            return null;
+            return false;
         }
         Map<LabelNode, Integer> labelOffsets = labelOffsets(method);
         if (labelOffsets == null) {
             count(NO_METHOD, "l2_no_method");
-            return null;
+            return false;
         }
         Integer startOffset = labelOffsets.get(local.start);
         Integer endOffset = labelOffsets.get(local.end);
         if (startOffset == null || endOffset == null || endOffset.intValue() <= startOffset.intValue()) {
             count(NO_LVT, "l2_no_lvt");
-            return null;
+            return false;
         }
         int lvtStart = startOffset.intValue();
         int lvtLength = endOffset.intValue() - lvtStart;
@@ -129,26 +167,29 @@ final class L2ClassFileTransformer implements ClassFileTransformer {
         AbstractInsnNode singleReturn = findSingleDoubleReturn(method);
         if (singleReturn == null) {
             count(NO_METHOD, "l2_no_method");
-            return null;
+            return false;
         }
 
         List<Boundary> boundaries = boundaries(method, lvtStart, lvtLength);
         if (boundaries == null) {
             count(NO_METHOD, "l2_no_method");
-            return null;
+            return false;
         }
-        if (boundaries.size() != 2) {
-            long n = PROBE_MISSING.incrementAndGet();
-            TraceAgent.log("l2_probe_missing method=" + TARGET_METHOD + " candidates="
-                    + boundaries.size() + " counter=" + n);
-            return null;
+        if (target.exactProbes) {
+            if (boundaries.size() != target.minProbes) {
+                countProbeMissing(target, boundaries.size());
+                return false;
+            }
+        } else if (boundaries.size() < target.minProbes) {
+            countProbeMissing(target, boundaries.size());
+            return false;
         }
 
         int enterSlot = method.maxLocals;
         int returnSlot = method.maxLocals + 2;
         method.maxLocals = method.maxLocals + 4;
 
-        // enter: enterNs = System.nanoTime(); SpanContext.enterL2(enterNs)
+        // enter: enterNs = System.nanoTime(); SpanContext.enterL2/enterL2Loop(enterNs)
         // The protected range starts AFTER the enterNs store so the catch-all handler (whose frame
         // carries the protected range's local state) can read that slot without a verify error.
         LabelNode tryStart = new LabelNode();
@@ -159,7 +200,7 @@ final class L2ClassFileTransformer implements ClassFileTransformer {
         enter.add(new VarInsnNode(Opcodes.LSTORE, enterSlot));
         enter.add(tryStart);
         enter.add(new VarInsnNode(Opcodes.LLOAD, enterSlot));
-        enter.add(new MethodInsnNode(Opcodes.INVOKESTATIC, LOCAL_OWNER, "enterL2", ENTER_DESC, false));
+        enter.add(new MethodInsnNode(Opcodes.INVOKESTATIC, LOCAL_OWNER, target.enterMethod, ENTER_DESC, false));
         method.instructions.insert(enter);
 
         // probes: LDC line; LDC "local"; DLOAD slot; Double.valueOf; recordLocal(int,String,Object)
@@ -195,19 +236,24 @@ final class L2ClassFileTransformer implements ClassFileTransformer {
         }
         method.tryCatchBlocks.add(0, new TryCatchBlockNode(tryStart, tryEnd, handler, THROWABLE_CLASS));
 
-        ClassWriter writer = new FrameComputingClassWriter();
-        node.accept(writer);
-        byte[] instrumented = writer.toByteArray();
-
-        TraceAgent.log("l2_probes_installed method=" + TARGET_METHOD
-                + " offsets=" + boundaries.get(0).offset + "," + boundaries.get(1).offset
-                + " lines=" + boundaries.get(0).line + "," + boundaries.get(1).line);
-        return instrumented;
+        StringBuilder offsets = new StringBuilder();
+        StringBuilder lines = new StringBuilder();
+        for (Boundary boundary : boundaries) {
+            if (offsets.length() > 0) {
+                offsets.append(',');
+                lines.append(',');
+            }
+            offsets.append(boundary.offset);
+            lines.append(boundary.line);
+        }
+        TraceAgent.log("l2_probes_installed method=" + target.method
+                + " offsets=" + offsets + " lines=" + lines);
+        return true;
     }
 
-    private static MethodNode findTargetMethod(ClassNode node) {
+    private static MethodNode findTargetMethod(ClassNode node, Target target) {
         for (MethodNode candidate : node.methods) {
-            if (TARGET_METHOD.equals(candidate.name) && TARGET_DESCRIPTOR.equals(candidate.desc)) {
+            if (target.method.equals(candidate.name) && target.descriptor.equals(candidate.desc)) {
                 return candidate;
             }
         }
@@ -225,7 +271,7 @@ final class L2ClassFileTransformer implements ClassFileTransformer {
 
     /**
      * @return the single {@code DRETURN} instruction, or {@code null} when the method returns in any
-     *         other way (signature drift) - the whole class is then left untouched
+     *         other way (signature drift) - that method is then left untouched
      */
     private static AbstractInsnNode findSingleDoubleReturn(MethodNode method) {
         AbstractInsnNode found = null;
@@ -356,10 +402,33 @@ final class L2ClassFileTransformer implements ClassFileTransformer {
         return returnsOrThrows || jumps || switches;
     }
 
+    private static void countProbeMissing(Target target, int candidates) {
+        long n = PROBE_MISSING.incrementAndGet();
+        TraceAgent.log("l2_probe_missing method=" + target.method + " candidates="
+                + candidates + " counter=" + n);
+    }
+
     private static void count(AtomicLong counter, String label) {
         long n = counter.incrementAndGet();
         if (n == 1L || n % 100L == 0L) {
             TraceAgent.log(label + "=" + n + " class=" + TARGET_CLASS);
+        }
+    }
+
+    /** One instrumented method: name/descriptor, probe self-check and the enter entry point. */
+    private static final class Target {
+        final String method;
+        final String descriptor;
+        final int minProbes;
+        final boolean exactProbes;
+        final String enterMethod;
+
+        Target(String method, String descriptor, int minProbes, boolean exactProbes, String enterMethod) {
+            this.method = method;
+            this.descriptor = descriptor;
+            this.minProbes = minProbes;
+            this.exactProbes = exactProbes;
+            this.enterMethod = enterMethod;
         }
     }
 

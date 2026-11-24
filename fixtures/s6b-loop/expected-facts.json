@@ -1,0 +1,358 @@
+{
+  "schema": "traceboard.expected-facts.v1",
+  "caseId": "s6b-loop",
+  "stage": "S6b",
+  "pathSyntax": "dot-separated segments; a numeric segment indexes an array; the leaf value is compared with deep JSON equality",
+  "factSelector": "a fact selects the chain event by spanId when present; otherwise by kind+nodeKey+status (S5 convention). Derived '#trace.*' facts need no selector.",
+  "derivedPathSyntax": "paths starting with '#trace.' are computed over the whole source before fact lookup: spanCount, backendSpanCount, valuesSpanCount, valuesLength (items on the reconcileLoop span), valuesTotalFlag (integer after VALUES_TOTAL=), valuesCappedFlag (integer after VALUES_CAPPED=), droppedEqualsTotalMinusLength, noSilentDrop, firstValueFrom, lastValueTo, badValueCount (items with from!==null && to===0), badValueIndexes, retainedOrderAscending (observation order preserved), allItemsTruncatedFalse, allInvocationOne, valueLineSet, graphNodeKeyCount",
+  "note": "S6b loop fixture ONLY. This file is deterministic contract shape, NOT runtime evidence: the real ~102 observations, the folded 20-item list, the VALUES_CAPPED/VALUES_TOTAL counts and the retained 50 -> 0 bad value must come from demo L2DemoService#reconcileLoop + the javaagent L2Values folding E2E (S6B-C). Never cite this directory as proof of runtime folding, of full loop recording, of sampling rates or of L2 overhead. The 82/102 numbers are a shape example: runtime tests assert t>20, d=t-20, length=20 and never hard-code total. Line numbers are illustrative; tests recompute the init/increment/reset lines from L2DemoService.java.",
+  "sources": {
+    "chain": {
+      "file": "fixtures/s6b-loop/events.ndjson",
+      "format": "ndjson",
+      "lineCount": 4,
+      "eventCount": 4
+    }
+  },
+  "eventCount": 4,
+  "runtimeProbeExpectations": {
+    "probes": "4 probes measured with JDK8 javap (init baseline line, increment line, if/reset line, anchor line; the for-line boundary is skipped because the previous instruction is if_icmpgt); the transformer self-check accepts >=2, logs the actual count in l2_probes_installed and fail-opens with l2_probe_missing below 2; tests never hard-assert 3",
+    "anchor": "the anchor statement reads local without changing it; it is what makes the post-reset 0 observable at the next line boundary (the reset write happens on the if line, the changed value is observed at the following boundary/anchor)",
+    "observations": "about 102 changes for times=100: null->0 baseline, 49 increments, 49->50 and 50->0 at i=50, 0->1 recovery, then 49 increments to 50",
+    "fold": "first 6 + last 6 + middle uniform samples to fill 20, and the first bad value (from!==null && to===0) is always kept; retained items stay in original observation order",
+    "noRecompute": "retained from/to/line are copied verbatim; dropped neighbours are never spliced or smoothed",
+    "counts": "VALUES_TOTAL=<observations before fold>, VALUES_CAPPED=<total-20>; both mandatory when folded; event status TRUNCATED; retained items truncated=false",
+    "control": "times=5 yields 6 observations -> status OK, no VALUES_CAPPED/VALUES_TOTAL, no fold"
+  },
+  "globalAssertions": {
+    "chain": {
+      "sessionId": "s_s6bloop",
+      "eventCount": 4,
+      "traceId": "9e0f1a2b3c4d5e6f708192a3b4c5d6e7",
+      "rootSpanId": "e000000000000001",
+      "rootEventId": "click_s6bloop01",
+      "rootEventIdIsClickId": true,
+      "rootEventIdNotClickLost": true,
+      "singleRoot": true,
+      "rootKind": "ui_event",
+      "rootParentSpanId": null,
+      "rootConfidence": "EXACT",
+      "confidenceAllExact": true,
+      "statuses": ["OK", "OK", "OK", "TRUNCATED"],
+      "statusAllOk": false,
+      "noExceptions": true,
+      "noThrewStatus": true,
+      "noNotCollectedStatus": true,
+      "noReason": true,
+      "noLostBackendFlag": true,
+      "noL1Flag": true,
+      "noAsyncFlag": true,
+      "parentBySpanId": {
+        "e000000000000001": null,
+        "e000000000000002": "e000000000000001",
+        "e000000000000003": "e000000000000002",
+        "e000000000000004": "e000000000000003"
+      },
+      "kindChain": ["ui_event", "fetch", "controller", "service"],
+      "startNsNonDecreasing": true,
+      "intervalContainment": true,
+      "intervalNested": true,
+      "rootIntervalContainsAll": true,
+      "clickWindow": { "startNs": 11000000000, "endNs": 11122000000 },
+      "threadFrontendAllEqual": "browser-main",
+      "controllerThread": { "id": 44, "name": "http-nio-8080-exec-1" },
+      "controllerSpanId": "e000000000000003",
+      "serviceSpanId": "e000000000000004",
+      "controllerParentIsFetchSpan": true,
+      "fetchSpanIdIsTraceparentParentId": "e000000000000002",
+      "clickIdIsTraceBoardClickHeader": "click_s6bloop01",
+      "flagsClick": ["SDK_ACTIVE", "OBSERVE_MS=1500"],
+      "flagsFetch": ["SDK_ACTIVE"],
+      "flagsController": ["S2_ZERO_ROW_CHAIN"],
+      "flagsServiceLoop": ["S2_ZERO_ROW_CHAIN", "L2", "VALUES_CAPPED=82", "VALUES_TOTAL=102"],
+      "flagsAreContainsOnly": true,
+      "flagsRuntimeAssertion": "runtime flags may append advisory flags (DROP_COUNT=<n>, S3_RUNTIME_SDK); assert includes('L2') && includes('VALUES_CAPPED') && includes('VALUES_TOTAL') and absence of L1 / LOST_BACKEND / L1_SKIPPED / NO_DEBUG_INFO; never deep-equal arrays and never hard-code the total",
+      "serviceNodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "serviceParentIsController": true,
+      "serviceStatus": "TRUNCATED",
+      "eventLevelTruncated": true,
+      "itemLevelTruncated": false,
+      "serviceReturn": { "type": "double", "value": 50 },
+      "controllerReturn": { "type": "org.springframework.http.ResponseEntity", "value": 200 },
+      "controllerValuesAbsent": true,
+      "valuesSpanCount": 1,
+      "valuesOnlyOnServiceSpans": true,
+      "valuesLength": 20,
+      "valuesTotalFlag": 102,
+      "valuesCappedFlag": 82,
+      "droppedEqualsTotalMinusLength": true,
+      "totalGreaterThanCap": true,
+      "firstValueFrom": null,
+      "firstValueTo": 0,
+      "lastValueTo": 50,
+      "badValueCount": 1,
+      "badValueIndexes": [9],
+      "retainedOrderAscending": true,
+      "allItemsTruncatedFalse": true,
+      "allItemsRedactedFalse": true,
+      "allInvocationOne": true,
+      "valueLineSet": [27, 30, 32],
+      "initLine": 27,
+      "incrementLine": 30,
+      "resetLine": 32,
+      "badLineEqualsResetLine": true,
+      "linesAreIllustrative": true,
+      "valueKindsAllLocal": true,
+      "noParamFieldReturnKinds": true,
+      "valueKeyOrder": ["name", "kind", "line", "from", "to", "truncated", "redacted", "invocation"],
+      "valueKeyOrderIsContractual": false,
+      "noSilentDrop": "values.length + VALUES_CAPPED === VALUES_TOTAL (82 dropped + 20 retained = 102 observed)",
+      "backendSpanCount": 2,
+      "graphNodeKeyCount": 15,
+      "graphNodeKeysOrdered": [
+        "spanId", "parentSpanId", "kind", "nodeKey", "status", "return", "sideEffects",
+        "startNs", "durNs", "thread", "flags", "reason", "source", "confidence", "values"
+      ]
+    }
+  },
+  "facts": [
+    {
+      "id": "F1",
+      "source": "chain",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "#trace.backendSpanCount", "value": 2 },
+      "summary": "reconcileLoop 后端恰 2 span（controller + service）；requests.backendSpanCount=2"
+    },
+    {
+      "id": "F2",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "status", "value": "TRUNCATED" },
+      "summary": "发生折叠时事件级 status=TRUNCATED（不是失败、不是 OK；值列表被折叠）"
+    },
+    {
+      "id": "F3",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "#trace.valuesTotalFlag", "value": 102 },
+      "summary": "命中 VALUES_TOTAL=102（折叠前真实项数；运行时只断言 t>20，不硬编码 102）"
+    },
+    {
+      "id": "F4",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "#trace.valuesCappedFlag", "value": 82 },
+      "summary": "命中 VALUES_CAPPED=82（丢弃数）且 82 = 102 - 20（无静默丢弃）"
+    },
+    {
+      "id": "F5",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "values.length", "value": 20 },
+      "summary": "values 恰 20 项（前 6 + 后 6 + 中段样本 8；保留顺序即观测顺序）"
+    },
+    {
+      "id": "F6",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "values.0.from", "value": null },
+      "summary": "首项保留基线 null→0（第一条观测是基线，不是值变化）"
+    },
+    {
+      "id": "F7",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "values.19.to", "value": 50 },
+      "summary": "末项保留尾部 49→50（后 6 项保证尾部可见；return 也是 50）"
+    },
+    {
+      "id": "F8",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "#trace.badValueCount", "value": 1 },
+      "summary": "坏值 50→0（from 非空且 to=0）必须优先保留，即使在折叠中段也不能丢"
+    },
+    {
+      "id": "F9",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "#trace.retainedOrderAscending", "value": true },
+      "summary": "保留项按原观测顺序（不重排）；被丢弃项两侧的 from/to 不被拼接/平滑"
+    },
+    {
+      "id": "F10",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "#trace.allItemsTruncatedFalse", "value": true },
+      "summary": "保留项 truncated=false：真值未截断，是列表被折叠（UI 不得说成“已截断值”）"
+    },
+    {
+      "id": "F11",
+      "source": "chain",
+      "spanId": "e000000000000004",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "return.value", "value": 50 },
+      "summary": "折叠不改变真实返回值：100 次循环最终 50"
+    },
+    {
+      "id": "F12",
+      "source": "chain",
+      "kind": "controller",
+      "nodeKey": "com.example.shop.controller.OrderController#reconcileLoop",
+      "status": "OK",
+      "assert": { "path": "#trace.valuesSpanCount", "value": 1 },
+      "summary": "只有 loop service 携带 values；click/fetch/controller 省略该键（graph 呈现 null）"
+    },
+    {
+      "id": "F13",
+      "source": "chain",
+      "kind": "service",
+      "nodeKey": "com.example.shop.service.L2DemoService#reconcileLoop",
+      "status": "TRUNCATED",
+      "assert": { "path": "#trace.noSilentDrop", "value": true },
+      "summary": "无静默丢弃：20 保留 + 82 丢弃 = 102 观测，计数全部可见"
+    }
+  ],
+  "apiExpectations": {
+    "requests": {
+      "sdkActive": true,
+      "row": {
+        "traceId": "9e0f1a2b3c4d5e6f708192a3b4c5d6e7",
+        "rootSpanId": "e000000000000001",
+        "rootKind": "ui_event",
+        "nodeKey": "#btn-reconcile-loop",
+        "status": "TRUNCATED",
+        "confidence": "EXACT",
+        "spanCount": 4,
+        "startedAtNs": 11000000000,
+        "durNs": 122000000,
+        "hasError": false,
+        "fetchCount": 1,
+        "hasFrontend": true,
+        "hasBackend": true,
+        "backendSpanCount": 2
+      },
+      "statusRule": "existing aggregate priority; TRUNCATED beats RETURNED_FALSE/OK but loses to THREW/UNKNOWN/NOT_COLLECTED_*",
+      "nonFoldVariant": "times=5 => 6 observations, status OK and no VALUES_CAPPED/VALUES_TOTAL (S6B-C control); reconcileAmount keeps 1/2/1 and no cap flag"
+    },
+    "graph": {
+      "sessionId": "s_s6bloop",
+      "traceId": "9e0f1a2b3c4d5e6f708192a3b4c5d6e7",
+      "rootEventId": "click_s6bloop01",
+      "confidence": "EXACT",
+      "nodeCount": 4,
+      "edgeCount": 3,
+      "nodeKeyCount": 15,
+      "nodeOrder": ["e000000000000001", "e000000000000002", "e000000000000003", "e000000000000004"],
+      "kindOrder": ["ui_event", "fetch", "controller", "service"],
+      "edges": [
+        { "from": "e000000000000001", "to": "e000000000000002", "count": 1 },
+        { "from": "e000000000000002", "to": "e000000000000003", "count": 1 },
+        { "from": "e000000000000003", "to": "e000000000000004", "count": 1 }
+      ],
+      "valuesNullSpanIds": ["e000000000000001", "e000000000000002", "e000000000000003"],
+      "valuesSpanIds": ["e000000000000004"],
+      "valuesValueCounts": [20],
+      "valuesVerbatim": true,
+      "serviceNode": {
+        "status": "TRUNCATED",
+        "reason": null,
+        "valuesLength": 20,
+        "flagsContain": ["VALUES_CAPPED=82", "VALUES_TOTAL=102"]
+      },
+      "sortRule": "nodes: startNs ascending, ties by spanId; edges: parent node order then child node order"
+    }
+  },
+  "workbenchExpectations": {
+    "foldNoteSelector": "#s6-fold-note",
+    "foldNoteText": "已折叠 82 次（VALUES_CAPPED=82；共 102 次）",
+    "foldNoteSpanIds": ["e000000000000004"],
+    "foldNoteAbsentSpanIds": ["e000000000000001", "e000000000000002", "e000000000000003"],
+    "foldRule": "render only when the node exposes both VALUES_CAPPED=<n> (n>0) and VALUES_TOTAL=<m>; N=n, M=m; never render the note for nodes without the flags",
+    "valuesPanelSelector": "#s5-values",
+    "valuesRowCount": 20,
+    "firstRowText": "0",
+    "lastRowText": "49 → 50",
+    "badRowText": "50 → 0",
+    "badRowIndex": 9,
+    "rowFooters": "行号 N · 第 1/1 次 (invocation=1, one collected span with this nodeKey)",
+    "bannerText": "S6：L2 行级（reconcileAmount）、异步继承（reconcileAsync）、无调试信息（NoDebugService#compute，NOT_COLLECTED_NO_DEBUG_INFO）、循环折叠（reconcileLoop）；长生命周期线程池不自动传播；行级字段写入/对象深采/多方法 L2 未支持",
+    "l2NoteText": "S6 L2：行级局部变量来自 LVT 探针（reconcileAmount 第 2 次 100 → 0；reconcileLoop 折叠保留首/尾/样本）；异步子线程创建时继承上下文（ASYNC_INHERITED）；长生命周期线程池不自动传播",
+    "foldCanonical": "已折叠 N 次（VALUES_CAPPED=N；共 M 次）",
+    "staticDistTokens": [
+      "s6-fold-note", "s6-l2-badge", "s6-l2-note", "s6-async-badge", "s6-no-debug-badge",
+      "已折叠", "VALUES_CAPPED", "VALUES_TOTAL", "共", "data-value-kind", "行号 ", "s5-values"
+    ],
+    "dynamicDomOnly": [
+      "已折叠 82 次（VALUES_CAPPED=82；共 102 次）", "[data-value-kind=\"local\"]", "第 1/1 次"
+    ],
+    "pureFunctionExpectations": {
+      "module": "workbench/src/s6/**",
+      "foldCounts": { "e000000000000004": { "capped": 82, "total": 102 } },
+      "foldNote": { "e000000000000004": "已折叠 82 次（VALUES_CAPPED=82；共 102 次）" },
+      "foldFlagDriven": true,
+      "isL2Node": { "trueSpanIds": ["e000000000000004"], "falseSpanIds": ["e000000000000001", "e000000000000002", "e000000000000003"] },
+      "localValueRows": { "e000000000000004": 20 },
+      "isValueChange": { "row0": false, "row1": true, "row9": true, "row19": true },
+      "invocationDiffNodes": { "groupSpanIds": ["e000000000000004"], "diffSpanIds": ["e000000000000004"] },
+      "noFoldOnReconcileAmount": "fixtures/s6-l2-lines nodes have no VALUES_CAPPED/VALUES_TOTAL and must render no fold note"
+    },
+    "s5SelectorsRetained": ["#s5-values", "#s5-l1-badge", "#s5-source", "#s5-values-empty"],
+    "s6aSelectorsRetained": ["#s6-l2-badge", "#s6-l2-note", "data-value-kind", "data-invocation-diff", "100 → 0", "行号 "],
+    "staleTextsMustBeAbsentFromSrcAndDist": [
+      "循环全量记录",
+      "折叠无计数",
+      "已截断值",
+      "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
+      "异步/无调试信息/循环折叠/开销属 S6b",
+      "无构建期局部变量/L2"
+    ],
+    "forbiddenTexts": [
+      "循环全量记录",
+      "折叠未计数",
+      "已截断值",
+      "保留项已截断",
+      "全部循环值可见",
+      "开销达标",
+      "L2 开销 ≤40%"
+    ],
+    "negativeAssertions": [
+      "no fold note on click/fetch/controller nodes",
+      "no VALUES_CAPPED/VALUES_TOTAL on the reconcileAmount nodes of fixtures/s6-l2-lines",
+      "retained items are never described as truncated values (truncated=false)",
+      "TRUNCATED is not rendered as an error/THREW tone"
+    ],
+    "sourceTextIsIndicative": "fixture line numbers are shape only; runtime tests recompute init/increment/reset lines from L2DemoService.java"
+  }
+}

@@ -201,6 +201,29 @@ const S3_SELECTORS = [
   "s3-panel", "s3-session", "s3-refresh", "s3-tabs", "s3-ops",
   "s3-tree", "s3-timeline", "s3-replay-toggle", "s3-readonly", "s3-caseb",
 ];
+/* ------------------------------------------------------------------ */
+/* S6b canonical copy (dispatch §4.5 / api.v1.md §10.11, verbatim)      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * S6 banner (api.v1.md §10.11). It SUPERSEDES the S6a banner; the old S6a copy survives only
+ * as a reverse (stale) literal in S5_STALE_TEXTS below and must not be asserted positively.
+ */
+const S6_BANNER = "S6：L2 行级（reconcileAmount）、异步继承（reconcileAsync）、无调试信息（NoDebugService#compute，NOT_COLLECTED_NO_DEBUG_INFO）、循环折叠（reconcileLoop）；长生命周期线程池不自动传播；行级字段写入/对象深采/多方法 L2 未支持";
+/** S6 L2 explanation (replaces the S6a L2 note). */
+const S6_L2_NOTE = "S6 L2：行级局部变量来自 LVT 探针（reconcileAmount 第 2 次 100 → 0；reconcileLoop 折叠保留首/尾/样本）；异步子线程创建时继承上下文（ASYNC_INHERITED）；长生命周期线程池不自动传播";
+/** S6 ×N note (replaces the S6a ×N note). */
+const S6_XN_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 仅 L2DemoService#reconcileAmount 与 reconcileAsync（单异步线程内）演示；其他方法无运行时 ×3";
+/** No-debug explanation (grey, never a success claim). */
+const S6_NO_DEBUG_NOTE = "S6 无调试信息：NoDebugService#compute 无 LocalVariableTable，状态 NOT_COLLECTED_NO_DEBUG_INFO；不猜变量名/行号";
+/** Fold-note template; N = VALUES_CAPPED (dropped), M = VALUES_TOTAL. */
+const S6_FOLD_NOTE_TEMPLATE = "已折叠 N 次（VALUES_CAPPED=N；共 M 次）";
+/** S6a copies superseded by S6b (reverse literals only; never positive tokens). */
+const S6A_STALE_BANNER = "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b";
+const S6A_STALE_L2_NOTE = "S6a L2：行级局部变量来自 LVT 探针（样例第 2 次调用 local 100 → 0）；异步/无调试信息/循环折叠/开销属 S6b";
+const S6A_STALE_XN_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3";
+const S6A_STALE_SEGMENT = "异步/无调试信息/循环折叠/开销属 S6b";
+
 const S3_WORKBENCH_TOKENS = [
   "已确认：本次点击因果链内没有网络请求",
   "无法确认",
@@ -214,8 +237,8 @@ const S3_WORKBENCH_TOKENS = [
   "回放不会重发请求、不写数据库、不调用 demo、不执行程序；",
   // S5 migration (B3): the old "JS 内部变量本次未采集（无构建插件/sourcemap）" copy is gone.
   "JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）",
-  // S6a migration (B8): the old absolute S5 banner is replaced by the canonical S6a banner.
-  "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
+  // S6b migration (§10): the canonical S6 banner replaces the old S6a banner.
+  S6_BANNER,
 ];
 const S3_STATE_SEMANTICS = [
   "OK", "RETURNED_FALSE", "THREW", "NOT_COLLECTED_", "TRUNCATED", "REDACTED", "UNKNOWN", "LOST",
@@ -260,7 +283,7 @@ const S4_SELECTORS = [
 ];
 const S4_GAP_EMPTY_TEXT = "未发现缺口（仅基于已采集数据；未采集项不会显示为成功）";
 const S4_FETCH_WITHOUT_BACKEND_TEXT = "后端未采集/未关联";
-const S4_RUNTIME_X3_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3";
+const S4_RUNTIME_X3_NOTE = S6_XN_NOTE;
 /** S4-G sessions/URLs (diagnose cases). */
 const S4_DIAG_SESSION = "s_s4diag";
 const S4_DIAG_MISSING_SESSION = "s_s4missing";
@@ -380,16 +403,34 @@ const S5_STALE_TEXTS = [
   "运行时 ×3 属 S6",
   "无异步/×3",
   "无构建期局部变量/L2",
+  // S6b migration (§10): the three superseded S6a copies + the "属 S6b" segment are now stale.
+  S6A_STALE_BANNER,
+  S6A_STALE_L2_NOTE,
+  S6A_STALE_XN_NOTE,
+  S6A_STALE_SEGMENT,
 ];
-/** Claim text that must always stay absent (S5 is not L2). */
-const S5_FORBIDDEN_CLAIMS = ["kind=local", "L2 已采集"];
-/** S5 demo backend files allowed to change (order path + findById SELECT + S6a L2DemoService). */
+/**
+ * Claim text that must always stay absent (S5 is not L2; S6b proves inheritance/degradation/
+ * folding only, never full async propagation or overhead compliance). Keep-only-grows (B2):
+ * the original two entries stay and the S6b entries are appended.
+ */
+const S5_FORBIDDEN_CLAIMS = [
+  "kind=local", "L2 已采集",
+  "异步全量传播", "线程池自动传播", "无调试可采变量", "循环全量", "开销达标", "L2 开销 ≤40%",
+];
+/** S6a/S6b overclaim texts kept for the S6A-E/S6B-F reverse assertions (never grow-shrink). */
+const S6_OVERCLAIM_TEXTS = [
+  "异步上下文已采集", "无调试信息已处理", "循环折叠已实现", "L2 开销 ≤40%", "全部方法 L2", "L2 已采集",
+];
+/** S5 demo backend files allowed to change (tests/include the S6a/S6b demo additions). */
 const S5_DEMO_BACKEND_ALLOWED = [
   "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/controller/OrderController.java",
   "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/service/OrderService.java",
   "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/service/L2DemoService.java",
+  "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/service/NoDebugService.java",
   "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/mapper/OrderMapper.java",
   "demo/buggy-shop-boot-vue/backend/src/main/resources/mapper/OrderMapper.xml",
+  "demo/buggy-shop-boot-vue/backend/pom.xml",
 ];
 /**
  * S5 G1 freeze (plan-review §7.1): supersedes the S4 hashes for api.v1.md / event-model.v1.md
@@ -446,19 +487,20 @@ const S6A_L2_SERVICE_REL = `${S6A_DEMO_BACKEND_REL}/src/main/java/com/example/sh
 const S6A_L2_FLAG = "L2";
 const S6A_CONTROLLER_NODE_KEY = "com.example.shop.controller.OrderController#reconcile";
 const S6A_SERVICE_NODE_KEY = "com.example.shop.service.L2DemoService#reconcileAmount";
-const S6A_BANNER = "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b";
-const S6A_L2_NOTE = "S6a L2：行级局部变量来自 LVT 探针（样例第 2 次调用 local 100 → 0）；异步/无调试信息/循环折叠/开销属 S6b";
-const S6A_XN_NOTE = "×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3";
+const S6A_BANNER = S6_BANNER; // S6b migration: canonical banner (the S6a copy is only in S5_STALE_TEXTS)
+const S6A_L2_NOTE = S6_L2_NOTE;
+const S6A_XN_NOTE = S6_XN_NOTE;
 /** S6A-D static dist tokens (dist literals only; dynamic Vue attrs are proven elsewhere). */
 const S6A_WORKBENCH_TOKENS = [
   "s6-l2-badge", "s6-l2-note", "data-value-kind", "data-invocation-diff",
   "行号 ", "100 → 0", "值变化", S6A_BANNER, S6A_L2_NOTE, S6A_XN_NOTE,
 ];
-/** Agent files allowed to carry L2/LVT terminology (S2-8/S3-8/S4-I/S5-H, s6a-plan §8.1.3). */
+/** Agent files allowed to carry L2/LVT terminology (S2-8/S3-8/S4-I/S5-H). */
 const S6A_AGENT_L2_FILES = [
   "agent/src/main/java/io/traceboard/agent/L2ClassFileTransformer.java",
   "agent/src/main/java/io/traceboard/agent/L2Values.java",
   "agent/src/main/java/io/traceboard/agent/SpanContext.java",
+  "agent/src/main/java/io/traceboard/agent/NoDebugClassFileTransformer.java",
 ];
 const s6aL2Allowed = (rel) => S6A_AGENT_L2_FILES.includes(rel) || rel.startsWith("workbench/src/s6/");
 /**
@@ -476,11 +518,85 @@ const S6A_G1_FREEZE = {
   "docs/plans/stages/S6/dispatch-s6a.md": "c6dbda4d9a3d738d4168f875710fdd81ed10104b52273af1b2fb8156e4a52160",
   "docs/plans/stages/S6/plan-review-s6a.md": "cb41a56a607a469e0c5337837259050035bc9cf2b40c9f8008e80ffe960711e0",
 };
-/** S6a supersedes api/event-model; every other S5 entry stays at its S5 hash. */
-const LATEST_G1_FREEZE = { ...S5_G1_FREEZE, ...S6A_G1_FREEZE };
+/**
+ * S6b G1 freeze (plan-review-s6b §5, 14 entries): the two contracts (additive S6b revisions) +
+ * the three S6b fixtures (3 files each) + s6b-plan + dispatch-s6b + plan-review-s6b. It SUPERSEDES
+ * the S5/S6a api/event-model hashes; the other S5/S6a entries keep their frozen bytes.
+ */
+const S6B_G1_FREEZE = {
+  "docs/contracts/api.v1.md": "e1d7202ade2fad5f8665079e9f1b914a99ed29346a9000c9393cca6f689c6010",
+  "docs/contracts/event-model.v1.md": "06aecbfe82672edb4df277ee96325faf190b2be46b458f205aa04a7ab0fc2f38",
+  "fixtures/s6b-async/events.ndjson": "d03c2f8d804262569e0b2e3f33b9ecc0b74aee9bba340c60975ac6bab10275df",
+  "fixtures/s6b-async/expected-facts.json": "7f0d484f33be5f38b113507c0bb889f2e227c9cdb3f42a158d5c3c0202b92468",
+  "fixtures/s6b-async/README.md": "3d47e54ab389657464c7231eaef7e252072281a420fce8b9f32918e558b86a36",
+  "fixtures/s6b-no-debug/events.ndjson": "caa25a1a6ca6ff3600705bada2ada909302ab8801c5b43cd8981734b4d8bd4c2",
+  "fixtures/s6b-no-debug/expected-facts.json": "1e0badaa8773bbe083f0eb7bac8c04e2667ffaff617ca979072692dc7c5d50c1",
+  "fixtures/s6b-no-debug/README.md": "58339d834972954e8b04036f0e3d91d29741efcc73ce756254f81a9bbb5ba772",
+  "fixtures/s6b-loop/events.ndjson": "e21c3202cbf1a21a7537133d3291b872f2842e0c01c157bdd90f80e47e399c94",
+  "fixtures/s6b-loop/expected-facts.json": "228b55c8c2f8f164b44209bb2ef9584c8129fdae2522afafc95f9e516f1a0ac6",
+  "fixtures/s6b-loop/README.md": "15a551dd40b3334b314b003e7d3ac651a9f2dcdc7ff657e9195c299d1a030cab",
+  "docs/plans/stages/S6/s6b-plan.md": "f237685d3101f0b21d1b416a8c0162869080d6c7d88fd8bb1c59459cbbaa546b",
+  "docs/plans/stages/S6/dispatch-s6b.md": "690b16e63efc391f8d66765da96de4985c6f2c733532e78ab2203d2f405043c7",
+  "docs/plans/stages/S6/plan-review-s6b.md": "d9b75a09f0077652aba731cc29c0aadb574aca01e38363110cac243700645126",
+};
+/** S6b supersedes api/event-model; every other S5/S6a entry stays at its own hash. */
+const LATEST_G1_FREEZE = { ...S5_G1_FREEZE, ...S6A_G1_FREEZE, ...S6B_G1_FREEZE };
+
+/* ------------------------------------------------------------------ */
+/* S6b async / no-debug / loop-fold / workbench / perf                  */
+/* ------------------------------------------------------------------ */
+
+const S6B_PLAN_REVIEW_REL = "docs/plans/stages/S6/plan-review-s6b.md";
+const S6B_PLAN_REL = "docs/plans/stages/S6/s6b-plan.md";
+const S6B_DISPATCH_REL = "docs/plans/stages/S6/dispatch-s6b.md";
+const S6B_FIXTURE_DIRS = ["fixtures/s6b-async", "fixtures/s6b-no-debug", "fixtures/s6b-loop"];
+const S6B_FIXTURE_FILES = S6B_FIXTURE_DIRS.flatMap((dir) => ["events.ndjson", "expected-facts.json", "README.md"].map((name) => `${dir}/${name}`));
+/** Runtime agent session for the S6b E2E gates (dispatch §12; never s_s3demo/s_s5agent). */
+const S6B_SESSION = "s_s6b";
+const S6B_NO_DEBUG_SERVICE_REL = "demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/service/NoDebugService.java";
+const S6B_DEMO_POM_REL = "demo/buggy-shop-boot-vue/backend/pom.xml";
+const S6B_ASYNC_CONTROLLER_NODE_KEY = "com.example.shop.controller.OrderController#reconcileAsync";
+const S6B_NO_DEBUG_CONTROLLER_NODE_KEY = "com.example.shop.controller.OrderController#noDebug";
+const S6B_LOOP_CONTROLLER_NODE_KEY = "com.example.shop.controller.OrderController#reconcileLoop";
+const S6B_NO_DEBUG_NODE_KEY = "com.example.shop.service.NoDebugService#compute";
+const S6B_LOOP_NODE_KEY = "com.example.shop.service.L2DemoService#reconcileLoop";
+const S6B_ASYNC_FLAG = "ASYNC_INHERITED";
+const S6B_NO_DEBUG_FLAG = "NO_DEBUG_INFO";
+const S6B_NO_DEBUG_STATUS = "NOT_COLLECTED_NO_DEBUG_INFO";
+const S6B_NO_DEBUG_REASON = "LocalVariableTable missing";
+const S6B_VALUES_CAPPED = "VALUES_CAPPED";
+const S6B_VALUES_TOTAL = "VALUES_TOTAL";
+const S6B_FOLD_LIMIT = 20;
+/** Perf script (report-only; 1.40 is only a WARN label). */
+const S6B_PERF_REL = "tools/perf/l2-overhead.mjs";
+/** S6B-E static workbench tokens (static dist only; dynamic DOM literals are NOT asserted). */
+const S6B_WORKBENCH_TOKENS = [
+  "s6-async-badge", "s6-no-debug-badge", "s6-no-debug-reason", "s6-fold-note",
+  "已折叠", "VALUES_CAPPED", "VALUES_TOTAL", "共", "ASYNC_INHERITED", "长生命周期线程池不自动传播",
+  S6_BANNER, S6_L2_NOTE, S6_XN_NOTE, S6_NO_DEBUG_NOTE, S6_FOLD_NOTE_TEMPLATE,
+];
+/** Markers that may appear only in the S6b files (S6B-F scope; no field-line/deep-object/multi). */
+const S6B_AGENT_FILES = [
+  "agent/src/main/java/io/traceboard/agent/SpanContext.java",
+  "agent/src/main/java/io/traceboard/agent/L2Values.java",
+  "agent/src/main/java/io/traceboard/agent/SpanEmitter.java",
+  "agent/src/main/java/io/traceboard/agent/TraceAgent.java",
+  "agent/src/main/java/io/traceboard/agent/L2ClassFileTransformer.java",
+  "agent/src/main/java/io/traceboard/agent/NoDebugClassFileTransformer.java",
+];
+const s6bMarkerAllowed = (rel) =>
+  S6B_AGENT_FILES.includes(rel) ||
+  rel.startsWith("workbench/src/s6/") ||
+  rel === "workbench/src/components/S4DetailPanel.vue" ||
+  rel === "workbench/src/components/S3Panel.vue" ||
+  rel === "workbench/src/style.css" ||
+  rel === "demo/buggy-shop-boot-vue/frontend/src/App.vue" ||
+  rel === S6B_NO_DEBUG_SERVICE_REL;
 
 const S6A_IMPLEMENTED = ["A", "B", "C", "D", "E"];
+const S6B_IMPLEMENTED = ["A", "B", "C", "D", "E", "F"];
 const S6A_EVIDENCE = { javaBuild: null, demo: null, agent: null, fixture: null, workbench: null };
+const S6B_EVIDENCE = { builds: null, async: null, noDebug: null, loop: null, workbench: null, perf: null };
 /** One-run memoization for the S6a Java/build assets (reused from S5 when the full suite ran). */
 const S6A_BUILD_CACHE = { java: null, workbench: null, demoFrontend: null, sdk: null };
 
@@ -496,6 +612,19 @@ function parseS6Request(argv) {
 const S6_ONLY = process.argv.some((item) => item.startsWith("--s6a"));
 const S6_SELECTED = S6_ONLY ? (parseS6Request(process.argv) ?? new Set(S6A_IMPLEMENTED)) : null;
 const REPRO_S6 = `(cd "tools/verify" && node verify.mjs --s6a=${S6A_IMPLEMENTED.join(",")})`;
+
+/** Parse the S6b-only CLI selector; null when `--s6b` is absent (full S0–S6 run). */
+function parseS6BRequest(argv) {
+  const arg = argv.find((item) => item === "--s6b" || item.startsWith("--s6b="));
+  if (arg === undefined) return null;
+  const raw = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1).trim() : "";
+  if (!raw) return new Set(S6B_IMPLEMENTED);
+  return new Set(raw.split(",").map((part) => part.trim().toUpperCase()).filter(Boolean));
+}
+
+const S6B_ONLY = process.argv.some((item) => item.startsWith("--s6b"));
+const S6B_SELECTED = S6B_ONLY ? (parseS6BRequest(process.argv) ?? new Set(S6B_IMPLEMENTED)) : null;
+const REPRO_S6B = `(cd "tools/verify" && node verify.mjs --s6b=${S6B_IMPLEMENTED.join(",")})`;
 
 /**
  * `npm ci` can transiently fail on Windows with EPERM/EBUSY (errno -4048) while a previous
@@ -4815,8 +4944,8 @@ function checkS2Drift() {
       const ok = Boolean(expected) && actual === expected;
       checks.push({
         ok,
-        label: `S3/S4/S6a migration: contract updated only through the latest G1 freeze (${entry.rel})`,
-        detail: ok ? "hash matches the latest (S6a) G1 freeze" : `actual=${actual} latest=${expected ?? "missing"}`,
+        label: `S3/S4/S5/S6a/S6b migration: contract updated only through the latest G1 freeze (${entry.rel})`,
+        detail: ok ? "hash matches the latest (S6b) G1 freeze" : `actual=${actual} latest=${expected ?? "missing"}`,
       });
     } else {
       checks.push({
@@ -4966,14 +5095,15 @@ function checkS2Scope() {
   ];
   const adviceClasses = [
     "ControllerAdvice.class", "PreviewControllerAdvice.class", "ReconcileControllerAdvice.class",
+    "AsyncControllerAdvice.class", "NoDebugControllerAdvice.class", "LoopControllerAdvice.class",
     "ServiceAdvice.class", "PreviewServiceAdvice.class", "FieldWriteAdvice.class",
     "MapperAdvice.class", "SqlAdvice.class",
   ];
   checks.push({
-    ok: typeMatchers === 5 && transformSites === 8 &&
+    ok: typeMatchers === 5 && transformSites === 11 &&
       agentTargets.every((target) => traceAgent.includes(target)) &&
       adviceClasses.every((name) => traceAgent.includes(name)),
-    label: "agent instruments exactly 5 Byte Buddy types / 8 advices (cancel + preview + reconcile controllers, cancel/preview services, Order field write, MapperProxy, PreparedStatementHandler; L2DemoService is ASM-only)",
+    label: "agent instruments exactly 5 Byte Buddy types / 11 advices (cancel+preview+reconcile+async+noDebug+loop controllers, cancel/preview services, Order field write, MapperProxy, PreparedStatementHandler; L2DemoService/NoDebugService are ASM-only)",
     detail: `.type=${typeMatchers} .transform=${transformSites} advices=${adviceClasses.length}`,
   });
   const shopClasses = [...new Set(agentSources.match(/com\.example\.shop\.[A-Za-z0-9_.]+/g) ?? [])].sort();
@@ -4982,11 +5112,12 @@ function checkS2Scope() {
     "com.example.shop.mapper.OrderMapper",
     "com.example.shop.model.Order",
     "com.example.shop.service.L2DemoService",
+    "com.example.shop.service.NoDebugService",
     "com.example.shop.service.OrderService",
   ];
   checks.push({
     ok: deepEqual(shopClasses, expectedShopClasses),
-    label: "no other com.example.shop target is referenced/instrumented: 4 S2/S5 classes + the ASM-only L2DemoService (not a Byte Buddy target)",
+    label: "no other com.example.shop target is referenced/instrumented: 4 S2/S5 classes + the two ASM-only demo services (L2DemoService/NoDebugService are not Byte Buddy targets)",
     detail: shopClasses.join(","),
   });
   checks.push({
@@ -5010,7 +5141,7 @@ function checkS2Scope() {
   }
   checks.push({
     ok: agentForbidden.length === 0,
-    label: "agent has no browser SDK / exception-payload code; L2/LVT terminology is allowed only in the 3 S6a L2 files (L1Values stays param+field+return only)",
+    label: "agent has no browser SDK / exception-payload code; L2/LVT terminology is allowed only in the S6a/S6b L2 files (L1Values stays param+field+return only)",
     detail: agentForbidden.join(",") || "none",
   });
   const l1Values = agentCode.find((f) => f.rel.endsWith("L1Values.java"))?.text ?? "";
@@ -5238,7 +5369,7 @@ function checkS2Scope() {
 
   gate(
     "S2-8",
-    "S4/S5/S6a migration: 9 business routes + 5 Byte Buddy types / 8 advices exactly (handshake is handwritten HttpURLConnection), L2 only in the S6a L2 files, no persistence/stream, H2 embedded only, no secrets/mirrors",
+    "S4/S5/S6a/S6b migration: 9 business routes + 5 Byte Buddy types / 11 advices exactly (handshake is handwritten HttpURLConnection), L2 only in the S6a/S6b L2 files, no persistence/stream, H2 embedded only, no secrets/mirrors",
     checks,
     `grep -rnE "EventSource|WebSocket|JdbcTemplate|SseEmitter" agent/src server/collector/src workbench/src demo/buggy-shop-boot-vue/backend/src`,
   );
@@ -5520,11 +5651,12 @@ function checkS3Builds(validate) {
   const demoTokens = [
     "amount-b", "btn-save-b", "金额必须大于 0", "校验通过（本案例不提交）",
     "traceparent", "X-TraceBoard-Click", "s_s3demo",
-    // S6a migration (B8): the old absolute S5 banner is REPLACED by the canonical S6a banner;
-    // all non-banner S5 tokens stay, and the S6a reconcile tokens are added.
-    "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
+    // S6b migration (§10): the canonical S6 banner replaces the old S6a banner; async/loop
+    // buttons are now part of the demo surface (no stale "S6a" literal is required any more).
+    S6_BANNER,
     "__TRACEBOARD_MANIFEST__", "previewDiscount",
-    "#btn-reconcile", "reconcileBatch", "reconcileAmount", "S6a", "L2",
+    "#btn-reconcile", "reconcileBatch", "reconcileAmount", "S6", "L2",
+    "btn-reconcile-async", "btn-reconcile-loop",
   ];
   for (const token of demoTokens) {
     checks.push({
@@ -5729,7 +5861,7 @@ function checkS3Fixtures(validate) {
   }
   checks.push({
     ok: hashProblems.length === 0,
-    label: "schema, contracts (latest = S6a G1 freeze: api/event-model superseded), S3 fixtures/plan/dispatch, S0–S2 fixtures: every hash matches (bytes unchanged)",
+    label: "schema, contracts (latest = S6b G1 freeze: api/event-model superseded), S3 fixtures/plan/dispatch, S0–S2 fixtures: every hash matches (bytes unchanged)",
     detail: hashProblems.length ? hashProblems.slice(0, 4).join(" || ") : `${freeze.s3.length + freeze.legacy.length} hashes match`,
   });
   const s2Freeze = s2FreezeSections();
@@ -6351,14 +6483,14 @@ function checkS3Scope() {
   });
 
   const l2Hits = productCode.filter((file) =>
-    // S5 values are param/field/return summaries; L2 line-level locals exist only in the S6a
-    // agent L2 files + workbench/src/s6/** (never SDK/collector/demo frontend/other files).
+    // S5 values are param/field/return summaries; L2 line-level locals exist only in the S6a/S6b
+    // agent L2/no-debug files + workbench/src/s6/** (never SDK/collector/demo frontend/other files).
     !s6aL2Allowed(file.rel) &&
     /kind\s*=\s*["']local|LocalVariableTable|visitLocalVariable|localVariables/.test(file.text)).map((file) => file.rel);
   checks.push({
     ok: l2Hits.length === 0,
-    label: "L2 allowed only in the S6a L2 files (3 agent L2/ASM files + workbench/src/s6/**); all other SDK/agent/collector/workbench files stay L2/local-free",
-    detail: l2Hits.join(",") || "none outside the S6a L2 files",
+    label: "L2 allowed only in the S6a/S6b L2 files (L2ClassFileTransformer/L2Values/SpanContext/NoDebugClassFileTransformer + workbench/src/s6/**); all other SDK/agent/collector/workbench files stay L2/local-free",
+    detail: l2Hits.join(",") || "none outside the S6a/S6b L2 files",
   });
 
   const workbenchSdkMaps = [WORKBENCH_DIST_REL, SDK_DIST_REL]
@@ -6451,7 +6583,7 @@ function checkS3Scope() {
 
   gate(
     "S3-8",
-    "scope/security: S5 values/manifest/sourcemap allowed; L2 only in the S6a L2 files; no .map decoding/pixel replay/SSE/WS/persistence, SDK no secrets/CDN/PII, loopback, no external $ref; S4 launcher is allowed",
+    "scope/security: S5 values/manifest/sourcemap allowed; L2 only in the S6a/S6b L2 files; no .map decoding/pixel replay/SSE/WS/persistence, SDK no secrets/CDN/PII, loopback, no external $ref; S4 launcher is allowed",
     checks,
     `grep -rnE "rrweb|EventSource|WebSocket|localStorage|sourceMappingURL" frontend/sdk/src workbench/src demo/buggy-shop-boot-vue/frontend/src server/collector/src agent/src`,
   );
@@ -8266,7 +8398,7 @@ async function checkS4F() {
     const missingTokens = S4_DIST_TOKENS.filter((token) => !distAll.includes(token));
     checks.push({
       ok: distFiles.length > 0 && missingTokens.length === 0,
-      label: "workbench dist contains node-details/×N/gaps tokens + all 未采集 texts (incl. the canonical S6a ×N note)",
+      label: "workbench dist contains node-details/×N/gaps tokens + all 未采集 texts (incl. the canonical S6 ×N note)",
       detail: missingTokens.length ? `missing=${missingTokens.join(",")}` : `${S4_DIST_TOKENS.length}/${S4_DIST_TOKENS.length} tokens`,
     });
     const missingSelectors = S4_SELECTORS.filter((id) => !distAll.includes(id));
@@ -8815,8 +8947,8 @@ function checkS4H() {
     detail: schemaHash,
   });
 
-  /* -------- S5 G1 freeze (S6a supersedes api/event-model): zero drift -------- */
-  // Keep the 18-entry S5 set (count assertion); only api/event-model take the S6a hash.
+  /* -------- S5 G1 freeze (S6b supersedes api/event-model): zero drift -------- */
+  // Keep the 18-entry S5 set (count assertion); only api/event-model take the S6b hash.
   const frozenEntries = Object.entries(S5_G1_FREEZE);
   const freezeDrift = [];
   for (const [rel, s5Hash] of frozenEntries) {
@@ -8826,7 +8958,7 @@ function checkS4H() {
   }
   checks.push({
     ok: frozenEntries.length === 18 && freezeDrift.length === 0,
-    label: "S5 G1 freeze 18/18 at S6a hashes: schema, 4 contracts (api/event-model superseded), 2 guides, S4/S5 fixtures, S4/S5 plan+dispatch/amendment",
+    label: "S5 G1 freeze 18/18 at the latest (S6b) hashes: schema, 4 contracts (api/event-model superseded), 2 guides, S4/S5 fixtures, S4/S5 plan+dispatch/amendment",
     detail: freezeDrift.length ? freezeDrift.slice(0, 4).join(" || ") : `${frozenEntries.length}/${frozenEntries.length} hashes match`,
   });
 
@@ -8931,7 +9063,7 @@ function checkS4I() {
   }
   checks.push({
     ok: markerHits.length === 0 && scopeFiles.length > 0,
-    label: "S4 sources contain no S6+ capability (.map decoding, L2/local outside the S6a L2 files, WAR/Tomcat, cloud, SSE/WS, pixel replay, persistence); S5 values/manifest allowed",
+    label: "S4 sources contain no S6+ capability (.map decoding, L2/local outside the S6a/S6b L2 files, WAR/Tomcat, cloud, SSE/WS, pixel replay, persistence); S5 values/manifest allowed",
     detail: markerHits.slice(0, 5).join(",") || `${scopeFiles.length} files clean`,
   });
 
@@ -9096,6 +9228,9 @@ function checkS4I() {
     "fixtures/s4-details/",
     "fixtures/s5-l1-values/",
     "fixtures/s6-l2-lines/",
+    "fixtures/s6b-async/",
+    "fixtures/s6b-no-debug/",
+    "fixtures/s6b-loop/",
     "tools/verify/",
     "tools/perf/",
   ];
@@ -9119,7 +9254,7 @@ function checkS4I() {
   }
   checks.push({
     ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
-    label: "git change set is inside the S6a whitelist only (agent/collector/launcher/sdk+build-plugin/demo frontend+5 backend files/workbench/docs contracts+guides+S4+S5+S6a/fixtures/s4+s5+s6-l2-lines/tools/verify+perf/pom)",
+    label: "git change set is inside the S6b whitelist only (agent/collector/launcher/sdk+build-plugin/demo frontend+demo backend incl. NoDebugService+pom/workbench/docs contracts+guides+S4+S5+S6a+S6b/fixtures s4+s5+s6-l2-lines+s6b/tools/verify+perf/pom)",
     detail: unexpected.length || forbidden.length
       ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
       : `${status.lines.length} entries within scope`,
@@ -9449,8 +9584,8 @@ async function checkS5D() {
       "100 → 0", "已脱敏", "已截断", "（manifest 映射）", "行号未采集", "第 1/1 次",
       "S5 L1：参数/字段写入/返回摘要；局部变量（L2）与行级属 S6，本阶段未采集",
       "未采集（该节点无 values；S5 只采参数/字段写入/返回摘要）",
-      // S6a migration (B2): the old S5 header banner is replaced by the canonical S6a banner.
-      "S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b",
+      // S6b migration (§10): the canonical S6 banner replaces the old S6a banner.
+      S6_BANNER,
       "JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）",
     ];
     const missingS5 = s5WorkbenchTokens.filter((token) => !wbText.includes(token));
@@ -9621,12 +9756,12 @@ function checkS5E() {
   const demoApp = readFileSync(abs(`${S5_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
   checks.push({
     ok: demoText.includes("#btn-discount") && demoText.includes("previewDiscount") &&
-      demoText.includes("S6a：仅 L2DemoService#reconcileAmount 采集行级局部变量（L2）与逐次 ×3；其他方法无 L2；异步/无调试信息/循环折叠/开销属 S6b") &&
+      demoText.includes(S6_BANNER) &&
       demoApp.includes('id="btn-discount"') && demoApp.includes('data-tb-fn="previewDiscount"') &&
       demoApp.includes("requestedAmount=100") && demoApp.includes("demoSecret=s3cr3t") &&
       demoApp.includes('"x".repeat(3000)'),
-    label: "demo dist/source: #btn-discount + previewDiscount + S6a canonical copy + fixed 100/s3cr3t/3000-x URL, no loadOrders refresh",
-    detail: `btn=${demoText.includes("#btn-discount")} copy=${demoText.includes("S6a：仅 L2DemoService")}`,
+    label: "demo dist/source: #btn-discount + previewDiscount + canonical S6b banner + fixed 100/s3cr3t/3000-x URL, no loadOrders refresh",
+    detail: `btn=${demoText.includes("#btn-discount")} copy=${demoText.includes(S6_BANNER.slice(0, 20))}`,
   });
   const cdnHosts = ["unpkg.com", "jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com", "npmmirror.com", "mirrors.aliyun.com"];
   const cdnHits = [];
@@ -9783,7 +9918,7 @@ function checkS5G() {
   }
   checks.push({
     ok: Object.keys(S5_G1_FREEZE).length === 18 && freezeDrift.length === 0,
-    label: "S5 G1 freeze zero drift: schema/contracts/guides/S4+S5 fixtures/S4+S5 plan+dispatch (18 files, api+event-model at S6a hashes, S6a files at S6a hashes)",
+    label: "S5 G1 freeze zero drift: schema/contracts/guides/S4+S5 fixtures/S4+S5 plan+dispatch (18 files; api+event-model at the S6b hashes, S6a/S6b files at their frozen bytes)",
     detail: freezeDrift.length ? freezeDrift.slice(0, 4).join(" || ") : "18/18 hashes match",
   });
   const schemaHash = existsSync(abs(SCHEMA_REL)) ? sha256File(abs(SCHEMA_REL)) : "missing";
@@ -9850,7 +9985,7 @@ function checkS5G() {
   }
   return gate(
     "S5-G",
-    "regression/freeze: S0–S4 anchors PASS in a full run, schema/S0–S5 fixture bytes unchanged, S5 G1 freeze 18/18 at S6a hashes (api/event-model superseded; anchors explicitly deferred in S5-only mode)",
+    "regression/freeze: S0–S4 anchors PASS in a full run, schema/S0–S5 fixture bytes unchanged, S5 G1 freeze 18/18 at the latest hashes (api/event-model superseded by S6b; anchors explicitly deferred in S5-only mode)",
     checks,
     repro,
   );
@@ -9891,7 +10026,7 @@ function checkS5H() {
   }
   checks.push({
     ok: markerHits.length === 0 && scopeFiles.length > 0,
-    label: "no S6+ capability in S5 product sources: no L2/local outside the S6a L2 files, async continuation, runtime ×3, SSE/WS, persistence, pixel replay, .map decoding, Tomcat/WAR, cloud, React; no async/NO_DEBUG/loop-fold/perf claims",
+    label: "no S6+ capability in S5 product sources: no L2/local outside the S6a/S6b L2 files, async continuation, runtime ×3, SSE/WS, persistence, pixel replay, .map decoding, Tomcat/WAR, cloud, React; no async/NO_DEBUG/loop-fold/perf claims",
     detail: markerHits.slice(0, 6).join(",") || `${scopeFiles.length} files clean`,
   });
   const agentL1 = readFileSync(abs("agent/src/main/java/io/traceboard/agent/L1Values.java"), "utf8");
@@ -10037,6 +10172,7 @@ function checkS5H() {
     "demo/buggy-shop-boot-vue/frontend/", "workbench/", "docs/contracts/", "docs/guides/",
     "docs/plans/stages/S5/", "fixtures/s5-l1-values/", "tools/verify/", "tools/perf/",
     "docs/plans/stages/S6/", "fixtures/s6-l2-lines/",
+    "fixtures/s6b-async/", "fixtures/s6b-no-debug/", "fixtures/s6b-loop/",
   ];
   const forbiddenPrefixes = ["schema/", "fixtures/case-a-zero-rows/", "fixtures/s1-walking-skeleton/", "fixtures/s2-zero-row-chain/", "fixtures/s3-frontend-facts/", "fixtures/s4-details/", "docs/plans/stages/S0/"];
   const forbiddenExact = ["docs/contracts/transport.v1.md", "docs/contracts/status-semantics.md", "docs/plans/00-master-plan.md", "docs/plans/SOLO-PLAN.md"];
@@ -10051,7 +10187,7 @@ function checkS5H() {
   }
   checks.push({
     ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
-    label: "S6a change set within the whitelist (agent/collector/launcher/sdk+build-plugin/demo frontend+5 backend files/workbench/docs contracts+guides+S5+S6a/fixtures s5+s6/tools/verify+perf/pom); schema/S0–S4 fixtures/transport/status untouched",
+    label: "S6b change set within the whitelist (agent/collector/launcher/sdk+build-plugin/demo frontend+demo backend incl. NoDebugService+pom/workbench/docs contracts+guides+S5+S6a+S6b/fixtures s5+s6+s6b/tools/verify+perf/pom); schema/S0–S4 fixtures/transport/status untouched",
     detail: unexpected.length || forbidden.length
       ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
       : `${status.lines.length} entries within scope`,
@@ -11025,8 +11161,8 @@ async function checkS6B() {
     if (/@RequestMapping\("\/api\/orders"\)/.test(file.text)) ordersMapping += 1;
   }
   checks.push({
-    ok: ordersMapping === 1 && deepEqual(mappingPaths.slice().sort(), ["", "/{id}/cancel", "/{id}/preview-discount", "/{id}/reconcile"].sort()),
-    label: "demo controller surface unchanged except the single POST /{id}/reconcile (GET list + cancel + preview-discount + reconcile only)",
+    ok: ordersMapping === 1 && deepEqual(mappingPaths.slice().sort(), ["", "/{id}/cancel", "/{id}/preview-discount", "/{id}/reconcile", "/{id}/reconcile-async", "/{id}/no-debug", "/{id}/reconcile-loop"].sort()),
+    label: "demo controller surface is exactly 7 mapped endpoints (GET list + cancel + preview-discount + reconcile + reconcile-async + no-debug + reconcile-loop)",
     detail: `orders=${ordersMapping} paths=${mappingPaths.join(",")}`,
   });
   const appSource = readFileSync(abs(`${S5_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
@@ -11036,10 +11172,14 @@ async function checkS6B() {
   checks.push({
     ok: appSource.includes('id="btn-reconcile"') &&
       appSource.includes('fetch("/api/orders/1/reconcile", { method: "POST" })') &&
+      appSource.includes('id="btn-reconcile-async"') &&
+      appSource.includes('fetch("/api/orders/1/reconcile-async", { method: "POST" })') &&
+      appSource.includes('id="btn-reconcile-loop"') &&
+      appSource.includes('fetch("/api/orders/1/reconcile-loop?times=100", { method: "POST" })') &&
       reconcileBody.length > 0 && !reconcileBody.includes("loadOrders") &&
-      !/wrapFn\("reconcile/.test(appSource) && appSource.includes(S6A_BANNER),
-    label: "demo frontend static: #btn-reconcile -> POST /api/orders/1/reconcile (plain handler, no wrapFn), never loadOrders, S6a banner present",
-    detail: `handler=${reconcileBody.length} chars loadOrders=${reconcileBody.includes("loadOrders")}`,
+      !/wrapFn\("reconcile/.test(appSource) && appSource.includes(S6_BANNER),
+    label: "demo frontend static: #btn-reconcile/#btn-reconcile-async/#btn-reconcile-loop -> plain POST handlers (no wrapFn), never loadOrders, canonical S6b banner present",
+    detail: `handler=${reconcileBody.length} chars loadOrders=${reconcileBody.includes("loadOrders")} banner=${appSource.includes(S6_BANNER)}`,
   });
   if (!pre.every((item) => item.ok)) {
     return record("S6A-B", "S6A-B demo reconcile (preconditions)", false,
@@ -11477,7 +11617,7 @@ async function checkS6D() {
     const missingS6 = S6A_WORKBENCH_TOKENS.filter((token) => !wbText.includes(token));
     checks.push({
       ok: wb.build.code === 0 && wbDist.length > 0 && missingS6.length === 0,
-      label: "workbench dist STATIC tokens: s6-l2-badge/s6-l2-note/data-value-kind/data-invocation-diff/行号 /100 → 0/值变化 + canonical banner/L2 note/×N note (dynamic Vue attrs are NOT asserted as dist literals)",
+      label: "workbench dist STATIC tokens: s6-l2-badge/s6-l2-note/data-value-kind/data-invocation-diff/行号 /100 → 0/值变化 + canonical S6b banner/L2 note/×N note (dynamic Vue attrs are NOT asserted as dist literals)",
       detail: missingS6.length ? `missing=${missingS6.join(",")}` : `${S6A_WORKBENCH_TOKENS.length}/${S6A_WORKBENCH_TOKENS.length} tokens`,
     });
     const retained = [
@@ -11580,7 +11720,7 @@ async function checkS6D() {
  * S6b capability/claims, no secrets/CDN/mirrors, ports/processes/git whitelist, cleanup.
  */
 function checkS6E() {
-  section("S6A-E: regression/scope/cleanup (S6a partial; S0–S5 anchors, freeze at S6a hashes, no S6b, ports/git)");
+  section("S6A-E: regression/scope/cleanup (S6a; S0–S5 anchors, S6A/S6B freeze with api/event-model superseded by S6b, S6b only in whitelisted files)");
   const checks = [];
   const repro = REPRO_S6;
 
@@ -11591,14 +11731,17 @@ function checkS6E() {
     detail: "plan-review-s6a.md",
   });
   const s6Drift = [];
-  for (const [rel, expected] of Object.entries(S6A_G1_FREEZE)) {
+  const s6aKept = [];
+  for (const [rel, s6aHash] of Object.entries(S6A_G1_FREEZE)) {
+    const expected = LATEST_G1_FREEZE[rel] ?? s6aHash;
     const actual = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
     if (actual !== expected) s6Drift.push(`${rel} ${actual.slice(0, 12)}…!=${expected.slice(0, 12)}…`);
+    if (!["docs/contracts/api.v1.md", "docs/contracts/event-model.v1.md"].includes(rel) && actual !== s6aHash) s6aKept.push(rel);
   }
   checks.push({
-    ok: Object.keys(S6A_G1_FREEZE).length === 8 && s6Drift.length === 0,
-    label: "S6A_G1_FREEZE zero drift: api/event-model + S6a fixture 3 files + s6a-plan/dispatch/plan-review (8 files)",
-    detail: s6Drift.length ? s6Drift.slice(0, 4).join(" || ") : "8/8 hashes match",
+    ok: Object.keys(S6A_G1_FREEZE).length === 8 && s6Drift.length === 0 && s6aKept.length === 0,
+    label: "S6A_G1_FREEZE zero drift: S6a fixture 3 files + s6a-plan/dispatch/plan-review keep their S6a hashes; api/event-model are superseded by S6b",
+    detail: s6Drift.length || s6aKept.length ? s6Drift.slice(0, 4).concat(s6aKept).join(" || ") : "8/8 match (2 superseded)",
   });
   const supersededRels = ["docs/contracts/api.v1.md", "docs/contracts/event-model.v1.md"];
   const s5Drift = [];
@@ -11612,9 +11755,10 @@ function checkS6E() {
     .every(([rel, hash]) => existsSync(abs(rel)) && sha256File(abs(rel)) === hash);
   checks.push({
     ok: Object.keys(S5_G1_FREEZE).length === 18 && s5Drift.length === 0 && keptAtS5 &&
-      supersededRels.every((rel) => LATEST_G1_FREEZE[rel] === S6A_G1_FREEZE[rel]),
-    label: "S5 G1 freeze 18/18 (16 files at their S5 bytes; api/event-model superseded by the S6a hashes) + schema/transport/status unchanged",
-    detail: s5Drift.length ? `drift=${s5Drift.join(",")}` : "18/18 match (2 superseded)",
+      Object.keys(S6B_G1_FREEZE).length === 14 &&
+      supersededRels.every((rel) => LATEST_G1_FREEZE[rel] === S6B_G1_FREEZE[rel]),
+    label: "S5 G1 freeze 18/18 (16 files at their S5 bytes; api/event-model superseded by the S6b hashes) + S6B_G1_FREEZE 14 entries + schema/transport/status unchanged",
+    detail: s5Drift.length ? `drift=${s5Drift.join(",")}` : "18/18 match (2 superseded), S6b=14",
   });
 
   const fixtureBaseline = new Map();
@@ -11630,19 +11774,25 @@ function checkS6E() {
   collectFixtures(s3FreezeSections().all);
   collectFixtures(s2FreezeSections().all);
   collectFixtures(Object.entries(S5_G1_FREEZE).map(([rel, hash]) => ({ rel, hash })));
+  collectFixtures(Object.entries(S6A_G1_FREEZE).map(([rel, hash]) => ({ rel, hash })));
+  collectFixtures(Object.entries(S6B_G1_FREEZE).map(([rel, hash]) => ({ rel, hash })));
   const fixtureDrift = [];
   for (const [rel, expected] of fixtureBaseline) {
     const now = existsSync(abs(rel)) ? sha256File(abs(rel)) : "missing";
     if (now !== expected) fixtureDrift.push(rel);
   }
   const s6FixtureFiles = walk(abs(S6A_FIXTURE_DIR)).map(relOf).sort();
+  const s6bFixtureFiles = S6B_FIXTURE_DIRS.map((dir) => walk(abs(dir)).map(relOf).sort()).flat();
+  const s6bFixtureProblems = S6B_FIXTURE_DIRS.filter((dir, index) =>
+    !deepEqual(s6bFixtureFiles.slice(index * 3, index * 3 + 3), [`${dir}/README.md`, `${dir}/events.ndjson`, `${dir}/expected-facts.json`].sort()));
   checks.push({
-    ok: fixtureBaseline.size >= 13 && fixtureConflicts.length === 0 && fixtureDrift.length === 0 &&
-      deepEqual(s6FixtureFiles, [S6A_EVENTS_REL, S6A_FACTS_REL, S6A_README_REL].sort()),
-    label: "S0–S5 fixture bytes unchanged (never folded into the S6a baseline); fixtures/s6-l2-lines contains exactly the 3 new files",
-    detail: fixtureDrift.length || fixtureConflicts.length
-      ? `drift=${fixtureDrift.join(",")} conflicts=${fixtureConflicts.join(",")}`
-      : `${fixtureBaseline.size} S0–S5 fixtures match; S6a=3 files`,
+    ok: fixtureBaseline.size >= 22 && fixtureConflicts.length === 0 && fixtureDrift.length === 0 &&
+      deepEqual(s6FixtureFiles, [S6A_EVENTS_REL, S6A_FACTS_REL, S6A_README_REL].sort()) &&
+      s6bFixtureProblems.length === 0,
+    label: "S0–S5/S6a/S6b fixture bytes unchanged; fixtures/s6-l2-lines = 3 files; fixtures/s6b-{async,no-debug,loop} = exactly 3 files each",
+    detail: fixtureDrift.length || fixtureConflicts.length || s6bFixtureProblems.length
+      ? `drift=${fixtureDrift.join(",")} conflicts=${fixtureConflicts.join(",")} s6b=${s6bFixtureProblems.join(",")}`
+      : `${fixtureBaseline.size} fixtures match; S6a=3, S6b=9 files`,
   });
 
   if (S6_ONLY) {
@@ -11669,7 +11819,7 @@ function checkS6E() {
     });
   }
 
-  /* -------- S6b boundary: no async/no-debug/loop-fold/budget/perf capability -------- */
+  /* -------- S6b boundary: capability only in the whitelisted S6b files -------- */
   const scopeTrees = [
     "agent/src", "server/collector/src", "server/launcher/src", "frontend/sdk/src",
     "frontend/build-plugin", "workbench/src", `${S5_DEMO_FRONTEND_REL}/src`, `${S6A_DEMO_BACKEND_REL}/src`,
@@ -11678,16 +11828,17 @@ function checkS6E() {
     .map((file) => ({ rel: file.rel, text: stripComments(file.text) }));
   const s6bHits = [];
   for (const file of scopeFiles) {
+    // Async frameworks / continuations stay banned EVERYWHERE (S6b only supports creation-time
+    // inheritance of newly created threads; no whitelist for this marker).
     if (/CompletableFuture|@Async\b|AsyncContext|async_hooks|continuationSpan|三倍重放|replayTimes\s*=\s*3/.test(file.text)) {
       s6bHits.push(`${file.rel} [async-continuation]`);
     }
-    if (file.rel.startsWith("agent/") && /NOT_COLLECTED_NO_DEBUG_INFO|NO_DEBUG_INFO|nodebug:/.test(file.text)) {
-      s6bHits.push(`${file.rel} [no-debug-event]`);
-    }
+    if (s6bMarkerAllowed(file.rel)) continue;
+    if (/\bNO_DEBUG_INFO\b|nodebug_lvt_present/.test(file.text)) s6bHits.push(`${file.rel} [no-debug-event]`);
+    if (/ASYNC_INHERITED|InheritableThreadLocal|originThreadId/.test(file.text)) s6bHits.push(`${file.rel} [async-inherit]`);
+    if (/VALUES_CAPPED|VALUES_TOTAL/.test(file.text)) s6bHits.push(`${file.rel} [loop-fold]`);
   }
-  const claimTexts = [
-    "异步上下文已采集", "无调试信息已处理", "循环折叠已实现", "L2 开销 ≤40%", "全部方法 L2", "L2 已采集",
-  ];
+  const claimTexts = S6_OVERCLAIM_TEXTS;
   for (const tree of [WORKBENCH_DIST_REL, `${S5_DEMO_FRONTEND_REL}/src`, DEMO_DIST_REL]) {
     const files = tree === WORKBENCH_DIST_REL || tree === DEMO_DIST_REL
       ? distTextFiles(tree)
@@ -11698,10 +11849,9 @@ function checkS6E() {
       }
     }
   }
-  if (existsSync(abs("tools/perf/l2-overhead.mjs"))) s6bHits.push("tools/perf/l2-overhead.mjs [L2 overhead gate]");
   checks.push({
     ok: s6bHits.length === 0,
-    label: "no S6b capability or claim: no async continuation, no NOT_COLLECTED_NO_DEBUG_INFO from the agent, no loop folding/sampling budget, no L2 overhead script/40% claim",
+    label: "S6b capability only in the whitelisted files: no async continuation anywhere, no NO_DEBUG_INFO/ASYNC_INHERITED/VALUES_CAPPED marker outside the S6b agent/workbench/demo files, no S6b overclaim",
     detail: s6bHits.slice(0, 6).join(" || ") || `${scopeFiles.length} product files clean`,
   });
 
@@ -11795,6 +11945,7 @@ function checkS6E() {
     "agent/", "server/collector/", "server/launcher/", "frontend/sdk/", "frontend/build-plugin/",
     "demo/buggy-shop-boot-vue/frontend/", "workbench/", "docs/contracts/", "docs/guides/",
     "docs/plans/stages/S5/", "docs/plans/stages/S6/", "fixtures/s5-l1-values/", "fixtures/s6-l2-lines/",
+    "fixtures/s6b-async/", "fixtures/s6b-no-debug/", "fixtures/s6b-loop/",
     "tools/verify/", "tools/perf/",
   ];
   const forbiddenPrefixes = ["schema/", "fixtures/case-a-zero-rows/", "fixtures/s1-walking-skeleton/", "fixtures/s2-zero-row-chain/", "fixtures/s3-frontend-facts/", "fixtures/s4-details/", "docs/plans/stages/S0/"];
@@ -11810,21 +11961,21 @@ function checkS6E() {
   }
   checks.push({
     ok: status.ok && unexpected.length === 0 && forbidden.length === 0,
-    label: "S6a change set within the whitelist (agent/5 demo backend L2 files/workbench/S6 docs+fixtures/tools); schema/S0–S4 fixtures/transport/status untouched",
+    label: "S6b change set within the whitelist (agent/collector/launcher/sdk+build-plugin/demo frontend+demo backend incl. NoDebugService+pom/workbench/S6 docs+fixtures incl. s6b/tools/verify+perf); schema/S0–S4 fixtures/transport/status untouched",
     detail: unexpected.length || forbidden.length
       ? `unexpected=${unexpected.slice(0, 4).join(" | ")} forbidden=${forbidden.slice(0, 4).join(" | ")}`
       : `${status.lines.length} entries within scope`,
   });
   const tagList = runExe("git", ["tag", "--list"], { timeout: 60000 });
   checks.push({
-    ok: tagList.code === 0 && !/(^|\n)\s*s6a?\s*(\n|$)/i.test(tagList.stdout ?? ""),
-    label: "no s6/s6a tag exists (S6 stays partial; S6b + final S6 acceptance come later)",
+    ok: tagList.code === 0 && !/(^|\n)\s*s6(-?b)?\s*(\n|$)/i.test(tagList.stdout ?? ""),
+    label: "no s6/s6b tag exists yet (S6 stays partial until the acceptance checkpoint; tester runs no git write)",
     detail: (tagList.stdout ?? "").trim().split(/\r?\n/).filter(Boolean).slice(0, 5).join(",") || "no tags",
   });
 
   return gate(
     "S6A-E",
-    "regression/scope/cleanup: S0–S5 anchors PASS (full run), S6A_G1_FREEZE 8/8 + S5 freeze 18/18 at S6a hashes, S0–S5 fixture/schema/transport/status bytes, case A/B/L1/replay unchanged, no S6b capability/claims, no secrets/CDN/mirrors, ports/processes/git clean",
+    "regression/scope/cleanup: S0–S5 anchors PASS (full run), S6A_G1_FREEZE 8/8 + S5 freeze 18/18 + S6B_G1_FREEZE 14 (api/event-model superseded by S6b), S0–S6a fixture/schema/transport/status bytes, S6b only in whitelisted files, case A/B/L1/replay unchanged, no secrets/CDN/mirrors, ports/processes/git clean",
     checks,
     repro,
   );

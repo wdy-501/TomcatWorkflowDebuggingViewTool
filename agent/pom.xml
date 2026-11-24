@@ -15,7 +15,7 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Agent</name>
-  <description>S6a -javaagent: Byte Buddy instrumentation (controller/service/mapper/sql/field) plus one dedicated ASM transformer for L2DemoService#reconcileAmount line-level local probes, fail-open NDJSON sender</description>
+  <description>S6b -javaagent: Byte Buddy instrumentation (controller/service/mapper/sql/field) plus dedicated ASM transformers for L2DemoService#reconcileAmount/#reconcileLoop line-level probes and the no-debug NoDebugService#compute enter/exit, fail-open NDJSON sender</description>
 
   <properties>
     <!-- S1 decision: agent bytecode must stay Java 8 (class file major version 52). -->

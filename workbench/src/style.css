@@ -2190,6 +2190,93 @@ code {
   margin: 0;
 }
 
+/* S6b async inheritance: badge/note only for nodes whose flags carry ASYNC_INHERITED. */
+.s6-async-badge {
+  background: rgba(74, 158, 255, 0.14);
+  border: 1px solid rgba(74, 158, 255, 0.6);
+  border-radius: 4px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+}
+
+.s6-async-note {
+  color: var(--text-dim);
+  font-size: 10px;
+  margin: 0;
+}
+
+/* S6b no-debug: grey "not collected" tone (never success/OK). */
+.s6-no-debug {
+  border: 1px dashed #5b6775;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 6px 8px;
+}
+
+.s6-no-debug-badge {
+  align-self: flex-start;
+  border: 1px dashed #5b6775;
+  border-radius: 4px;
+  color: #9aa7b5;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+.s6-no-debug-reason {
+  color: #c8d6e5;
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.s6-no-debug-flag {
+  align-self: flex-start;
+  background: rgba(143, 156, 173, 0.12);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 0 5px;
+}
+
+.s6-no-debug-note {
+  color: var(--text-dim);
+  font-size: 10px;
+  margin: 0;
+}
+
+/* S6b loop fold: visible dropped/total counts; retained samples are not truncated. */
+.s6-fold-note {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(143, 156, 173, 0.14) 0 4px,
+    transparent 4px 8px
+  );
+  border: 1px dashed #5b6775;
+  border-radius: 4px;
+  color: #e3b341;
+  font-family: var(--mono);
+  font-size: 11px;
+  margin: 0;
+  padding: 2px 6px;
+}
+
+.s6-fold-hint {
+  color: var(--text-dim);
+  font-size: 10px;
+  margin: 0;
+}
+
 .s5-values__list {
   display: flex;
   flex-direction: column;

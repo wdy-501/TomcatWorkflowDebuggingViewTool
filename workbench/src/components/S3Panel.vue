@@ -15,7 +15,7 @@ import {
 import { useS3Store, type S3Error, type S3Tab } from "../stores/s3";
 import S4DetailPanel from "./S4DetailPanel.vue";
 import { groupNodesByNodeKey } from "../s4/derive";
-import { S6A_BANNER } from "../s6/l2";
+import { S6_BANNER } from "../s6/canonical";
 
 const s3 = useS3Store();
 
@@ -790,7 +790,7 @@ function notCollectedReason(status: string): string {
     return "事件丢失（未到达 collector；检查 SDK/agent 与网络）";
   }
   if (status === "NOT_COLLECTED_NO_DEBUG_INFO") {
-    return "缺少调试信息（后端 NOT_COLLECTED_NO_DEBUG_INFO；S5 manifest 只覆盖前端函数/文件/行号，局部变量属 L2/S6）";
+    return "缺少调试信息（NoDebugService#compute 无 LocalVariableTable；只证明调用与返回值，不猜变量名/行号）";
   }
   return "该事实未采集（原因未提供；检查采集开关与连接）";
 }
@@ -895,7 +895,7 @@ const STATUS_LEGEND = [
     status: "NOT_COLLECTED_*",
     tone: "notcollected",
     hint: "灰虚线 + reason（为什么没采到/怎么开启）",
-    reason: "如 NOT_COLLECTED_NO_DEBUG_INFO → 后端缺少调试信息（S5 manifest 只覆盖前端函数/文件/行号，局部变量属 L2/S6）",
+    reason: "如 NOT_COLLECTED_NO_DEBUG_INFO → NoDebugService#compute 无 LocalVariableTable（灰色状态 + reason，未采集不是成功）",
   },
   { status: "TRUNCATED", tone: "truncated", hint: "条纹 · 已截断/已折叠", reason: null },
   { status: "REDACTED", tone: "redacted", hint: "锁形 · 值级已脱敏", reason: null },
@@ -1036,7 +1036,7 @@ function rawTimeTitle(node: GraphNode): string {
         <p class="s3-panel__note">
           点击/控件/请求/DOM 事实来自 collector 的 requests / graph 只读查询；状态语义区分
           OK / RETURNED_FALSE / THREW / NOT_COLLECTED_* / TRUNCATED / REDACTED。
-          {{ S6A_BANNER }} · 非实时（无 SSE/WS）。
+          {{ S6_BANNER }} · 非实时（无 SSE/WS）。
         </p>
       </div>
       <span class="s3-panel__badge">S3 · GET requests / graph / replay</span>
@@ -1272,7 +1272,7 @@ function rawTimeTitle(node: GraphNode): string {
                     <span
                       v-if="groupCount(row.node.nodeKey) >= 2"
                       class="s4-xn"
-                      :title="`该 nodeKey 在所选 trace 内已采集 ${groupCount(row.node.nodeKey)} 次（前端 ×N 聚合；运行时 ×3 见 L2DemoService#reconcileAmount）`"
+                      :title="`该 nodeKey 在所选 trace 内已采集 ${groupCount(row.node.nodeKey)} 次（前端 ×N 聚合；运行时 ×3 见 L2DemoService#reconcileAmount / reconcileAsync）`"
                     >×{{ groupCount(row.node.nodeKey) }}</span>
                     <span v-if="selectedSpanId === row.node.spanId" class="s4-node-selected">节点详情已打开</span>
                     <span v-if="statusHint(row.node.status)" class="s3-node__hint">
@@ -1463,7 +1463,7 @@ function rawTimeTitle(node: GraphNode): string {
       本板只读：GET requests / graph / replay。回放不会重发请求、不写数据库、不调用 demo、不执行程序；
       时间轴按所选 trace 的 min(startNs) 归一化显示，API 参数仍是原始 epoch-ns。
       S4 节点详情 / ×N 分组 / 缺口清单均为已采集 graph 的只读前端派生；
-      {{ S6A_BANNER }}、无图库/SSE/WS。S0/S1/S2 面板保留在下方折叠区。
+      {{ S6_BANNER }}、无图库/SSE/WS。S0/S1/S2 面板保留在下方折叠区。
     </p>
   </section>
 </template>

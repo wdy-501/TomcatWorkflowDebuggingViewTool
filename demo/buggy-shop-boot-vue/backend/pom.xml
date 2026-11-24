@@ -51,6 +51,66 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
+      <!--
+        S6b no-debug build (docs/contracts/api.v1.md Appendix G, event-model.v1.md 4.4.9):
+        NoDebugService is compiled normally above, then recompiled here with javac debug="false"
+        (-g:none: NO LocalVariableTable / LineNumberTable / SourceFile) overwriting ONLY its class
+        file in target/classes. process-classes runs after compile and before package, so the
+        stripped class is what ends up in the Boot jar. The classpath keeps @Service intact.
+        JDK8 reports java.home=<jdk>/jre (no javac there), so the JDK bin is resolved explicitly.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>no-debug-service</id>
+            <phase>process-classes</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <condition property="tb.javac.home" value="${java.home}">
+                  <available file="${java.home}/bin/javac.exe"/>
+                </condition>
+                <condition property="tb.javac.home" value="${java.home}/..">
+                  <and>
+                    <not>
+                      <isset property="tb.javac.home"/>
+                    </not>
+                    <available file="${java.home}/../bin/javac.exe"/>
+                  </and>
+                </condition>
+                <condition property="tb.javac.home" value="${env.JAVA_HOME}">
+                  <and>
+                    <not>
+                      <isset property="tb.javac.home"/>
+                    </not>
+                    <isset property="env.JAVA_HOME"/>
+                  </and>
+                </condition>
+                <!-- Ant's javac skips "up to date" targets (class newer than source); remove ONLY
+                     this class so the stripped version is always rebuilt in this phase. -->
+                <delete file="${project.build.outputDirectory}/com/example/shop/service/NoDebugService.class"/>
+                <javac srcdir="${project.build.sourceDirectory}"
+                       destdir="${project.build.outputDirectory}"
+                       includes="com/example/shop/service/NoDebugService.java"
+                       debug="false"
+                       includeantruntime="false"
+                       source="1.8"
+                       target="1.8"
+                       encoding="UTF-8"
+                       fork="true"
+                       executable="${tb.javac.home}/bin/javac.exe">
+                  <classpath refid="maven.compile.classpath"/>
+                </javac>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 </project>

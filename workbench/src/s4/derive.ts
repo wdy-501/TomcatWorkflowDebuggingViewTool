@@ -7,17 +7,17 @@
  * the workbench only groups spans the collector already returned by `nodeKey`.
  */
 import type { GraphNode } from "../api";
+import { S6_XN_NOTE } from "../s6/canonical";
 
 export const MISSING = "未采集";
 export const NOT_COLLECTED_NO_REASON = "未采集（无 reason）";
 export const FETCH_WITHOUT_BACKEND_TEXT = "后端未采集/未关联";
 export const GAP_EMPTY_TEXT = "未发现缺口（仅基于已采集数据；未采集项不会显示为成功）";
-/** Static honesty line required under #s4-invocations / #s4-gaps (S6a canonical ×N note). */
-export const RUNTIME_X3_NOTE =
-  "×N 为已采集 span 的前端聚合；运行时 ×3 已在 L2DemoService#reconcileAmount 演示；其他方法无运行时 ×3";
+/** Static honesty line required under #s4-invocations / #s4-gaps (canonical S6 ×N note). */
+export const RUNTIME_X3_NOTE = S6_XN_NOTE;
 /** Visible label for the ×N demo; the fixture is UI/test data only. */
 export const XN_DEMO_LABEL =
-  "×N 聚合演示（已采集 span 前端聚合；运行时 ×3 见 L2DemoService#reconcileAmount）";
+  "×N 聚合演示（已采集 span 前端聚合；运行时 ×3 见 L2DemoService#reconcileAmount / reconcileAsync）";
 
 const FRONTEND_KINDS = new Set(["ui_event", "js_method", "fetch", "render"]);
 

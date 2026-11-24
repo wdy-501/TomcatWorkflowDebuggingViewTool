@@ -11,9 +11,10 @@ import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
 
 /**
- * S6a java agent: instruments the S2 four-point chain, the three S5 advice points and the S6a
- * reconcile controller (8 advice / 5 Byte Buddy types) plus ONE dedicated ASM transformer for
- * line-level probes in {@code L2DemoService#reconcileAmount}.
+ * S6b java agent: instruments the S2 four-point chain, the three S5 advice points, the S6a
+ * reconcile controller and the three S6b demo controllers (11 advice / 5 Byte Buddy types) plus TWO
+ * dedicated ASM transformers (line-level probes in {@code L2DemoService#reconcileAmount} /
+ * {@code #reconcileLoop}; enter/exit only in the no-debug {@code NoDebugService#compute}).
  *
  * <pre>
  * controller  com.example.shop.controller.OrderController#cancel(long)               -> root span
@@ -26,10 +27,16 @@ import net.bytebuddy.utility.JavaModule;
  * field       com.example.shop.model.Order#setAmount(double)                          -> no span (S5, appends amount 100->0)
  * controller  com.example.shop.controller.OrderController#reconcile(long)             -> span (S6a, no values)
  * service     com.example.shop.service.L2DemoService#reconcileAmount(long,double,int)  -> span (S6a ASM, line-level values, flag L2)
+ * controller  com.example.shop.controller.OrderController#reconcileAsync(long)         -> span (S6b, no values)
+ * controller  com.example.shop.controller.OrderController#noDebug(long)                -> span (S6b, no values)
+ * controller  com.example.shop.controller.OrderController#reconcileLoop(long,int)      -> span (S6b, no values)
+ * service     com.example.shop.service.L2DemoService#reconcileLoop(long,int)           -> span (S6b ASM, folded values, flag L2)
+ * service     com.example.shop.service.NoDebugService#compute(double)                  -> span (S6b ASM, no LVT: NOT_COLLECTED_NO_DEBUG_INFO)
  * </pre>
  *
- * <p>The last type is instrumented by {@link L2ClassFileTransformer} (ASM, exact class match) and
- * is explicitly ignored by Byte Buddy, so no class is ever touched by both.</p>
+ * <p>The two service classes are instrumented by dedicated ASM transformers
+ * ({@link L2ClassFileTransformer}, {@link NoDebugClassFileTransformer}; exact class match) and are
+ * explicitly ignored by Byte Buddy, so no class is ever touched by both.</p>
  *
  * <p>Nothing else is instrumented. The agent is fail-open: every {@code Throwable} is swallowed and
  * the host application is never blocked or broken.</p>
@@ -47,6 +54,8 @@ public final class TraceAgent {
     static final String ORDER_TYPE = "com.example.shop.model.Order";
     /** S6a: the single class handled by the dedicated ASM transformer; Byte Buddy ignores it. */
     static final String L2_SERVICE_TYPE = "com.example.shop.service.L2DemoService";
+    /** S6b: no-debug class handled by its own ASM transformer; Byte Buddy ignores it. */
+    static final String NO_DEBUG_SERVICE_TYPE = "com.example.shop.service.NoDebugService";
 
     private TraceAgent() {
         // utility class, never instantiated
@@ -66,10 +75,14 @@ public final class TraceAgent {
             install(inst);
             // S4 handshake: daemon thread, <=3 attempts, 1s timeouts, fail-open (never blocks).
             AgentHello.start(config);
-            log("premain installed: targets=" + CONTROLLER_TYPE + "#cancel(long)/#previewDiscount(long,double,String,String)/#reconcile(long), "
+            log("premain installed: targets=" + CONTROLLER_TYPE
+                    + "#cancel(long)/#previewDiscount(long,double,String,String)/#reconcile(long)"
+                    + "/#reconcileAsync(long)/#noDebug(long)/#reconcileLoop(long,int), "
                     + SERVICE_TYPE + "#cancel(long)/#previewDiscount(long,double,String,String), "
                     + MAPPER_PROXY_TYPE + "#invoke, " + STATEMENT_HANDLER_TYPE + "#update, "
-                    + ORDER_TYPE + "#setAmount(double), " + L2_SERVICE_TYPE + "#reconcileAmount (ASM); ingestUrl="
+                    + ORDER_TYPE + "#setAmount(double), " + L2_SERVICE_TYPE
+                    + "#reconcileAmount|#reconcileLoop (ASM), " + NO_DEBUG_SERVICE_TYPE
+                    + "#compute (ASM, no-debug); ingestUrl="
                     + config.ingestUrl() + ", sessionId=" + config.sessionId());
         } catch (Throwable t) {
             log("premain failed, continuing without instrumentation (fail-open): " + t);
@@ -85,11 +98,21 @@ public final class TraceAgent {
         } catch (Throwable t) {
             log("l2_transformer_register_failed (fail-open): " + t.getClass().getName());
         }
+        // S6b: dedicated exact-class transformer for the no-debug class (no LVT probe; enter/exit
+        // only). Byte Buddy never touches this type (explicit ignore below). Errors return the
+        // original bytes (fail-open); an LVT present in the built class is logged and NOT
+        // instrumented (build fallback -> gate must fail).
+        try {
+            inst.addTransformer(new NoDebugClassFileTransformer(), false);
+        } catch (Throwable t) {
+            log("nodebug_transformer_register_failed (fail-open): " + t.getClass().getName());
+        }
         AgentBuilder builder = new AgentBuilder.Default()
                 .disableClassFormatChanges()
                 .with(AgentBuilder.RedefinitionStrategy.DISABLED)
                 // org.apache.ibatis.* MUST stay instrumentable (mapper + sql points); only JDK,
-                // Spring, Byte Buddy, the agent itself and the ASM-only L2 type are excluded.
+                // Spring, Byte Buddy, the agent itself and the two ASM-only service types are
+                // excluded.
                 .ignore(ElementMatchers.nameStartsWith("java.")
                         .or(ElementMatchers.nameStartsWith("jdk."))
                         .or(ElementMatchers.nameStartsWith("sun."))
@@ -98,6 +121,7 @@ public final class TraceAgent {
                         .or(ElementMatchers.nameStartsWith("net.bytebuddy."))
                         .or(ElementMatchers.nameStartsWith("io.traceboard.agent."))
                         .or(ElementMatchers.named(L2_SERVICE_TYPE))
+                        .or(ElementMatchers.named(NO_DEBUG_SERVICE_TYPE))
                         .or(ElementMatchers.isSynthetic()))
                 .type(ElementMatchers.named(CONTROLLER_TYPE))
                 .transform(advice(ControllerAdvice.class,
@@ -107,6 +131,13 @@ public final class TraceAgent {
                                 long.class, double.class, String.class, String.class))))
                 .transform(advice(ReconcileControllerAdvice.class,
                         ElementMatchers.named("reconcile").and(ElementMatchers.takesArguments(long.class))))
+                .transform(advice(AsyncControllerAdvice.class,
+                        ElementMatchers.named("reconcileAsync").and(ElementMatchers.takesArguments(long.class))))
+                .transform(advice(NoDebugControllerAdvice.class,
+                        ElementMatchers.named("noDebug").and(ElementMatchers.takesArguments(long.class))))
+                .transform(advice(LoopControllerAdvice.class,
+                        ElementMatchers.named("reconcileLoop").and(ElementMatchers.takesArguments(
+                                long.class, int.class))))
                 .type(ElementMatchers.named(SERVICE_TYPE))
                 .transform(advice(ServiceAdvice.class,
                         ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))

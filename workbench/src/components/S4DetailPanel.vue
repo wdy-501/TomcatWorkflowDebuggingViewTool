@@ -6,13 +6,18 @@
  * the SQL sideEffects ticket (missing = 未采集, never 0), the UI effect ticket
  * (ui_effect/render/callback listed per trace, causality not inferred), the
  * per-invocation ×N list/selector, the S5 L1 Values section (param/field/
- * return, redaction/truncation badges, 行号未采集/第 i/N 次), the S6a L2 rows
+ * return, redaction/truncation badges, 行号未采集/第 i/N 次), the S6 L2 rows
  * (L2 badge/note, `行号 N` + `100 → 0` for `local` kinds, 值变化 on the
- * invocation whose local value changed) and the gap list (F > N > R).
+ * invocation whose local value changed), the S6b badges
+ * (`ASYNC_INHERITED` → 异步继承, no-debug status → 无调试信息 + event reason,
+ * fold counts → 已折叠 N 次) and the gap list (F > N > R).
  *
  * S5 reads `values` straight from the graph node; it never decodes `.map`,
- * never recomputes redaction/truncation. S6a L2 claims follow the `L2` flag
- * only (never the nodeKey); non-L2 nodes keep the S5 wording verbatim.
+ * never recomputes redaction/truncation. S6 L2 claims follow the `L2` flag
+ * only (never the nodeKey); the async badge follows `ASYNC_INHERITED` only;
+ * the no-debug badge follows the exact `NOT_COLLECTED_NO_DEBUG_INFO` status
+ * only; the fold note follows VALUES_CAPPED/VALUES_TOTAL only. Non-L2 nodes
+ * keep the S5 wording verbatim.
  */
 import { computed, ref } from "vue";
 import type { GraphNode } from "../api";
@@ -49,12 +54,27 @@ import {
 } from "../s5/values";
 import {
   L2_BADGE_TEXT,
-  S6A_L2_NOTE,
   VALUE_CHANGE_TEXT,
   invocationDiffNodes,
   isL2Node,
   isValueChange,
 } from "../s6/l2";
+import {
+  ASYNC_BADGE_TEXT,
+  ASYNC_LIMIT_NOTE,
+  hasAsyncInherited,
+} from "../s6/async";
+import {
+  NO_DEBUG_BADGE_TEXT,
+  isNoDebugNode,
+  noDebugReason,
+} from "../s6/no-debug";
+import { FOLD_NOTE_TITLE, foldNote } from "../s6/fold";
+import {
+  S6_L2_NOTE,
+  S6_NO_DEBUG_NOTE,
+  hasNoDebugFlag,
+} from "../s6/canonical";
 
 const props = defineProps<{
   nodes: GraphNode[];
@@ -153,6 +173,31 @@ const l2Node = computed<boolean>(() =>
   selectedNode.value !== null && isL2Node(selectedNode.value)
 );
 
+/** S6b: async badge follows `ASYNC_INHERITED` only (never nodeKey/thread). */
+const asyncNode = computed<boolean>(() =>
+  selectedNode.value !== null && hasAsyncInherited(selectedNode.value)
+);
+
+/** S6b: no-debug block follows the exact NOT_COLLECTED_NO_DEBUG_INFO status. */
+const noDebugNode = computed<boolean>(() =>
+  selectedNode.value !== null && isNoDebugNode(selectedNode.value)
+);
+
+/** Verbatim event reason; a missing reason renders 未采集（无 reason）. */
+const noDebugReasonText = computed<string>(() =>
+  selectedNode.value === null ? "" : noDebugReason(selectedNode.value)
+);
+
+/** Advisory `NO_DEBUG_INFO` flag chip; not a success marker. */
+const noDebugFlag = computed<boolean>(() =>
+  selectedNode.value !== null && hasNoDebugFlag(selectedNode.value)
+);
+
+/** S6b fold note: `已折叠 N 次（VALUES_CAPPED=N；共 M 次）`, null without flags. */
+const foldNoteText = computed<string | null>(() =>
+  selectedNode.value === null ? null : foldNote(selectedNode.value)
+);
+
 /** S5 rows verbatim in collected order (param → field → return); null/[] = empty. */
 const values = computed(() => (selectedNode.value === null ? [] : valueRows(selectedNode.value)));
 
@@ -223,7 +268,7 @@ function onClose(): void {
         class="s4-group-badge__item"
         :class="{ 's4-group-badge__item--active': selectedNode !== null && selectedNode.nodeKey === group.nodeKey }"
         :data-node-key="group.nodeKey"
-        :title="`${group.count} 次同 nodeKey 调用（前端聚合显示；运行时 ×3 见 L2DemoService#reconcileAmount）`"
+        :title="`${group.count} 次同 nodeKey 调用（前端聚合显示；运行时 ×3 见 L2DemoService#reconcileAmount / reconcileAsync）`"
         @click="selectGroup(group)"
       >
         <span class="s4-xn">{{ group.badge }}</span>
@@ -245,6 +290,30 @@ function onClose(): void {
           {{ statusMeta(selectedNode.status).label }}
         </span>
         <span class="s4-detail__reason">reason：{{ reasonText(selectedNode) }}</span>
+      </div>
+
+      <div
+        v-if="noDebugNode"
+        id="s6-no-debug"
+        class="s6-no-debug"
+        role="note"
+        aria-label="无调试信息（未采集，不是成功）"
+      >
+        <span
+          id="s6-no-debug-badge"
+          class="s6-no-debug-badge"
+          title="状态 NOT_COLLECTED_NO_DEBUG_INFO：灰色未采集状态，不是 OK/成功"
+        >
+          {{ NO_DEBUG_BADGE_TEXT }}
+        </span>
+        <span id="s6-no-debug-reason" class="s6-no-debug-reason">
+          reason：{{ noDebugReasonText }}
+        </span>
+        <span v-if="noDebugFlag" class="s6-no-debug-flag">NO_DEBUG_INFO</span>
+        <p class="s6-no-debug-note">{{ S6_NO_DEBUG_NOTE }}</p>
+        <p class="s6-no-debug-note">
+          该节点的 values 与行号均为未采集（不是 0）：无 LocalVariableTable 时不猜变量名/行号。
+        </p>
       </div>
 
       <dl class="s4-facts">
@@ -311,13 +380,28 @@ function onClose(): void {
             v-if="l2Node"
             id="s6-l2-badge"
             class="s6-l2-badge"
-            title="该节点 flags 含 L2：S6a LVT 行级局部变量（仅 L2DemoService#reconcileAmount）"
+            title="该节点 flags 含 L2：LVT 行级局部变量（S6 演示方法 reconcileAmount / reconcileLoop）"
           >
             {{ L2_BADGE_TEXT }}
           </span>
+          <span
+            v-if="asyncNode"
+            id="s6-async-badge"
+            class="s6-async-badge"
+            title="该节点 flags 含 ASYNC_INHERITED：上下文来自创建时继承的父帧且线程不同于父帧创建线程；不证明 @Async/CompletableFuture 或任务边界传播"
+          >
+            {{ ASYNC_BADGE_TEXT }}
+          </span>
         </header>
-        <p v-if="l2Node" id="s6-l2-note" class="s6-l2-note">{{ S6A_L2_NOTE }}</p>
+        <p v-if="l2Node" id="s6-l2-note" class="s6-l2-note">{{ S6_L2_NOTE }}</p>
         <p v-else id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
+        <p v-if="asyncNode" id="s6-async-note" class="s6-async-note">{{ ASYNC_LIMIT_NOTE }}</p>
+        <p v-if="foldNoteText !== null" id="s6-fold-note" class="s6-fold-note" :title="FOLD_NOTE_TITLE">
+          {{ foldNoteText }}
+        </p>
+        <p v-if="foldNoteText !== null" class="s6-fold-hint">
+          事件状态 TRUNCATED 表示列表被折叠（不是失败/异常）；保留项为首/尾/中段样本，from → to 原样不重算、单值未被截断。
+        </p>
         <p class="s4-detail__hint">
           字段写入/局部变量行显示 old → new（例如 100 → 0，高亮）；参数/返回行显示 to。
           值行序号来自 values.invocation；S4 ×N 组序号来自同 nodeKey 的已采集 span 分组，两者不混用。

@@ -1,6 +1,6 @@
 # 事件模型 v1（event-model.v1）
 
-> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S3 增补：2026-11-24；S4 增补：2026-11-24；S5 增补：2026-11-27；S6a 增补：2026-11-23）｜作者：plan-writer（S0）
+> 状态：DRAFT → G1 冻结｜版本：v1｜日期：2026-11-23（S3 增补：2026-11-24；S4 增补：2026-11-24；S5 增补：2026-11-27；S6a 增补：2026-11-23；S6b 增补：2026-11-24）｜作者：plan-writer（S0）
 > 变更记录：**2026-11-23 S1 增补（G1 第 1 轮返工）**——§2/§5/§7/§9/§11 记录“游离后端根（isolated backend request）”这一**唯一例外**
 >   （`parentSpanId=null` + `kind=controller` + `confidence=LOST` + 合成 `rootEventId=click_lost_<spanId>` + flag `LOST_BACKEND`）。
 >   **仅文档修订：schema 与 fixture 字节未变。**
@@ -24,6 +24,13 @@
 >   新增 flag `L2`（仅该 service span；§7）。**`kind=local` 不得出现在任何未插桩方法上**；异步续体/线程池/`CompletableFuture`/`@Async`、
 >   `NOT_COLLECTED_NO_DEBUG_INFO` 事件/reason/UI、无 LVT 的降级事件、行级字段写入、对象深采、多方法选择、循环折叠/采样/丢弃预算、
 >   L2 开销门槛仍属 **S6b**，S6a 不产生也不宣称。**schema 字节不变**（`local`/`line`/`invocation` 自 v1 起即合法）。
+>   **2026-11-24 S6b 增补（仅语义，无字段/枚举/约束变更）**：①异步**创建时**继承（§4.4.8、§13.1）——
+>   L2/无调试子 span 所在线程 ≠ 父帧创建线程时 flag `ASYNC_INHERITED`（§7），`values`/`invocation` 形状不变；
+>   ②无调试信息降级（§4.4.9）——`status=NOT_COLLECTED_NO_DEBUG_INFO` + `reason="LocalVariableTable missing"` + flag `NO_DEBUG_INFO`、**无 `values`**、无行号/变量名；
+>   ③循环值折叠（§4.4.10）——单 span 保留上限 20（前 6 + 后 6 + 中段样本，坏值 `to=0` 优先），事件 `status=TRUNCATED` +
+>   `VALUES_CAPPED=<n>` + `VALUES_TOTAL=<t>`，保留项 `truncated=false`，**无静默丢弃**。**仍不做**：行级字段写入（`kind=field`+行号）、
+>   对象深采、多方法 L2、`CompletableFuture`/`@Async`/框架续体、长生命周期线程池自动传播、跨服务。**schema 字节不变**
+>   （`ASYNC_INHERITED`/`NO_DEBUG_INFO`/`VALUES_TOTAL=<n>` 只是既有 `flags[]` 字符串；`NOT_COLLECTED_NO_DEBUG_INFO`/`TRUNCATED`/`reason`/`values` 自 v1 起合法）。
 > 机器可校验版本：`schema/traceboard.event.v1.json`（JSON Schema 2020-12，`$id=urn:traceboard:schema:event:v1`）
 > 语义来源：主计划 §13.4 / §2.3 / §8.3 / §9.2；分发书 §4.1。本文与 schema 冲突时以 schema 为机器事实、以本文为语义解释。
 
@@ -258,6 +265,50 @@
   S6a **不**产生 `NOT_COLLECTED_NO_DEBUG_INFO` 事件/reason/UI（S6b）。
 - L2 span 上的 `param`/`field`/`return` 值项、行级字段写入、对象深采、多方法 L2、异步续体、循环折叠、采样/丢弃预算与 L2 开销门槛**均属 S6b**，S6a 出现即越界。
 
+#### 4.4.8 S6b 语义：异步**创建时**继承与 `ASYNC_INHERITED`
+
+| 项 | S6b 精确口径 |
+|---|---|
+| 上下文 | `SpanContext` 栈改为 `InheritableThreadLocal<ArrayDeque<Frame>>`；`childValue` 返回**深拷贝**帧栈（不可变字段原值；`values`/`extraFlags`/`l2Previous`/`l2Values`/`childCallCounts` 独立副本），子线程修改不回流请求线程 |
+| 传播时机 | **仅在线程创建时**；已存在线程/长生命周期池（启动期创建）**不继承**任何请求上下文（该场景计 `l2_no_parent`、**不发假 span**）；复用旧 worker 可能携带过期 trace（S6 不解决，如实记录） |
+| demo | `L2DemoService#reconcileAsync(long)`：请求线程内 per-request `Executors.newFixedThreadPool(1)`（**单 worker**；固定 3 线程会让每次 `invocation` 都从 1 开始，禁止）；顺序 submit 3 次 `reconcileAmount(id,100.0,i)`、`Future.get()` join、`finally` shutdown |
+| 线程事实 | 3 个 service span 的 `thread.id` 相同且 **≠ controller 的 `thread.id`**；父 spanId 是 controller 的 spanId；`traceId`/`rootEventId`/`confidence` 原值继承 |
+| flag | 帧记录 `originThreadId`（创建线程 id，继承副本保留）；L2/无调试子 span 的 enter 若 `currentThread.id != parent.originThreadId` → `flags` 追加 `ASYNC_INHERITED`（§7）。**同线程** span 不得带该 flag |
+| 值语义 | 与同线程调用一致：`kind=local`、`invocation` 1/2/3（在**继承副本的 controller 帧**内计数）、`return` 100/0/100、`values` 1/2/1、第 2 次 `100 → 0`；`values` 不因跨线程改变形状 |
+| 不宣称 | `ASYNC_INHERITED` 只证明“上下文来自继承的父帧”，**不**证明 `@Async`/`CompletableFuture`/线程池任务边界/框架续体传播；S6b 不使用 `kind=async`、不产生跨服务事件 |
+
+- 子线程退出只弹本线程副本的 L2 帧；**不得**把继承副本的 controller 帧 emit 成第二棵根；原请求线程的栈不受子线程修改。
+- per-request 建池有线程创建开销；这是 demo 为保证“父帧已打开 + 单 worker 顺序”的取舍，不代表生产方案（限制写入 `api.v1.md` §10.11 与 README）。
+
+#### 4.4.9 S6b 语义：无调试信息降级（`NoDebugService#compute`）
+
+| 项 | S6b 精确口径 |
+|---|---|
+| 范围 | 仅 `com.example.shop.service.NoDebugService#compute(double)` 一个方法；该类由 Maven antrun `javac debug="false"`（`-g:none`）在 `process-classes` 重编，**无 `LocalVariableTable`/`LineNumberTable`/`SourceFile`** |
+| 状态 | 正常返回 `status=NOT_COLLECTED_NO_DEBUG_INFO`（灰虚线，**不是 `OK`/成功**）；异常退出 `status=THREW`、`return=null`、仍无 values |
+| `reason` | 逐字 `LocalVariableTable missing`（非空，满足 `NOT_COLLECTED*` 的 schema 强制） |
+| flag | `NO_DEBUG_INFO`（另含 `S2_ZERO_ROW_CHAIN`；跨线程时再按 §4.4.8 追加 `ASYNC_INHERITED`） |
+| `values` | **键缺失**（不得写 `[]`、不得写占位值/猜名）；**没有行探针**、不出现 `kind=local`/`param`/`field`/`return` 值项 |
+| `return` | 真实方法返回值（demo 固定 `{"type":"double","value":200}`），不编造 |
+| `source` | 缺失或 `line=null`（无调试信息不得伪造行号；`SourceFile` 缺失时 `source` 整体可省略） |
+| 构建回退 | 若该类仍有 LVT（构建回退/被后续 compile 覆盖）→ transformer 记 `nodebug_lvt_present`、返回原字节、**不插桩**；S6B-B 必须 **FAIL**（不允许“有 LVT 就当普通 L2/猜名”） |
+| 可见性 | 工作台灰色显示 `status` + 事件 `reason`（`#s6-no-debug-badge`/`#s6-no-debug-reason`），不得显示为成功；报告/README 写“无调试信息方法只证明调用与返回值，给不出局部变量名/行号” |
+
+#### 4.4.10 S6b 语义：循环值折叠（`TRUNCATED` + `VALUES_CAPPED`/`VALUES_TOTAL`）
+
+| 项 | S6b 精确口径 |
+|---|---|
+| 触发 | `L2DemoService#reconcileLoop(long,int)`（`times` 默认 100、clamp 1..200）单 span 观测约 **102** 次值变化（含 `null→0` 基线、`50→0` 坏值、`0→1` 恢复、末尾 `49→50`）；项数 > 20 才折叠 |
+| 上限 | `L2Values` 单 span 保留 **20** 项（严于既有 ≤30 项/schema ≤512 项预算；L1 的 30 项预算不动） |
+| 保留规则 | 前 **6** + 后 **6** + 中段均匀样本（补足 20）；**优先保留第一条非空 `from` 且 `to=0` 的坏值**（若与样本重合则占用该样本名额）；保留项按**原观测顺序**，不重排 |
+| 不重算 | 保留项的 `from`/`to`/`line` 原样（中间被丢弃项的 `from/to` 链不被拼接/平滑）；`invocation` 为该 span 的调用序号（demo 单次 → 1） |
+| 计数 | `VALUES_TOTAL=<t>` = 折叠前真实项数（含基线）；`VALUES_CAPPED=<d>` = `t - 20`（`d>0`）；两者**同时**出现，缺一即契约违规 |
+| 事件状态 | 发生折叠时 `status=TRUNCATED`（事件级标记）；保留项 `truncated=false`（真值未截断，列表被折叠）；未折叠（`times≤~20`）时 `status=OK` 且**无** cap flag |
+| 无静默丢弃 | 任何丢弃必须由 `status=TRUNCATED` + `VALUES_CAPPED`/`VALUES_TOTAL` 可见；`reconcileAmount`（≤2 项）与其它 S6a span 的 1/2/1 逐字不变、`OK`、无 cap |
+| 单 span 字节 | 仍受 ≤64KB 旧上限约束；20 项上限使 demo 远低于该值；折叠不改变 `values` 之外的字段（`return` 仍是真实 50） |
+
+- 工作台“已折叠 N 次”中的 N = `VALUES_CAPPED` 值、总数 = `VALUES_TOTAL`；两者必须同屏（`#s6-fold-note`，逐字见 `api.v1.md` §10.11）；无 flag 时不得显示折叠文案。
+
 ### 4.5 `sideEffects[]`（v1 仅 SQL）
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -319,12 +370,18 @@
 | `OBSERVE_MS=<n>` | click 根实际的观察窗毫秒数（正常 1500；`pagehide` 提前关闭时为实际值）；只说明窗口，不是 `durNs` | S3 使用（SDK 写 click 根） |
 | `L1` | 该 span 走 **L1** 值级采集（参数/字段写入/返回摘要；**不是** L2、不含局部变量） | S5 使用（agent 写 `OrderService#previewDiscount`） |
 | `SOURCE_MAPPED` | 该事件的 `source` 来自**构建 manifest** 而非 `.map` 解码（函数/文件/原始行号）；只说明来源，不承载关联语义 | S5 使用（SDK 写 manifest 命中的 `js_method`/click 根） |
-| `VALUES_CAPPED=<n>` | 该 span 的值项因预算被截掉 `n` 项（`n`>0）；可见的丢弃计数 | S5 使用（demo 不触发） |
+| `VALUES_CAPPED=<n>` | 该 span 的值项因预算被截掉 `n` 项（`n`>0）；可见的丢弃计数 | S5 使用（demo 不触发）；**S6b** 折叠时 `n=`丢弃数（与 `VALUES_TOTAL` 成对，见 §4.4.10） |
 | `L1_SKIPPED=<n>` | 该 span 有 `n` 个非标量/不可读参数或返回值被跳过（未采集） | S5 使用（demo 不触发） |
+| `ASYNC_INHERITED` | 该 span 的上下文来自**继承的父帧**，且本 span 所在线程 ≠ 父帧创建线程（仅“线程创建时”继承，见 §4.4.8/§13.1） | S6b 使用（agent 写异步 L2/no-debug 子 span） |
+| `NO_DEBUG_INFO` | 该 span 的方法字节码无调试信息（无 `LocalVariableTable`），只证明调用与返回值，给不出变量名/行号 | S6b 使用（`NoDebugService#compute`，见 §4.4.9） |
+| `VALUES_TOTAL=<n>` | 该 span 折叠前的真实值项数（`n>20`；与 `VALUES_CAPPED` 同时出现） | S6b 使用（`reconcileLoop`，见 §4.4.10） |
 
 - flag 是**提示**，不改变 `status`；未知 flag 读取方必须忽略而非报错（但 schema 只允许上述字符集）。
 - `L2` 不再是纯预留：S6a 起只写**真实做了** LVT 行级采集的 span（当前仅 `L2DemoService#reconcileAmount`）；
   未插桩方法不得带 `L2`，也不得因写了 `L1` 就暗示 L2 可用（异步/无调试/折叠/预算由 S6b 扩展）。
+- **S6b 扩展**：`L2` 覆盖 `L2DemoService#reconcileAmount` 与 `L2DemoService#reconcileLoop` 两个 demo 方法（仍不是“多方法/任意方法”能力）；
+  `ASYNC_INHERITED` 只写真实跨线程继承的子 span（**同线程不得写**）；`VALUES_CAPPED` 与 `VALUES_TOTAL` 必须成对用于折叠（`status=TRUNCATED` 是事件级状态，不是 flag）；
+  `NO_DEBUG_INFO` 只写 `NOT_COLLECTED_NO_DEBUG_INFO` 的 span；所有 flag 仍是**提示**，读取方对未知 flag 忽略而非报错。
 - `SOURCE_MAPPED`/`values` 只在**该事件自身**上说明来源；不从父节点继承，也不按 `nodeKey` 传播。
 - `SKELETON`/`S1_ONE_METHOD`/`S1_WALKING_SKELETON` 是本阶段标记：读取方一律按“未知 flag 忽略”规则处理，不得据此推断关联或能力。
 - 静默丢弃不可接受：任何丢弃都必须以 `DROP_COUNT` 或 `NOT_COLLECTED_LOST + reason` 出现（主计划 §9.2）。
@@ -361,6 +418,11 @@
 **S6a 边界**：S6a 起 `values[]` 可在**仅** `L2DemoService#reconcileAmount` 的 service span 上使用 `kind=local`（§4.4.7，flag `L2`），
 逐次 `invocation` 1..3；**仍无**异步续体/线程池、`NOT_COLLECTED_NO_DEBUG_INFO` 事件/reason/UI、无 LVT 的降级事件、行级字段写入、
 对象深采、多方法 L2、循环折叠/采样/丢弃预算、L2 开销门槛、其他方法的 L2/×3（S6b）；schema 字节不变。
+**S6b 边界**：S6b 起新增 ①异步**创建时**继承（`ASYNC_INHERITED`，仅新建线程，§4.4.8/§13.1）；②无调试信息降级
+（`NOT_COLLECTED_NO_DEBUG_INFO` + `reason` + `NO_DEBUG_INFO`、无 values，§4.4.9）；③循环值折叠（`TRUNCATED` +
+`VALUES_CAPPED`/`VALUES_TOTAL`，cap 20，§4.4.10）；L2 扩展到 `reconcileAmount`/`reconcileLoop` 两个 demo 方法。
+**仍无**：行级字段写入（`kind=field` + 行号）、对象深采、多方法/任意方法 L2、`CompletableFuture`/`@Async`/框架续体传播、
+长生命周期/已存在线程池自动传播、跨服务/云端；schema/transport/status 语义字节不变。
 
 ## 10. 变更流程
 
@@ -393,6 +455,17 @@
   [`values` 仅 `kind=local`：1/2/1 项、第 2 次坏行 `100→0`、`invocation` 1/2/3、flags `S2_ZERO_ROW_CHAIN`+`L2`]）；
   期望事实：同目录 `expected-facts.json`（×3 / 逐次值/行号 / 第二次坏 / graph 6 节点 5 边 / 工作台选择器与文案）。
   行号为示意，测试从 `L2DemoService.java` 重算；运行时证据必须来自 demo+ASM agent（S6A-C），不得引用本目录冒充。
+- **S6b 异步继承样例（6 行，单 trace，全 `EXACT`/`OK`，测试数据非运行时证据）**：`fixtures/s6b-async/events.ndjson`
+  （click `#btn-reconcile-async` → fetch → controller → 3 个同 nodeKey service span：同一异步 worker `thread.id` ≠ controller、
+  flags `S2_ZERO_ROW_CHAIN`+`L2`+`ASYNC_INHERITED`、`values` 1/2/1、第 2 次 `100 → 0`）；期望事实同目录 `expected-facts.json`。
+- **S6b 无调试信息样例（2 行，单 trace 的合法游离后端根链，测试数据非运行时证据）**：`fixtures/s6b-no-debug/events.ndjson`
+  （endpoint-only 链：controller 根 `LOST`+`LOST_BACKEND`，service `NOT_COLLECTED_NO_DEBUG_INFO` + `reason="LocalVariableTable missing"` +
+  flag `NO_DEBUG_INFO`、**无 `values`**、无 source 行号）；期望事实同目录 `expected-facts.json`。
+- **S6b 循环折叠样例（4 行，单 trace，`EXACT`，测试数据非运行时证据）**：`fixtures/s6b-loop/events.ndjson`
+  （click `#btn-reconcile-loop` → fetch → controller → `reconcileLoop` service：`status=TRUNCATED`、
+  flags `L2`+`VALUES_CAPPED=82`+`VALUES_TOTAL=102`、`values` 恰 20 项（首 `null→0`、尾 `→50`、含 `50→0` 坏值））；
+  期望事实同目录 `expected-facts.json`。fixture 的 `t/d` 只是形状示例，运行时不硬编码 total（断言 `t>20`、`d=t-20`）。
+- 三个 S6b 目录都是**测试数据**，不是运行时证据；运行时必须由 demo+agent 的 S6B-A/B/C 产生，且不得据此宣称长生命周期池传播/框架异步/行级字段写入。
 - 校验入口：`(cd "tools/verify" && node verify.mjs)`（S0/S1/S2 门禁；S3 由 tester 扩展 S3-A..S3-J）。
 ## 12. S3 runtime SDK 事件与头关联（仅语义；schema 字节不变）
 
@@ -587,3 +660,30 @@ ui_event(#btn-save-b, SDK_ACTIVE, OBSERVE_MS=1500)
 - 不解析 `.map`、不做堆栈反混淆、不做服务端 source map 映射、不上传/提交 `.map`（`build.sourcemap=true` 只服务浏览器 devtools）。
 - 不采集行级变量/局部变量/对象深字段（S6）；不把“函数入口行号”冒充“赋值行号”。
 - 不因 manifest 命中而改变 `status`/`return`/`confidence`/`values`。
+
+## 13. S6b 上下文传播模型与不宣称清单（仅语义；schema 字节不变）
+
+> S6b 只解决“**新建线程**能继承已打开的 controller 上下文”，不解决框架级/长生命周期池的传播。
+> 本节解释 §4.4.8–§4.4.10 的边界；不新增字段/枚举/约束。
+
+### 13.1 继承模型（`InheritableThreadLocal` + 深拷贝）
+
+1. 栈类型：`InheritableThreadLocal<ArrayDeque<Frame>>`；`initialValue` 空栈；`childValue` 对**每一帧**做深拷贝
+   （不可变字段原值；`values`/`extraFlags`/`l2Previous`/`l2Values`/`childCallCounts` 各建独立集合）。
+2. 复制时机：JDK 在 `Thread` 构造时调用 `childValue`（父线程创建子线程的瞬间）。因此 demo 必须**在 controller 帧打开之后**创建 worker；
+   per-request 单线程池的 worker 在第一次 `submit` 时创建，正好满足。
+3. 一 worker 顺序执行 3 个任务：副本内的 `childCallCounts` 自增 1..3，`invocation` 与同线程一致；子线程退出只弹本线程的 L2 帧。
+4. 原请求线程栈不被子线程修改；副本的 controller 帧**永不 emit**（它不是本线程 `exitController` 的栈顶）。
+5. 已知限制（必须写入契约/UI/README）：
+   - 仅“线程创建时”继承；启动期长生命周期池/已存在的 `ThreadPoolExecutor` worker **没有**请求上下文（无父帧 → `l2_no_parent`，不发假 span）；
+   - 线程复用可能带**过期 trace**（仍会 emit 到旧 trace/parent；S6 不检测、不修复，S7+ 显式传播/清理）；
+   - per-request 建池有线程创建开销；不适用于高 QPS 生产场景。
+6. **不宣称**：`@Async`、`CompletableFuture.supplyAsync`、`ForkJoinPool`、框架续体、跨服务传播均**未实现**；`ASYNC_INHERITED` 只是“继承来源”提示。
+
+### 13.2 明确不做（S6b）
+
+- 行级字段写入（`kind=field` + 行号）、对象深采、集合展开、`valueRef`。
+- 多方法/任意方法 L2（仅 `reconcileAmount`/`reconcileLoop` 两个 demo 方法）、循环逐次全量记录、按速率采样。
+- 无调试信息下的变量名/行号猜测、`LocalVariableTable` 重建、`.map`/字节码反编译。
+- 长生命周期池自动传播、已存在线程注入、跨服务/跨 JVM、SSE/WS/持久化、云端。
+- 任何“开销达标”承诺：L2 开销只报告（`tools/perf/l2-overhead.mjs`，ratio>1.40 仅 WARN），不改采集行为。

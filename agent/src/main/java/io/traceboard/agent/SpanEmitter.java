@@ -26,6 +26,13 @@ public final class SpanEmitter {
     static final String FLAG_L1 = "L1";
     /** S6a: span was collected with line-level probes (only {@code L2DemoService#reconcileAmount}). */
     static final String FLAG_L2 = "L2";
+    /** S6b: the context came from an inherited parent frame on a different (new) thread. */
+    static final String FLAG_ASYNC_INHERITED = "ASYNC_INHERITED";
+    /** S6b: the instrumented method has no {@code LocalVariableTable} (no values / line numbers). */
+    static final String FLAG_NO_DEBUG_INFO = "NO_DEBUG_INFO";
+    /** S6b: folded list counts (both are appended together, never one without the other). */
+    static final String FLAG_VALUES_CAPPED = "VALUES_CAPPED";
+    static final String FLAG_VALUES_TOTAL = "VALUES_TOTAL";
 
     private static final int MAX_RETURN_TYPE_CHARS = 64;
 
@@ -115,12 +122,23 @@ public final class SpanEmitter {
      */
     static void emit(SpanContext.Frame frame, long durNs, String status, String returnType,
                      String returnValueJson, String sideEffectsJson, StackTraceElement source) {
-        emit(frame, durNs, status, returnType, returnValueJson, sideEffectsJson, source, null);
+        emit(frame, durNs, status, returnType, returnValueJson, sideEffectsJson, source, null, null);
     }
 
+    /** S5/S6b: same as above with a pre-formatted {@code values} array (no reason). */
     static void emit(SpanContext.Frame frame, long durNs, String status, String returnType,
                      String returnValueJson, String sideEffectsJson, StackTraceElement source,
                      String valuesJson) {
+        emit(frame, durNs, status, returnType, returnValueJson, sideEffectsJson, source, valuesJson, null);
+    }
+
+    /**
+     * S6b: emits with an optional {@code reason} (required by the schema for {@code NOT_COLLECTED_*}
+     * statuses, e.g. {@code LocalVariableTable missing}); {@code null} omits the field.
+     */
+    static void emit(SpanContext.Frame frame, long durNs, String status, String returnType,
+                     String returnValueJson, String sideEffectsJson, StackTraceElement source,
+                     String valuesJson, String reason) {
         try {
             if (!enabled || frame == null || frame.traceId == null) {
                 return;
@@ -155,6 +173,9 @@ public final class SpanEmitter {
             json.append("\"startNs\":").append(frame.startNs).append(',');
             json.append("\"durNs\":").append(durNs < 0L ? 0L : durNs).append(',');
             appendStringField(json, "status", status).append(',');
+            if (reason != null) {
+                appendStringField(json, "reason", reason).append(',');
+            }
 
             if (returnType == null || returnValueJson == null) {
                 json.append("\"return\":null,");
@@ -180,7 +201,8 @@ public final class SpanEmitter {
                 json.append(',');
                 appendQuoted(json, FLAG_LOST_BACKEND);
             }
-            // S5 extra flags (L1 / VALUES_CAPPED=<n> / L1_SKIPPED=<n>); empty for S2-S4 spans.
+            // S5/S6b extra flags (L1 / L2 / ASYNC_INHERITED / NO_DEBUG_INFO / VALUES_*=<n>);
+            // empty for S2-S4 spans.
             for (String extraFlag : frame.extraFlags) {
                 json.append(',');
                 appendQuoted(json, extraFlag);
@@ -189,7 +211,8 @@ public final class SpanEmitter {
             appendQuoted(json, "DROP_COUNT=" + senderDropped());
             json.append(']');
             if (valuesJson != null) {
-                // S5: omitted entirely when the span has no value facts (S2-S4 byte compatibility).
+                // S5/S6b: omitted entirely when the span has no value facts (S2-S4 byte
+                // compatibility and the S6b no-debug contract "values key absent").
                 json.append(",\"values\":").append(valuesJson);
             }
             json.append("}\n");

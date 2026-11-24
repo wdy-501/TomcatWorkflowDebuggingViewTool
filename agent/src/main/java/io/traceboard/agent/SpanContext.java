@@ -24,6 +24,17 @@ import java.util.concurrent.atomic.AtomicLong;
  * around {@code L2DemoService#reconcileAmount}, and {@link #enterReconcileController(long)} opens
  * the reconcile controller span.</p>
  *
+ * <p>S6b: the stack is an {@link InheritableThreadLocal} whose {@code childValue} deep-copies every
+ * frame, so a thread created while a controller frame is open inherits trace/root/parent/confidence
+ * and its own {@code childCallCounts}. Each frame records the creating thread id
+ * ({@code originThreadId}); L2 / no-debug child spans opened on a different thread than the parent
+ * frame add the {@code ASYNC_INHERITED} flag. Inheritance happens ONLY at thread creation:
+ * long-lived pools / pre-existing threads carry no request context ({@code l2_no_parent}, no
+ * fabricated span) and a recycled worker may carry a stale trace (not solved here; S7+). S6b also
+ * opens the loop entry point ({@link #enterL2Loop(long)}) and the no-debug entry point
+ * ({@link #enterNoDebug(long)}, {@link #exitNoDebug(long, double)}) for methods whose class file has
+ * no {@code LocalVariableTable}.</p>
+ *
  * <p>Every method is fail-open: any {@code Throwable} is swallowed and the host application is
  * never affected.</p>
  */
@@ -63,18 +74,54 @@ public final class SpanContext {
     static final String L2_CLASS = "com.example.shop.service.L2DemoService";
     static final String L2_METHOD = "reconcileAmount";
     static final String L2_SERVICE_NODE_KEY = L2_CLASS + "#" + L2_METHOD;
+    /** S6b: second ASM-instrumented method of the same class (loop value folding). */
+    static final String L2_LOOP_METHOD = "reconcileLoop";
+    static final String L2_LOOP_NODE_KEY = L2_CLASS + "#" + L2_LOOP_METHOD;
+    /** S6b: no-debug demo service (compiled without LocalVariableTable by the antrun build). */
+    static final String NO_DEBUG_CLASS = "com.example.shop.service.NoDebugService";
+    static final String NO_DEBUG_METHOD = "compute";
+    static final String NO_DEBUG_NODE_KEY = NO_DEBUG_CLASS + "#" + NO_DEBUG_METHOD;
+    /** S6b verbatim reason for {@code NOT_COLLECTED_NO_DEBUG_INFO} (api.v1.md Appendix G). */
+    static final String NO_DEBUG_REASON = "LocalVariableTable missing";
     /** S6a: the reconcile controller span (Byte Buddy advice, EXACT header join like S3/S5). */
     static final String RECONCILE_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#reconcile";
+    /** S6b controller spans (Byte Buddy advices, same header join rules). */
+    static final String ASYNC_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#reconcileAsync";
+    static final String NO_DEBUG_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#noDebug";
+    static final String LOOP_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#reconcileLoop";
 
     private static final int MAX_DEPTH = 64;
     private static final String MAPPED_STATEMENT_FIELD = "mappedStatement";
 
-    private static final ThreadLocal<ArrayDeque<Frame>> STACK = new ThreadLocal<ArrayDeque<Frame>>() {
-        @Override
-        protected ArrayDeque<Frame> initialValue() {
-            return new ArrayDeque<Frame>();
-        }
-    };
+    /**
+     * S6b: inheritable stack. {@link #childValue} returns a deep copy (each frame + every mutable
+     * collection), so a thread created while the controller frame is open receives the request
+     * context. This happens ONLY at thread creation; existing / long-lived pool threads start
+     * without context (no fabricated span, counted as {@code l2_no_parent}).
+     */
+    private static final InheritableThreadLocal<ArrayDeque<Frame>> STACK =
+            new InheritableThreadLocal<ArrayDeque<Frame>>() {
+                @Override
+                protected ArrayDeque<Frame> initialValue() {
+                    return new ArrayDeque<Frame>();
+                }
+
+                @Override
+                protected ArrayDeque<Frame> childValue(ArrayDeque<Frame> parentValue) {
+                    ArrayDeque<Frame> copy = new ArrayDeque<Frame>();
+                    try {
+                        if (parentValue != null) {
+                            for (Frame frame : parentValue) {
+                                copy.addLast(frame.copyForInheritance());
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                        // fail-open: an uncopyable stack yields an empty child stack (no fake span)
+                        copy.clear();
+                    }
+                    return copy;
+                }
+            };
 
     private static final AtomicLong ORPHAN = new AtomicLong();
     private static final AtomicLong RESET = new AtomicLong();
@@ -109,6 +156,8 @@ public final class SpanContext {
         int skipped;
         /** S6a: true only on the L2 service frame opened by {@link #enterL2(long)}. */
         boolean l2;
+        /** S6b: true only on the no-debug service frame opened by {@link #enterNoDebug(long)}. */
+        boolean noDebug;
         /** S6a: 1..3 call index inside the parent controller frame (reset per request). */
         int invocationIndex;
         /** S6a: frame-local previous value per local name (never {@code (frame,line,name)}). */
@@ -117,9 +166,22 @@ public final class SpanContext {
         final java.util.List<L2Values.Item> l2Values = new java.util.ArrayList<L2Values.Item>();
         /** S6a: per-nodeKey call counter owned by a controller frame (the ×3 index source). */
         final java.util.Map<String, Integer> childCallCounts = new java.util.HashMap<String, Integer>();
+        /**
+         * S6b: id of the thread that CREATED this frame. Inheritance copies keep the original
+         * value, so a child span opened on another thread can prove {@code ASYNC_INHERITED}
+         * ({@code currentThread.id != parent.originThreadId}).
+         */
+        final long originThreadId;
 
         Frame(String kind, String nodeKey, String spanId, String traceId, String rootEventId,
               String parentSpanId, long startNs, boolean root, String confidence, boolean exactLink) {
+            this(kind, nodeKey, spanId, traceId, rootEventId, parentSpanId, startNs, root, confidence,
+                    exactLink, Thread.currentThread().getId());
+        }
+
+        private Frame(String kind, String nodeKey, String spanId, String traceId, String rootEventId,
+                      String parentSpanId, long startNs, boolean root, String confidence,
+                      boolean exactLink, long originThreadId) {
             this.kind = kind;
             this.nodeKey = nodeKey;
             this.spanId = spanId;
@@ -130,6 +192,27 @@ public final class SpanContext {
             this.root = root;
             this.confidence = confidence;
             this.exactLink = exactLink;
+            this.originThreadId = originThreadId;
+        }
+
+        /**
+         * S6b deep copy for {@link InheritableThreadLocal#childValue}: scalar fields are copied by
+         * value (including the original {@code originThreadId}); every mutable collection is a new
+         * instance so child-thread mutations never flow back into the request thread.
+         */
+        Frame copyForInheritance() {
+            Frame copy = new Frame(kind, nodeKey, spanId, traceId, rootEventId, parentSpanId,
+                    startNs, root, confidence, exactLink, originThreadId);
+            copy.values.addAll(values);
+            copy.extraFlags.addAll(extraFlags);
+            copy.skipped = skipped;
+            copy.l2 = l2;
+            copy.noDebug = noDebug;
+            copy.invocationIndex = invocationIndex;
+            copy.l2Previous.putAll(l2Previous);
+            copy.l2Values.addAll(l2Values);
+            copy.childCallCounts.putAll(childCallCounts);
+            return copy;
         }
     }
 
@@ -365,9 +448,27 @@ public final class SpanContext {
      * resets per request and never depends on a global counter). No controller parent, no frame:
      * the call is counted as {@code l2_no_parent} and no span is fabricated.
      *
+     * <p>S6b: on an inherited stack (thread created while the controller frame was open) the parent
+     * is the copied controller frame, so the invocation index continues 1..3 inside the single pool
+     * worker; a thread id different from the parent frame's {@code originThreadId} adds the
+     * {@code ASYNC_INHERITED} flag. Same-thread calls never carry that flag.</p>
+     *
      * <p>Called from ASM-injected bytecode, therefore {@code public static}.</p>
      */
     public static void enterL2(long enterNs) {
+        openL2Frame(enterNs, L2_SERVICE_NODE_KEY);
+    }
+
+    /**
+     * S6b {@code L2DemoService#reconcileLoop}: same frame/index/async rules as
+     * {@link #enterL2(long)}, nodeKey {@code L2DemoService#reconcileLoop}. Called from
+     * ASM-injected bytecode.
+     */
+    public static void enterL2Loop(long enterNs) {
+        openL2Frame(enterNs, L2_LOOP_NODE_KEY);
+    }
+
+    private static void openL2Frame(long enterNs, String nodeKey) {
         try {
             if (!SpanEmitter.isEnabled()) {
                 return;
@@ -379,18 +480,34 @@ public final class SpanContext {
                 return;
             }
             int index = 1;
-            Integer seen = parent.childCallCounts.get(L2_SERVICE_NODE_KEY);
+            Integer seen = parent.childCallCounts.get(nodeKey);
             if (seen != null) {
                 index = seen.intValue() + 1;
             }
-            parent.childCallCounts.put(L2_SERVICE_NODE_KEY, Integer.valueOf(index));
-            Frame frame = new Frame(KIND_SERVICE, L2_SERVICE_NODE_KEY, SpanEmitter.randomHex(8),
+            parent.childCallCounts.put(nodeKey, Integer.valueOf(index));
+            Frame frame = new Frame(KIND_SERVICE, nodeKey, SpanEmitter.randomHex(8),
                     parent.traceId, parent.rootEventId, parent.spanId,
                     SpanEmitter.epochNanosFrom(enterNs), false, parent.confidence, false);
             frame.l2 = true;
             frame.invocationIndex = index;
             frame.extraFlags.add(SpanEmitter.FLAG_L2);
+            markAsyncInherited(frame, parent);
             stack.push(frame);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /**
+     * S6b: adds {@code ASYNC_INHERITED} only when the child span is opened on a thread different
+     * from the thread that created the parent frame. The flag proves the context came from an
+     * inherited parent frame; it never implies framework/thread-pool task propagation.
+     */
+    private static void markAsyncInherited(Frame child, Frame parent) {
+        try {
+            if (Thread.currentThread().getId() != parent.originThreadId) {
+                child.extraFlags.add(SpanEmitter.FLAG_ASYNC_INHERITED);
+            }
         } catch (Throwable ignored) {
             // fail-open
         }
@@ -439,17 +556,25 @@ public final class SpanContext {
         }
     }
 
-    /** S6a normal exit: pops the top L2 frame and emits {@code OK} with the real returned value. */
+    /**
+     * S6a normal exit: pops the top L2 frame and emits the real returned value. S6b: when the
+     * observation list exceeded the 20-item budget the values are folded (first 6 + last 6 +
+     * uniform middle samples, first bad {@code to=0} value kept) and the event becomes
+     * {@code status=TRUNCATED} with visible {@code VALUES_CAPPED=<dropped>} + {@code VALUES_TOTAL=<total>}
+     * flags; retained items stay {@code truncated=false} (the values themselves were not truncated,
+     * the list was folded - nothing is dropped silently).
+     */
     public static void exitL2(long enterNs, double returned) {
         try {
             Frame frame = popL2Frame();
             if (frame == null) {
                 return;
             }
-            String valuesJson = L2Values.toValuesJson(frame);
-            SpanEmitter.emit(frame, duration(enterNs), "OK", "double",
+            L2Values.Fold fold = L2Values.fold(frame);
+            appendFoldFlags(frame, fold);
+            SpanEmitter.emit(frame, duration(enterNs), fold.folded ? "TRUNCATED" : "OK", "double",
                     L1Values.formatDouble(returned), null,
-                    findSource(L2_CLASS, frame.nodeKey), valuesJson);
+                    findSource(L2_CLASS, frame.nodeKey), fold.json);
         } catch (Throwable ignored) {
             // fail-open
         }
@@ -462,12 +587,108 @@ public final class SpanContext {
             if (frame == null) {
                 return;
             }
-            String valuesJson = L2Values.toValuesJson(frame);
+            L2Values.Fold fold = L2Values.fold(frame);
+            appendFoldFlags(frame, fold);
             SpanEmitter.emit(frame, duration(enterNs), "THREW", null, null, null,
-                    findSource(L2_CLASS, frame.nodeKey), valuesJson);
+                    findSource(L2_CLASS, frame.nodeKey), fold.json);
         } catch (Throwable ignored) {
             // fail-open
         }
+    }
+
+    /** S6b: fold counts are visible on the event (never a silent drop). */
+    private static void appendFoldFlags(Frame frame, L2Values.Fold fold) {
+        if (fold.folded) {
+            frame.extraFlags.add(SpanEmitter.FLAG_VALUES_CAPPED + "=" + fold.dropped);
+            frame.extraFlags.add(SpanEmitter.FLAG_VALUES_TOTAL + "=" + fold.total);
+        }
+    }
+
+    // ---------------------------------------------------------------- no-debug service (S6b)
+
+    /**
+     * S6b {@code NoDebugService#compute}: opens a service frame under the current controller frame.
+     * The class file has no {@code LocalVariableTable} (antrun {@code javac debug="false"}), so no
+     * line probe / variable name is ever injected: only the call and the real return value are
+     * proven. Async inheritance rules are identical to {@link #enterL2(long)}. Called from
+     * ASM-injected bytecode.
+     */
+    public static void enterNoDebug(long enterNs) {
+        try {
+            if (!SpanEmitter.isEnabled()) {
+                return;
+            }
+            ArrayDeque<Frame> stack = STACK.get();
+            Frame parent = stack.peek();
+            if (parent == null || !KIND_CONTROLLER.equals(parent.kind) || parent.traceId == null) {
+                countL2NoParent();
+                return;
+            }
+            Frame frame = new Frame(KIND_SERVICE, NO_DEBUG_NODE_KEY, SpanEmitter.randomHex(8),
+                    parent.traceId, parent.rootEventId, parent.spanId,
+                    SpanEmitter.epochNanosFrom(enterNs), false, parent.confidence, false);
+            frame.noDebug = true;
+            frame.extraFlags.add(SpanEmitter.FLAG_NO_DEBUG_INFO);
+            markAsyncInherited(frame, parent);
+            stack.push(frame);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /**
+     * S6b normal exit: {@code status=NOT_COLLECTED_NO_DEBUG_INFO}, verbatim reason, flag
+     * {@code NO_DEBUG_INFO}, NO {@code values} key, real return value and NO fabricated source line.
+     */
+    public static void exitNoDebug(long enterNs, double returned) {
+        try {
+            Frame frame = popNoDebugFrame();
+            if (frame == null) {
+                return;
+            }
+            SpanEmitter.emit(frame, duration(enterNs), "NOT_COLLECTED_NO_DEBUG_INFO", "double",
+                    L1Values.formatDouble(returned), null, null, null, NO_DEBUG_REASON);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /** S6b exceptional exit: {@code THREW}, no return, still no values. */
+    public static void exitNoDebugThrew(long enterNs) {
+        try {
+            Frame frame = popNoDebugFrame();
+            if (frame == null) {
+                return;
+            }
+            SpanEmitter.emit(frame, duration(enterNs), "THREW", null, null, null, null, null, null);
+        } catch (Throwable ignored) {
+            // fail-open
+        }
+    }
+
+    /**
+     * Pops only when the stack top really is the no-debug frame (peek before poll), so a missing
+     * parent frame can never pop the controller.
+     */
+    private static Frame popNoDebugFrame() {
+        if (!SpanEmitter.isEnabled()) {
+            return null;
+        }
+        ArrayDeque<Frame> stack = STACK.get();
+        Frame top = stack.peek();
+        if (top == null) {
+            countL2Orphan("empty");
+            return null;
+        }
+        if (!top.noDebug) {
+            countL2Orphan(top.kind);
+            return null;
+        }
+        stack.poll();
+        if (stack.isEmpty()) {
+            STACK.remove();
+        }
+        return top.traceId == null ? null : top;
     }
 
     /**
@@ -502,6 +723,33 @@ public final class SpanContext {
 
     /** S6a reconcile controller exit: {@code ResponseEntity} 200, no {@code values}. */
     public static void exitReconcileController(long enterNs, Object returned, Throwable thrown) {
+        exitController(enterNs, returned, thrown);
+    }
+
+    /** S6b {@code OrderController#reconcileAsync} (header join identical to S3/S5/S6a). */
+    public static void enterAsyncController(long enterNs) {
+        enterController(enterNs, ASYNC_CONTROLLER_NODE_KEY);
+    }
+
+    public static void exitAsyncController(long enterNs, Object returned, Throwable thrown) {
+        exitController(enterNs, returned, thrown);
+    }
+
+    /** S6b {@code OrderController#noDebug} (header join identical to S3/S5/S6a). */
+    public static void enterNoDebugController(long enterNs) {
+        enterController(enterNs, NO_DEBUG_CONTROLLER_NODE_KEY);
+    }
+
+    public static void exitNoDebugController(long enterNs, Object returned, Throwable thrown) {
+        exitController(enterNs, returned, thrown);
+    }
+
+    /** S6b {@code OrderController#reconcileLoop} (header join identical to S3/S5/S6a). */
+    public static void enterLoopController(long enterNs) {
+        enterController(enterNs, LOOP_CONTROLLER_NODE_KEY);
+    }
+
+    public static void exitLoopController(long enterNs, Object returned, Throwable thrown) {
         exitController(enterNs, returned, thrown);
     }
 
