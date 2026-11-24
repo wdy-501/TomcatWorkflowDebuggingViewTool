@@ -1,10 +1,10 @@
 # TraceBoard
 
-面向本地 Java（Spring Boot）Web 应用的“全链路事实”调试工具。当前完成 **S6（L2 与异步，V1）**：
+面向本地 Java（Spring Boot）Web 应用的“全链路事实”调试工具。当前完成 **S7（React18/Webpack5 本地基础第二栈，V1）**：
 
-- S0 契约/骨架 → S1 ingest/查询 → S2 真实 H2 0 行 → S3 runtime SDK/EXACT/回放 → S4 launcher/preview/详情×N → S5 L1/manifest → **S6 L2 行级局部变量、×3、异步继承、无调试信息、循环折叠、L2 性能**。
-- 仍**没有** S7–S10：无 Tomcat/WAR/SSM、React/Webpack、云端、SSE/WS、像素回放、持久化。
-- 案例 A/B/L1/S6a 行为不变；S6b 的 async/no-debug/loop 是新增 selected-method 演示。
+- S0 契约/骨架 → S1 ingest/查询 → S2 真实 H2 0 行 → S3 runtime SDK/EXACT/回放 → S4 launcher/preview/详情×N → S5 L1/manifest → S6 L2 行级局部变量、×3、异步继承、无调试信息、循环折叠 → **S7 React18 + Webpack5 前端第二栈：案例 A/B、经 devServer 代理的 EXACT 4-span 后端链、案例 B 零请求**。
+- 仍**没有** S8–S10：无 Tomcat/WAR/SSM、云端、SSE/WS、像素回放、持久化；React 仅基础（无构建插件/sourcemap/组件映射/JS 局部变量）。
+- 案例 A/B/L1/S6a/S6b 行为不变；S7 React 前端复用现有 Boot/H2 后端，新增端口 5175。
 
 ## 已真实可用（S0–S6，均可复跑）
 
@@ -17,12 +17,13 @@
 - **launcher（`server/launcher`，Java21）**：`idea` 打印 IDEA VM options；`jar` 用 JDK8 启动 demo+agent（detach/PID/日志/健康等待）、`stop`；`preview` 反代静态 HTML 并注入外部 `config.js`+`sdk.js`（仅 200 text/html、无内联脚本/CSP 改写、`not-injected:*` 原因）；`diagnose` 复核 collector/app/handshake/events/preview/SDK。
 - **S5 L1 + 前端浅层**：demo `preview-discount` 在内存把 `amount 100→0`、DB 仍 100；agent 采 5 项 values（`requestedAmount` 100、`demoSecret` `[REDACTED len=6]`、`note` 截断 2KB、`amount` 100→0、`return` 0），不采局部变量/L2；graph 增加 `values`（15 字段）；workbench 详情显示 L1/脱敏/截断/old→new；`frontend/build-plugin` 生成函数 manifest，SDK 写入 `source {file,line}` + `SOURCE_MAPPED`；demo 开启 `build.sourcemap`。性能基线 ratio 1.29（WARN）。
 - **S6 L2 + 异步**：`L2DemoService#reconcileAmount` ASM 行探针，第 2 次调用 `local 100→0`（行 23/25）；`reconcileBatch` ×3 逐次可指哪次坏；`reconcileAsync` 新建 worker 线程继承上下文（`ASYNC_INHERITED`，长生命周期池/@Async/CompletableFuture 不自动传播）；`NoDebugService#compute` 无 LVT → `NOT_COLLECTED_NO_DEBUG_INFO` + reason、无 values；`reconcileLoop` 100 次 local 写入折叠为 20 样本（`VALUES_CAPPED=82`/`VALUES_TOTAL=102`、`TRUNCATED`、坏 `50→0` 保留）；L2 perf ratio **1.037**。
+- **S7 React18 + Webpack5（本地基础）**：`demo/buggy-shop-boot-react/frontend/`（5175）复用 Boot/H2 后端；案例 A `#btn-cancel` 经 devServer `/api` 代理形成 click→fetch→controller→service→mapper→sql→render 7 span、全部 EXACT、SQL `rowsAffected=0`；案例 B `validateForm` 纯前端 `RETURNED_FALSE`、3 span、`fetchCount=0`；SDK 经 `/ingest` 代理发事件。**无** React 构建插件/sourcemap/组件映射/JS 局部变量；静态 dist 无代理。
 
 ## 明确未实现（勿据此承诺）
 
-- **无 S6**：行级 L2/局部变量、异步上下文传播、运行时 ×3、预算/循环折叠。工作台的 ×N 是**已采集 graph 的只读前端聚合**；`fixtures/s4-details` 的 ×3 是 UI/测试数据，不是运行时 ×3。
-- **无 S7–S10**：Tomcat/WAR/SSM、React/Webpack、云端上传/沙箱/DB/发布。
+- **无 S8–S10**：Tomcat/WAR/SSM、云端上传/沙箱/DB/发布；React/Webpack 仅基础级第二栈。
 - **S6 限制**：L2 仅 `L2DemoService#reconcileAmount/reconcileLoop` 等选中方法；行级字段写入/对象深采/多方法 L2 未支持；异步只在**新建线程创建时**继承（长生命周期池、`@Async`、`CompletableFuture` 不自动传播）；no-debug 仅 `NoDebugService#compute`（antrun `debug=false`）；loop 折叠保留首/尾/样本非全量；L2 perf 为本地短请求基线。
+- **S7 限制**：React18/Webpack5 仅本地基础、复用现有 Boot 后端；无 JS 源码位置/组件树/JS 局部变量/回调内部；无构建插件/manifest/sourcemap；只有 devServer 代理路径，静态 `dist` 无代理；未做 React 生产发布。
 - 无 SSE/WebSocket/实时推送；workbench 5 秒轮询；replay 只隐藏未来事件，不重跑程序、不重发请求、不写数据库。
 - collector/H2 均为内存存储，重启即清空；agent 握手记录 collector 重启即丢；无鉴权/保留/淘汰/CORS。
 - preview 注入仅在 `npm run dev` 的反代路径验证；Vite 的 `preview`/静态 dist 无代理。CSP 只允许 nonce/hash 的站点可能阻止外部脚本执行，launcher 只报“已注入”，不谎称“已执行”。
@@ -56,6 +57,9 @@ JAVA_HOME="C:/Program Files/Java/jdk-21" mvn -B -q -DskipTests package
 # 4) workbench / demo 前端
 (cd "workbench" && npm ci && npm run build)
 (cd "demo/buggy-shop-boot-vue/frontend" && npm ci && npm run build)
+
+# 5) S7 React 前端（先确保 frontend/sdk/dist 已构建）
+(cd "demo/buggy-shop-boot-react/frontend" && npm ci && npm run build)
 ```
 
 产物：`agent/target/traceboard-agent-0.1.0-SNAPSHOT.jar`（major 52、shaded Byte Buddy）、
@@ -117,11 +121,38 @@ COLLECTOR="http://127.0.0.1:8601"
 # 浏览器访问 http://127.0.0.1:8602；只注入外部 config.js/sdk.js，不内联、不改 CSP
 ```
 
+## S7 React18 + Webpack5 第二栈（本地基础，复用后端）
+
+```bash
+# SDK 先构建；React 依赖 file: frontend/sdk
+(cd "frontend/sdk" && npm run build)
+(cd "demo/buggy-shop-boot-react/frontend" && npm ci)
+
+# 1) collector 8601；2) 复用 Boot/H2 后端 + agent（会话必须 s_s7react）
+"C:/Program Files/Java/jdk-21/bin/java" -jar "server/collector/target/traceboard-collector-0.1.0-SNAPSHOT.jar"
+"C:/Program Files/Java/jdk1.8.0_221/bin/java" \
+  -javaagent:"agent/target/traceboard-agent-0.1.0-SNAPSHOT.jar" \
+  -Dtraceboard.ingestUrl="http://127.0.0.1:8601/ingest/v1/events" \
+  -Dtraceboard.sessionId=s_s7react -Dserver.port=8080 \
+  -jar "demo/buggy-shop-boot-vue/backend/target/demo-shop-backend-0.1.0-SNAPSHOT.jar"
+
+# 3) React dev 5175（/api→8080、/ingest→8601，同源代理）与 workbench 5173
+(cd "demo/buggy-shop-boot-react/frontend" && npm run dev)
+(cd "workbench" && npm run dev)
+```
+
+浏览器 `http://localhost:5175`：案例 A 取消成功且订单仍 `CREATED`；案例 B 金额 0 显示错误、零请求。
+工作台 `http://localhost:5173` 输入 `s_s7react`：A 为 7 节点/4 后端/SQL 0 行/EXACT；B 为 3 节点、`fetchCount=0`、已确认没有网络请求。
+静态 `dist` 只证明本地产物，不含代理；S7 通过路径是 devServer。
+
 ## 校验（独立复跑）
 
 ```bash
 (cd "tools/verify" && npm ci && node verify.mjs)
-# 期望：75 PASS / 0 FAIL，末行 S6 TEST (full S0–S6): PASS，exit 0
+# 期望：S0–S6 全量 75 PASS / 0 FAIL，末行 S6 TEST (full S0–S6): PASS，exit 0
+
+(cd "tools/verify" && node s7-react.mjs)
+# 期望：S7 TEST (React18/Webpack5): PASS；--no-e2e 仅做静态组
 ```
 
 覆盖：S0 契约/fixture；S1 ingest/查询；S2 H2 0 行/4-span/DB 不变；S3 SDK/案例 B/EXACT/replay 0 写；
@@ -132,7 +163,7 @@ S4 launcher/握手/preview/详情×3/缺口；S5 L1 values/manifest；S6a 行级
 ## 地址与限制
 
 - collector/launcher preview 只绑 `127.0.0.1`；浏览器入口用 `localhost`（Vite 可能绑 `[::1]`）。
-- 端口：collector 8601、demo 8080、workbench 5173、demo 前端 5174、preview 8602、Vite preview 4173/4174、静态测试 18080。
+- 端口：collector 8601、demo 8080、workbench 5173、Vue demo 前端 5174、React demo 5175、preview 8602、Vite preview 4173/4174、静态测试 18080。
 - 代理仅在 dev 生效；静态 dist 无代理。H2/collector 无持久化，重启清空。
 - S5 demo 前后端需同一会话：demo 前端 SDK 使用 `s_s3demo`，后端 agent 也必须用 `-Dtraceboard.sessionId=s_s3demo` 才能 EXACT 关联。
 - git 分支 `master`；无 secret/真实客户数据；不暴露到非回环网络。
@@ -156,6 +187,7 @@ S4 launcher/握手/preview/详情×3/缺口；S5 L1 values/manifest；S6a 行级
 | `docs/guides/frontend-shallow-plugin.md` | S5 manifest/sourcemap 浅层插件说明 |
 | `docs/plans/stages/S5/` | S5 分发/计划/G1/测试/验收/进度 |
 | `docs/plans/stages/S6/` | S6 分发/计划/G1/测试/验收/进度（s6a/s6b） |
+| `docs/plans/stages/S7/` | S7 分发/计划/G1/测试/验收/进度（React18/Webpack5 基础） |
 | `docs/guides/local-launcher.md` | IDEA/JAR/preview/diagnose 接入指南 |
 | `docs/plans/stages/S4/` | S4 分发/修订/计划/G1/测试/验收/进度 |
 | `docs/plans/archive/stage-S4-2026-11-23/` | S4 归档快照（MANIFEST/SUMMARY） |

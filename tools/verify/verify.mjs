@@ -542,8 +542,12 @@ const S6B_G1_FREEZE = {
   "docs/plans/stages/S6/dispatch-s6b.md": "690b16e63efc391f8d66765da96de4985c6f2c733532e78ab2203d2f405043c7",
   "docs/plans/stages/S6/plan-review-s6b.md": "d9b75a09f0077652aba731cc29c0aadb574aca01e38363110cac243700645126",
 };
-/** S6b supersedes api/event-model; every other S5/S6a entry stays at its own hash. */
-const LATEST_G1_FREEZE = { ...S5_G1_FREEZE, ...S6A_G1_FREEZE, ...S6B_G1_FREEZE };
+/** S7 G1 freeze: the api.v1 S7 additive append supersedes the S6b hash. */
+const S7_G1_FREEZE = {
+  "docs/contracts/api.v1.md": "fedfcbe01387acccdb75152911b21e0f282c0a1459c13dfcb66e2886f659acb3",
+};
+/** S6b/S7 supersede api; every other S5/S6a entry stays at its own hash. */
+const LATEST_G1_FREEZE = { ...S5_G1_FREEZE, ...S6A_G1_FREEZE, ...S6B_G1_FREEZE, ...S7_G1_FREEZE };
 
 /* ------------------------------------------------------------------ */
 /* S6b async / no-debug / loop-fold / workbench / perf                  */
@@ -11770,7 +11774,9 @@ function checkS6E() {
   checks.push({
     ok: Object.keys(S5_G1_FREEZE).length === 18 && s5Drift.length === 0 && keptAtS5 &&
       Object.keys(S6B_G1_FREEZE).length === 14 &&
-      supersededRels.every((rel) => LATEST_G1_FREEZE[rel] === S6B_G1_FREEZE[rel]),
+      supersededRels.every((rel) => rel === "docs/contracts/api.v1.md"
+        ? LATEST_G1_FREEZE[rel] === S7_G1_FREEZE[rel]
+        : LATEST_G1_FREEZE[rel] === S6B_G1_FREEZE[rel]),
     label: "S5 G1 freeze 18/18 (16 files at their S5 bytes; api/event-model superseded by the S6b hashes) + S6B_G1_FREEZE 14 entries + schema/transport/status unchanged",
     detail: s5Drift.length ? `drift=${s5Drift.join(",")}` : "18/18 match (2 superseded), S6b=14",
   });

@@ -239,6 +239,58 @@ S1 的写入面只有 `POST /ingest/v1/events` 一个；其余全部只读。不
 - demo 的三个 S6b 端点是 **demo 应用 API**（附录 G），不是 collector 路由；它们不改变 collector 契约面，也不新增能力键。
 - **仍无**（不得据此宣称已支持）：行级字段写入（`kind=field` + 行号）、对象深采、多方法/任意方法 L2（L2 仅覆盖 `reconcileAmount`/`reconcileLoop` 两个 demo 方法）、`CompletableFuture`/`@Async`/框架续体传播、长生命周期线程池/已存在线程的自动传播、跨服务/云端、SSE/WS/持久化/CORS/鉴权。
 
+### 2.8 S7 实现矩阵（React18/Webpack5 本地基础；当前权威；S0–S6b 矩阵保留为历史）
+
+> **2026-11-24 S7 增补（加性、只读；历史 §2–§10 与附录 A–G 全部保留不改写）**：S7 只新增第二栈前端
+> `demo/buggy-shop-boot-react/frontend`（React 18.3.1 + Webpack 5 + Babel，本地 dev 5175），**复用**现有
+> Boot 2.7/H2 demo 后端（`demo/buggy-shop-boot-vue/backend`，零业务改动）；collector/agent/SDK/schema **零改动**，
+> **不新增 collector 路由、事件字段、fixture 或 API**。本节为自包含的 S7 增补说明，文首历史变更记录不改写。
+
+| 方法 | 路径 | S7 状态 | 说明 |
+|---|---|---|---|
+| GET | `/actuator/health` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/meta` | **IMPLEMENTED** | `capabilities` 仍**恰好 5 键**、取值与 S6b 逐字相同；React 不是能力键 |
+| POST | `/ingest/v1/events` | **IMPLEMENTED** | 不变；React SDK 仍发既有事件的 NDJSON，只经同源 `/ingest` 代理到 8601 |
+| POST | `/ingest/v1/agent-hello` | **IMPLEMENTED** | 不变 |
+| GET | `/api/v1/sessions` | **IMPLEMENTED** | 不变；新会话 `s_s7react` 正常出现 |
+| GET | `/api/v1/sessions/{sessionId}/events` | **IMPLEMENTED** | 不变；React 事件逐字回显 |
+| GET | `/api/v1/sessions/{sessionId}/requests` | **IMPLEMENTED** | 形状/字段/排序不变；A 行 `spanCount=7/fetchCount=1/hasFrontend=true/hasBackend=true/backendSpanCount=4/confidence=EXACT`；B 行 `spanCount=3/fetchCount=0/hasBackend=false/backendSpanCount=0/EXACT` |
+| GET | `/api/v1/sessions/{sessionId}/graph?traceId=<32hex>` | **IMPLEMENTED** | 形状零改动：节点仍固定 **15 字段**；A 7 节点/6 边、B 3 节点/2 边；不新增 React 字段 |
+| GET | `/api/v1/sessions/{sessionId}/replay?fromNs=&toNs=` | **IMPLEMENTED** | 不变（只读窗口） |
+| GET | `/api/v1/sessions/{sessionId}/agent` | **IMPLEMENTED** | 不变；S7 用 `-Dtraceboard.sessionId=s_s7react` |
+| GET | `/api/v1/stream` | RESERVED | SSE 不实现（404） |
+| WS | `/ws/v1/events` | RESERVED | WebSocket 不实现（404） |
+| POST | `/api/v1/sessions/{sessionId}/links` | RESERVED | 手工关联不实现（404） |
+
+- **S7 不新增 collector 路由**：业务路由仍 **9 条**（meta、ingest、hello、sessions、events、requests、graph、replay、agent），含 `/actuator/health` 共 **10 条**；路径/参数/状态码/错误信封零改动；**collector 零 diff**。
+- **复用既有 demo 端点（非 collector API）**：React demo 只调用附录 A/B 已存在的 `GET /api/orders` 与 `POST /api/orders/1/cancel`；不改后端、不加端点、不加 CORS/鉴权。`cancel` 仍 `200 {"data":true}` 但 SQL `UPDATE ... AND status='PAID'` 影响 **0 行**，订单仍 `CREATED`。
+- **代理（仅 dev）**：webpack-dev-server 5175 `strictPort`；`/api` → `http://127.0.0.1:8080`、`/ingest` → `http://127.0.0.1:8601`，两路均 `changeOrigin:false`、不 rewrite；同源、无 CORS、不直连 8601。**静态 dist 无代理**，只证明本地资产，不是案例 A 的通过路径。
+- **会话/appName**：SDK 与 agent 均为 `s_s7react`；SDK `ingestUrl="/ingest"`、`appName="OrderEdit.jsx"`、observe 1500ms；工作台 `#s3-session` 手输该值。`appName` 只是 `js_method` 的 nodeKey 前缀，**不是源码映射**。
+
+**S7 交付支持矩阵（如实口径，不写「完整」）**
+
+| 维度 | S7 口径 |
+|---|---|
+| React 18.3.1 + Webpack 5 + runtime SDK（本地） | **基础** |
+| 云端（上传/沙箱/预览/DB） | **暂不支持** |
+| 可见 | 控件/click 根、fetch 请求 URL/method/HTTP 响应状态（不采响应体）、显式 `uiEffect` 声明的 UI 效果文本（非 DOM diff/截图）；后端 controller/service/mapper/sql 方法、SQL `rowsAffected` |
+| 不可见 | **JS 源码文件/行号、React 组件映射/组件树、JS 局部变量、回调内部逻辑** |
+| 构建期能力 | **无构建插件、无 sourcemap**（不 AST 插桩、不生成/内联 manifest；file/line 显示「未采集」） |
+| 主计划 §14.2「完整（P2）」 | **未交付**；S7 只证明本地基础案例 A/B |
+
+- **主计划 §14.2 的目标矩阵不改**：该表是长期目标（P1/P2/P3），S7 只在此处登记本地交付口径；不得把 P2「完整」写成已交付，也不得据此宣称 React 构建插件/sourcemap/组件映射。
+
+- **案例 A**：`#btn-cancel` → 同源 `POST /api/orders/1/cancel`（带 `traceparent`+`X-TraceBoard-Click`）→ 4 后端 span → 200 → `#success-hint` `操作成功` + `uiEffect("操作成功")`；同 trace 恰 7 span、全 `EXACT`、SQL 0 行、订单仍 `CREATED`。
+- **案例 B**：`#btn-save-b` → `OrderEdit.jsx#validateForm`（`RETURNED_FALSE`）→ `render`；同 trace 恰 3 span；`fetchCount=0`、`hasBackend=false`、`sdkActive=true`、click 根 flags 含 `OBSERVE_MS=1500`；无后端 span。
+- **命令（Git Bash，仓库根，路径含中文/空格需双引号）**：
+  - `(cd "frontend/sdk" && npm ci && npm run build)`（必须先构建，React 消费 `dist/index.js`）
+  - `(cd "demo/buggy-shop-boot-react/frontend" && npm ci && npm run build)`；dev：`npm run dev`（5175）
+  - collector：`"C:/Program Files/Java/jdk-21/bin/java" -jar "server/collector/target/traceboard-collector-0.1.0-SNAPSHOT.jar"`
+  - 后端+agent：JDK8 `-javaagent:... -Dtraceboard.ingestUrl="http://127.0.0.1:8601/ingest/v1/events" -Dtraceboard.sessionId=s_s7react -jar "demo/buggy-shop-boot-vue/backend/target/demo-shop-backend-0.1.0-SNAPSHOT.jar"`
+  - 工作台：`(cd "workbench" && npm ci && npm run build && npm run dev)`（5173）
+- **仍无**（不得据此宣称）：Tomcat/WAR/SSM、React 构建插件/sourcemap/组件映射、JS 文件/行号、JS 局部变量/入参值、回调内部、云端、SSE/WS/持久化/CORS/鉴权；无新 fixture（S7-C 的 SDK 形状事件由 tester 内联构造）。
+- **B 的「零请求」口径**：只指**本次 click 因果链**（`fetchCount=0`/`hasBackend=false`）。页面 mount 的 `GET /api/orders` 在 click 外，SDK 不记且 agent 未插桩 `list`，不产生后端 span；SDK ESM 初始化的一次 `/traceboard-manifest.json` 探测为 fail-open（404/非 JSON 均可、不发事件）。两者都不得被当成 B 的请求或伪造为 EXACT。
+
 ## 3. S0 已实现端点（S0 历史；S1 现状见 §7）
 
 ### 3.1 `GET /actuator/health`（IMPLEMENTED）
@@ -1495,3 +1547,66 @@ curl -s "http://127.0.0.1:8601/api/v1/sessions/s_s3demo/graph?traceId=<32hex>"  
     `reconcileAmount` 仍 1/2/1 且无 cap。
 - **仍不是 S6 的全部**：本附录不承诺行级字段写入（`kind=field` + 行号）、对象深采、多方法 L2、`CompletableFuture`/`@Async`/框架续体、
   长生命周期/已存在线程池的自动传播、跨服务或云端；L2 开销只报告不设硬门槛（`tools/perf/l2-overhead.mjs`，>1.40 仅 WARN）。
+
+## 附录 H：S7 React18/Webpack5 demo（案例 A/B；非 TraceBoard API）
+
+> S7 的第二栈前端位于 `demo/buggy-shop-boot-react/frontend`，**复用** `demo/buggy-shop-boot-vue/backend`（Boot 2.7/H2/JDK8）：
+> 后端零业务改动、零新端点；本附录只描述 demo 前端行为与运行方式，不改变 collector 契约面。S7-C 的 SDK 形状事件由 tester 内联构造，
+> **不新增 fixture**；所有运行时事实必须来自浏览器/collector，不得用静态文案冒充。
+
+**复用端点（既有，非新增）**
+
+| 方法 | 路径 | S7 行为 |
+|---|---|---|
+| GET | `/api/orders` | 页面 mount 时读取订单列表（click 外）；订单 1 `SO-0001/CREATED/100.00`；用于 `#order-status` |
+| POST | `/api/orders/1/cancel` | 案例 A 唯一请求；`200 {"data":true}`，但 SQL `rowsAffected=0`，订单仍 `CREATED` |
+
+**案例 A/B 前端契约（逐字）**
+
+| 选择器/属性 | 精确文本/行为 |
+|---|---|
+| `#btn-cancel` | 「取消订单」；click 只发 `POST /api/orders/1/cancel`；不 wrapFn；成功后不刷新列表/不发第二个 fetch |
+| `#success-hint` | 仅 2xx 显示 `操作成功`；同点 `uiEffect("操作成功")` |
+| `#order-status` | mount GET 后 `CREATED`；A 成功后仍 `CREATED` |
+| `#amount-b` | 金额输入（text/inputMode=decimal）；SDK 不采集输入值 |
+| `#btn-save-b` | 「保存」；`data-tb-fn="validateForm"`；click 只调 `validateForm`，无 fetch/XHR |
+| `#b-error` | 空/非数字/≤0 → `金额必须大于 0`；`RETURNED_FALSE` |
+| `#b-pass` | 有效 → `校验通过（本案例不提交）`；`OK` |
+| `validateForm` | `OrderEdit.jsx#validateForm`；模块级 `wrapFn` 恰一次；两支都 `uiEffect` |
+| `#root` | `public/index.html` 挂载点 |
+
+**SDK / 构建**
+
+- 依赖 `@traceboard/sdk: file:../../../frontend/sdk`，Webpack 解析到已构建的 **`dist/index.js`**；不 import `src`、不改 SDK。
+- `initTraceBoard({ingestUrl:"/ingest", sessionId:"s_s7react", appName:"OrderEdit.jsx", observeMs:1500})`。
+- React 18.3.1 + react-dom 18.3.1；Webpack 5 + webpack-dev-server 5；Babel preset-env + preset-react automatic；无 TS。
+- `devtool:false`（dev/build 无 `.map`）；无 TraceBoard 构建插件、无 AST 插桩、无内联/产出 manifest；`file`/`line` 显示「未采集」。
+- `public/index.html` + `#root`；无外链脚本/字体/图片；dist 仅本地资产。
+- 不新增 `backend` 子目录；README 明示复用 Vue demo 后端。
+
+**链路期望**
+
+| 案例 | span 数 | 组成 | 关键断言 |
+|---|---|---|---|
+| A | **7** | `ui_event → fetch → controller → service → mapper → sql` + `render`（render 父=click 根） | `controller.parentSpanId=fetch.spanId`；全 `EXACT`；无 `LOST_BACKEND`；`sql rowsAffected=0/transaction=UNKNOWN`；`GET /api/orders` 仍 `CREATED` |
+| B | **3** | `ui_event → js_method → render` | `RETURNED_FALSE`；`fetchCount=0/hasBackend=false/backendSpanCount=0/sdkActive=true`；`OBSERVE_MS=1500` 已关闭 |
+
+**运行（Git Bash，仓库根，路径双引号）**
+
+```bash
+(cd "frontend/sdk" && npm ci && npm run build)
+(cd "demo/buggy-shop-boot-react/frontend" && npm ci && npm run build)
+(cd "demo/buggy-shop-boot-react/frontend" && npm run dev)            # 5175
+"C:/Program Files/Java/jdk-21/bin/java" -jar "server/collector/target/traceboard-collector-0.1.0-SNAPSHOT.jar"
+"C:/Program Files/Java/jdk1.8.0_221/bin/java" \
+  -javaagent:"agent/target/traceboard-agent-0.1.0-SNAPSHOT.jar" \
+  -Dtraceboard.ingestUrl="http://127.0.0.1:8601/ingest/v1/events" \
+  -Dtraceboard.sessionId=s_s7react \
+  -jar "demo/buggy-shop-boot-vue/backend/target/demo-shop-backend-0.1.0-SNAPSHOT.jar"
+(cd "workbench" && npm ci && npm run build && npm run dev)            # 5173；#s3-session 输入 s_s7react
+```
+
+- **代理仅 dev**：5175 `/api`→8080、`/ingest`→8601，`changeOrigin:false`；静态 dist 无代理，需自备同源反代（S7 未验证）。
+- **A 的 7 span 前提**：fetch + `uiEffect` 须在 1500ms 观察窗内完成；若超时导致 `render` 未入库，只能如实显示 6 span/未采集，不得伪造 7 span。B 必须等窗口关闭后再判定 `fetchCount=0`。
+- **限制（如实）**：只支持本地基础案例 A/B；看不到 JS 源码位置/React 组件映射/JS 局部变量/回调内部；无构建插件/sourcemap；云端暂不支持；主计划 §14.2 的「完整（P2）」未交付；不做 Tomcat/WAR/SSM。
+- **B 的「零请求」**只指本次 click 因果链；mount GET 在 click 外且 agent 未插桩 `list`；SDK ESM 一次 manifest 探测 fail-open、不发事件，两者均不得计为 B 的请求或后端 EXACT。
