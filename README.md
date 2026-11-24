@@ -157,6 +157,7 @@ COLLECTOR="http://127.0.0.1:8601"
 
 覆盖：S0 契约/fixture；S1 ingest/查询；S2 H2 0 行/4-span/DB 不变；S3 SDK/案例 B/EXACT/replay 0 写；
 S4 launcher/握手/preview/详情×3/缺口；S5 L1 values/manifest；S6a 行级/×3；S6b async/no-debug/loop；S0–S5 回归、范围/安全/清理。
+S7 React18/Webpack5：独立 35 项（A 构建/产物、B 静态契约、C 代理/4-span EXACT/E2E fail-open、D serving/workbench、E 范围/freeze/清理），见 `tools/verify/s7-react.mjs`。
 性能基线（report-only）：`node tools/perf/l1-overhead.mjs` / `node tools/perf/l2-overhead.mjs` → L1 ratio 1.29 WARN；L2 ratio 1.037。
 冷启动嵌套回归：`node work/flake-nesting.mjs`（S4 已修复）。
 
