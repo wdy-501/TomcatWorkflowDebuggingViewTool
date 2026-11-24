@@ -203,3 +203,11 @@ S7 React18/Webpack5：独立 35 项（A 构建/产物、B 静态契约、C 代�
 | `docs/plans/archive/stage-S4-2026-11-23/` | S4 归档快照（MANIFEST/SUMMARY） |
 | `docs/contracts/` | v1 契约（api/transport/event-model/status-semantics） |
 | `frontend/sdk/`、`workbench/`、`server/launcher/` | SDK、工作台、启动器 |
+
+## 仓库与许可
+
+- GitHub：<https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool>
+- License：MIT（见 `LICENSE`；仓库从 private 切换为 public 后对所有人可见）
+- Releases：<https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases>
+- 第三方依赖保留各自许可证；如 Release 捆绑 Eclipse Temurin JRE，其许可证为 GPLv2+CE；不再分发 Oracle JDK。
+- 站点只展示内置程序的预置快照；不上传、不运行用户 JAR/WAR，S9/S10 云端执行不做。
