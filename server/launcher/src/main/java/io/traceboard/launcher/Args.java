@@ -85,6 +85,7 @@ final class Args {
             case "--sdk":
             case "--app-url":
             case "--preview-url":
+            case "--dir":
                 return true;
             default:
                 return false;

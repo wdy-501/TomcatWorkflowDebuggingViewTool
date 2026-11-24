@@ -87,5 +87,6 @@
 - S6 计划/评审/测试：[s6a-plan.md](stages/S6/s6a-plan.md)、[s6b-plan.md](stages/S6/s6b-plan.md)、[test-report.md](stages/S6/test-report.md)
 - S7 计划/评审/测试：[s7-plan.md](stages/S7/s7-plan.md)、[plan-review.md](stages/S7/plan-review.md)、[test-report.md](stages/S7/test-report.md)
 - S8 计划/矩阵/测试：[s8-plan.md](stages/S8/s8-plan.md)、[matrix.md](stages/S8/matrix.md)、[test-report.md](stages/S8/test-report.md)
+- 站点/比赛交付方案：[SITE-DEPLOY.md](SITE-DEPLOY.md)（Qoder Sites 只做展示/控制面；GitHub 源码/Release；Live Demo 本地/单租户）
 - 启动器指南：[docs/guides/local-launcher.md](../guides/local-launcher.md)｜前端浅层插件：[docs/guides/frontend-shallow-plugin.md](../guides/frontend-shallow-plugin.md)
 - 阶段备份：`docs/plans/archive/stage-S0...stage-S8`

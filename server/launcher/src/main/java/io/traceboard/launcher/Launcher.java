@@ -9,7 +9,7 @@ import java.util.Arrays;
 /**
  * TraceBoard S4 local launcher CLI.
  *
- * <p>Subcommands: {@code idea}, {@code jar}, {@code stop}, {@code preview}, {@code diagnose}.
+ * <p>Subcommands: {@code idea}, {@code jar}, {@code stop}, {@code preview}, {@code diagnose}, {@code ui}.
  * Global exit codes: {@code 0} success / no FAIL, {@code 1} unexpected launcher error
  * ({@code LAUNCHER_ERROR}), {@code 2} usage error, {@code 3} expected failure (spawn / health
  * timeout / stop refused / diagnose has at least one FAIL).</p>
@@ -75,10 +75,12 @@ public final class Launcher {
                 return new StopCommand().run(rest);
             case "preview":
                 return new PreviewCommand().run(rest);
+            case "ui":
+                return new UiCommand().run(rest);
             case "diagnose":
                 return new DiagnoseCommand().run(rest);
             default:
-                System.err.println("USAGE: 未知子命令 \"" + command + "\"；可用: idea | jar | stop | preview | diagnose（--help 查看用法）。");
+                System.err.println("USAGE: 未知子命令 \"" + command + "\"；可用: idea | jar | stop | preview | ui | diagnose（--help 查看用法）。");
                 printUsage(System.err);
                 return EXIT_USAGE;
         }
@@ -117,6 +119,11 @@ public final class Launcher {
                 out.println("只绑 127.0.0.1:<port> 的注入反代：/traceboard/config.js、/traceboard/sdk.js 本地提供，"
                         + "/ingest/v1/events 反代到 collector，其余转发 target 并在 </body> 前注入两个外部脚本。");
                 break;
+            case "ui":
+                out.println("用法: ui --dir <构建后的静态目录> [--port 5173] [--collector <base>]");
+                out.println("只绑 127.0.0.1:<port> 提供 workbench 静态文件；给 --collector 时把 GET/HEAD /api/* 反代到 collector；"
+                        + "无目录列表、无上传、无外部网络；根路径返回 index.html。");
+                break;
             case "diagnose":
                 out.println("用法: diagnose [--collector <base>] [--app-url <url>] --session <id> [--preview-url <url>]");
                 out.println("七项只读检查（collector_health/collector_meta/app_health/agent_handshake/recent_events/"
@@ -142,6 +149,7 @@ public final class Launcher {
                 + " [--port 8080] [--health <url>] [--detach] [--pid-file <path>] [--log-dir <path>]");
         out.println("  stop     --pid-file <path>");
         out.println("  preview  --target <http://静态HTML> [--port 8602] [--collector <base>] --session <id> [--sdk <path>] [--allow-non-loopback]");
+        out.println("  ui       --dir <构建后的静态目录> [--port 5173]");
         out.println("  diagnose [--collector <base>] [--app-url <url>] --session <id> [--preview-url <url>]");
         out.println();
         out.println("约定:");
