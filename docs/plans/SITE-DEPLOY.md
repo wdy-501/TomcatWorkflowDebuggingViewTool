@@ -42,6 +42,7 @@ scripts/package-windows.ps1
 - 启动/停止：`Run-TraceBoard.cmd` / `Stop-TraceBoard.cmd`；启动 collector 8601、demo 8080、workbench 5173（`ui --collector` 反代 `/api`）；实测 UI/API/agent/demo 均 200，停止后端口释放。
 - 要求本机 JDK8 + JDK21；不是自包含 EXE，也不是免 JDK。
 - 仍缺：GitHub Release 上传；自包含 EXE（Temurin 8/21 + jpackage/包装）；干净 Windows 验收。
+- 本地 app-image 已用 `scripts/package-exe.ps1` 冒烟：`TraceBoard.exe` 启动三服务、UI/API 200；但当前依赖系统 JDK8/21，且含本机 Oracle runtime，**不可作为发布 EXE**。需 Temurin 捆绑后重验。
 
 ### 2.3 GitHub 链接与可见性
 

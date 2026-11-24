@@ -34,6 +34,14 @@
 - 实测：启动后 UI `5173/` 200、UI 代理 `/api/v1/sessions/s_demo_package/agent` 200 connected、demo `/api/orders` 200 CREATED；`stop-traceboard.ps1` 释放 8080/8601/5173。
 - 未完成：GitHub Release 上传、自包含 EXE（jpackage + Temurin 包装）；当前 zip 不是 EXE，也不是免 JDK。
 
+## Windows app-image EXE（本地测试）
+
+- builder：`packaging/ReleaseLauncher.java` + `scripts/package-exe.ps1`（jpackage app-image）。
+- 本地产物：`dist/exe/TraceBoard/TraceBoard.exe`（不提交 git，含本机 Oracle JDK21 runtime，仅测试）。
+- 实测：`TraceBoard.exe` 启动 collector/demo/workbench，终端打印三个 READY，`5173/` 与 `/api/v1/.../agent` 均 200；关闭/终止后端口释放。
+- **不能作为发布 EXE**：jpackage runtime 不含 `java.exe`，当前 wrapper 依赖系统 JDK8/JDK21；发布需 Temurin JRE8/21 捆绑并重新验收。
+- 发布优先级仍是 portable zip；自包含 EXE 尚未完成。
+
 ## 仍未完成
 
 - Windows EXE 未构建：还要 Temurin JRE 8/21 + jpackage（或安装器 WiX），并在干净 Windows 验收。
