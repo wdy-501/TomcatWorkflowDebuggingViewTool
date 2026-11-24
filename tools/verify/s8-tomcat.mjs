@@ -182,7 +182,7 @@ async function main() {
     return !(f === "README.md" || f.startsWith("demo/buggy-shop-ssm-war/") || f.startsWith("docs/plans/stages/S8/") || f.startsWith("docs/plans/archive/stage-S8-") || f.startsWith("docs/plans/STAGE-PROGRESS.md") || f.startsWith("tools/verify/s8-tomcat.mjs"));
   });
   ok("S8-E2 git changes limited to S8", unexpected.length === 0, unexpected.slice(0, 3).join(",") || "S8 only");
-  ok("S8-E3 no S9+ work", !existsSync(path.join(REPO, "docs/plans/stages/S9")), "");
+  ok("S8-E3 no S10+ work (S9 docs allowed)", !existsSync(path.join(REPO, "docs/plans/stages/S10")), "");
   console.log(`S8 SUMMARY: ${pass} PASS / ${fail} FAIL`);
   console.log(`S8 TEST (Tomcat/SSM): ${fail === 0 ? "PASS" : "FAIL"}`);
   if (fail) console.log(`S8 FAILURES: ${failures.join(" | ")}`);
