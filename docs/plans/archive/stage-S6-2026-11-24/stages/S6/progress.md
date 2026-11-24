@@ -36,7 +36,7 @@ NEXT: S7（第二栈：Tomcat WAR/SSM 或 React/Webpack 二选一；需新分发
 
 ## 基线记录
 
-- 提交：`feat(S6): L2 locals, async inheritance, no-debug info and loop folding`
+- 提交：`be2f7d5` `feat(S6): L2 locals, async inheritance, no-debug info and loop folding`
 - tag：`s6-baseline`
 - 备份：`docs/plans/archive/stage-S6-2026-11-24/`（MANIFEST + SUMMARY）
 - 完整哈希：见 `docs(S6): record baseline commit` 与 `git log`。

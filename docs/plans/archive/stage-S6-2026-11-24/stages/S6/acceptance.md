@@ -44,6 +44,6 @@ S6 在 S0–S5 之上交付了 **L2 行级局部变量、×3 逐次、异步继�
 
 ## 5. 基线记录
 
-- 提交：`feat(S6): L2 locals, async inheritance, no-debug info and loop folding`（哈希见 progress/git log）。
+- 提交：`be2f7d5` `feat(S6): L2 locals, async inheritance, no-debug info and loop folding`。
 - tag：`s6-baseline`｜备份：`docs/plans/archive/stage-S6-2026-11-24/`（MANIFEST + SUMMARY）。
 - 下一步：S7（Tomcat WAR/SSM 或 React/Webpack 二选一；需新分发书）。
