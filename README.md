@@ -1,10 +1,10 @@
 # TraceBoard
 
-面向本地 Java（Spring Boot）Web 应用的“全链路事实”调试工具。当前完成 **S7（React18/Webpack5 本地基础第二栈，V1）**：
+面向本地 Java（Spring Boot / Tomcat）Web 应用的“全链路事实”调试工具。当前完成 **S8（Tomcat 8.5 + SSM WAR 第三栈，V1 本地矩阵）**：
 
-- S0 契约/骨架 → S1 ingest/查询 → S2 真实 H2 0 行 → S3 runtime SDK/EXACT/回放 → S4 launcher/preview/详情×N → S5 L1/manifest → S6 L2 行级局部变量、×3、异步继承、无调试信息、循环折叠 → **S7 React18 + Webpack5 前端第二栈：案例 A/B、经 devServer 代理的 EXACT 4-span 后端链、案例 B 零请求**。
-- 仍**没有** S8–S10：无 Tomcat/WAR/SSM、云端、SSE/WS、像素回放、持久化；React 仅基础（无构建插件/sourcemap/组件映射/JS 局部变量）。
-- 案例 A/B/L1/S6a/S6b 行为不变；S7 React 前端复用现有 Boot/H2 后端，新增端口 5175。
+- S0 契约/骨架 → S1 ingest/查询 → S2 真实 H2 0 行 → S3 runtime SDK/EXACT/回放 → S4 launcher/preview/详情×N → S5 L1/manifest → S6 L2/异步 → S7 React18 + Webpack5 基础 → **S8 Tomcat 8.5 WAR/SSM：案例 A 4-span EXACT（SQL 0 行）、案例 B 零请求、三栈本地矩阵**。
+- 仍**没有** S9–S10：云端上传/沙箱/DB/发布；Tomcat 仅本机 8.5/JDK8 基础，未做 9/10.1、未做云端 WAR。
+- 案例 A/B/L1/S6/S7 行为不变；S8 复用现有 agent 同 FQCN，不新增采集字段。
 
 ## 已真实可用（S0–S6，均可复跑）
 
@@ -18,12 +18,14 @@
 - **S5 L1 + 前端浅层**：demo `preview-discount` 在内存把 `amount 100→0`、DB 仍 100；agent 采 5 项 values（`requestedAmount` 100、`demoSecret` `[REDACTED len=6]`、`note` 截断 2KB、`amount` 100→0、`return` 0），不采局部变量/L2；graph 增加 `values`（15 字段）；workbench 详情显示 L1/脱敏/截断/old→new；`frontend/build-plugin` 生成函数 manifest，SDK 写入 `source {file,line}` + `SOURCE_MAPPED`；demo 开启 `build.sourcemap`。性能基线 ratio 1.29（WARN）。
 - **S6 L2 + 异步**：`L2DemoService#reconcileAmount` ASM 行探针，第 2 次调用 `local 100→0`（行 23/25）；`reconcileBatch` ×3 逐次可指哪次坏；`reconcileAsync` 新建 worker 线程继承上下文（`ASYNC_INHERITED`，长生命周期池/@Async/CompletableFuture 不自动传播）；`NoDebugService#compute` 无 LVT → `NOT_COLLECTED_NO_DEBUG_INFO` + reason、无 values；`reconcileLoop` 100 次 local 写入折叠为 20 样本（`VALUES_CAPPED=82`/`VALUES_TOTAL=102`、`TRUNCATED`、坏 `50→0` 保留）；L2 perf ratio **1.037**。
 - **S7 React18 + Webpack5（本地基础）**：`demo/buggy-shop-boot-react/frontend/`（5175）复用 Boot/H2 后端；案例 A `#btn-cancel` 经 devServer `/api` 代理形成 click→fetch→controller→service→mapper→sql→render 7 span、全部 EXACT、SQL `rowsAffected=0`；案例 B `validateForm` 纯前端 `RETURNED_FALSE`、3 span、`fetchCount=0`；SDK 经 `/ingest` 代理发事件。**无** React 构建插件/sourcemap/组件映射/JS 局部变量；静态 dist 无代理。
+- **S8 Tomcat 8.5 + SSM WAR（本地基础）**：`demo/buggy-shop-ssm-war/`（JDK8、ROOT.war、8081、Spring MVC/MyBatis/H2）复用 agent 同 FQCN 4 点插桩；案例 A 带 header cancel 4 后端 span 全 EXACT、SQL 0 行、订单 CREATED；preview 注入 SDK 后 A 7 事件/B 3 事件。Tomcat 启动需 `-Djava.util.logging.manager=java.util.logging.LogManager`（规避 agent hello/JULI 死锁）；仅本机 8.5/JDK8。
 
 ## 明确未实现（勿据此承诺）
 
-- **无 S8–S10**：Tomcat/WAR/SSM、云端上传/沙箱/DB/发布；React/Webpack 仅基础级第二栈。
+- **无 S9–S10**：云端上传/沙箱/DB/发布；Tomcat 仅本机 8.5 基础，未做 9/10.1、云端 WAR；无 SSE/WS/持久化。
 - **S6 限制**：L2 仅 `L2DemoService#reconcileAmount/reconcileLoop` 等选中方法；行级字段写入/对象深采/多方法 L2 未支持；异步只在**新建线程创建时**继承（长生命周期池、`@Async`、`CompletableFuture` 不自动传播）；no-debug 仅 `NoDebugService#compute`（antrun `debug=false`）；loop 折叠保留首/尾/样本非全量；L2 perf 为本地短请求基线。
 - **S7 限制**：React18/Webpack5 仅本地基础、复用现有 Boot 后端；无 JS 源码位置/组件树/JS 局部变量/回调内部；无构建插件/manifest/sourcemap；只有 devServer 代理路径，静态 `dist` 无代理；未做 React 生产发布。
+- **S8 限制**：仅 Tomcat 8.5.60/JDK8 本机、ROOT.war；SSM 只做案例 A/B，无 L1/L2/异步；页面需 launcher preview 注入 SDK；Tomcat 启动必须加 `-Djava.util.logging.manager=java.util.logging.LogManager`；无截图证据（浏览器 surface 不可见）；未做 9/10.1、云端 WAR、CI 矩阵。
 - 无 SSE/WebSocket/实时推送；workbench 5 秒轮询；replay 只隐藏未来事件，不重跑程序、不重发请求、不写数据库。
 - collector/H2 均为内存存储，重启即清空；agent 握手记录 collector 重启即丢；无鉴权/保留/淘汰/CORS。
 - preview 注入仅在 `npm run dev` 的反代路径验证；Vite 的 `preview`/静态 dist 无代理。CSP 只允许 nonce/hash 的站点可能阻止外部脚本执行，launcher 只报“已注入”，不谎称“已执行”。
@@ -60,6 +62,9 @@ JAVA_HOME="C:/Program Files/Java/jdk-21" mvn -B -q -DskipTests package
 
 # 5) S7 React 前端（先确保 frontend/sdk/dist 已构建）
 (cd "demo/buggy-shop-boot-react/frontend" && npm ci && npm run build)
+
+# 6) S8 Tomcat SSM WAR（JDK8；部署到 Tomcat 8.5 的独立 CATALINA_BASE）
+(cd "demo/buggy-shop-ssm-war" && JAVA_HOME="C:/Program Files/Java/jdk1.8.0_221" mvn -B -q -DskipTests package)
 ```
 
 产物：`agent/target/traceboard-agent-0.1.0-SNAPSHOT.jar`（major 52、shaded Byte Buddy）、
@@ -153,6 +158,9 @@ COLLECTOR="http://127.0.0.1:8601"
 
 (cd "tools/verify" && node s7-react.mjs)
 # 期望：S7 TEST (React18/Webpack5): PASS；--no-e2e 仅做静态组
+
+(cd "tools/verify" && node s8-tomcat.mjs)
+# 期望：18 PASS / 0 FAIL；S8 TEST (Tomcat/SSM): PASS（构建 WAR + 隔离 Tomcat + 4-span）
 ```
 
 覆盖：S0 契约/fixture；S1 ingest/查询；S2 H2 0 行/4-span/DB 不变；S3 SDK/案例 B/EXACT/replay 0 写；
@@ -164,7 +172,7 @@ S7 React18/Webpack5：独立 35 项（A 构建/产物、B 静态契约、C 代�
 ## 地址与限制
 
 - collector/launcher preview 只绑 `127.0.0.1`；浏览器入口用 `localhost`（Vite 可能绑 `[::1]`）。
-- 端口：collector 8601、demo 8080、workbench 5173、Vue demo 前端 5174、React demo 5175、preview 8602、Vite preview 4173/4174、静态测试 18080。
+- 端口：collector 8601、demo 8080、workbench 5173、Vue demo 前端 5174、React demo 5175、Tomcat SSM 8081、preview 8602、Vite preview 4173/4174、静态测试 18080。
 - 代理仅在 dev 生效；静态 dist 无代理。H2/collector 无持久化，重启清空。
 - S5 demo 前后端需同一会话：demo 前端 SDK 使用 `s_s3demo`，后端 agent 也必须用 `-Dtraceboard.sessionId=s_s3demo` 才能 EXACT 关联。
 - git 分支 `master`；无 secret/真实客户数据；不暴露到非回环网络。
@@ -189,6 +197,7 @@ S7 React18/Webpack5：独立 35 项（A 构建/产物、B 静态契约、C 代�
 | `docs/plans/stages/S5/` | S5 分发/计划/G1/测试/验收/进度 |
 | `docs/plans/stages/S6/` | S6 分发/计划/G1/测试/验收/进度（s6a/s6b） |
 | `docs/plans/stages/S7/` | S7 分发/计划/G1/测试/验收/进度（React18/Webpack5 基础） |
+| `docs/plans/stages/S8/` | S8 分发/计划/矩阵/测试/审阅/验收（Tomcat 8.5/SSM WAR） |
 | `docs/guides/local-launcher.md` | IDEA/JAR/preview/diagnose 接入指南 |
 | `docs/plans/stages/S4/` | S4 分发/修订/计划/G1/测试/验收/进度 |
 | `docs/plans/archive/stage-S4-2026-11-23/` | S4 归档快照（MANIFEST/SUMMARY） |

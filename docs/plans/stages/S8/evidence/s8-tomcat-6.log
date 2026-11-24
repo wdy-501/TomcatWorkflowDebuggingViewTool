@@ -1,0 +1,83 @@
+[traceboard-agent] premain installed: targets=com.example.shop.controller.OrderController#cancel(long)/#previewDiscount(long,double,String,String)/#reconcile(long)/#reconcileAsync(long)/#noDebug(long)/#reconcileLoop(long,int), com.example.shop.service.OrderService#cancel(long)/#previewDiscount(long,double,String,String), org.apache.ibatis.binding.MapperProxy#invoke, org.apache.ibatis.executor.statement.PreparedStatementHandler#update, com.example.shop.model.Order#setAmount(double), com.example.shop.service.L2DemoService#reconcileAmount|#reconcileLoop (ASM), com.example.shop.service.NoDebugService#compute (ASM, no-debug); ingestUrl=http://127.0.0.1:8601/ingest/v1/events, sessionId=s_s8tomcat
+[traceboard-agent] hello_sent=1
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: Server.服务器版本: Apache Tomcat/8.5.60
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 服务器构建:        Nov 12 2020 17:31:55 UTC
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 服务器版本号:      8.5.60.0
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 操作系统名称:      Windows 10
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: OS.版本:           10.0
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 架构:              amd64
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: Java 环境变量:     C:\Program Files\Java\jdk1.8.0_221\jre
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: Java虚拟机版本:    1.8.0_221-b11
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: JVM.供应商:        Oracle Corporation
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: CATALINA_BASE:     D:\Qoder 高校创造力大赛\TomcatWorkflowDebuggingViewTool\work\s8-tomcat
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: CATALINA_HOME:     D:\apache-tomcat-8.5.60\apache-tomcat-8.5.60
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -javaagent:agent/target/traceboard-agent-0.1.0-SNAPSHOT.jar
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -Dtraceboard.sessionId=s_s8tomcat
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -Dfile.encoding=UTF-8
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -Djava.util.logging.manager=java.util.logging.LogManager
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -Dcatalina.home=D:/apache-tomcat-8.5.60/apache-tomcat-8.5.60
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -Dcatalina.base=D:/Qoder 高校创造力大赛/TomcatWorkflowDebuggingViewTool/work/s8-tomcat
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.startup.VersionLoggerListener log
+信息: 命令行参数：       -Djava.io.tmpdir=D:/Qoder 高校创造力大赛/TomcatWorkflowDebuggingViewTool/work/s8-tomcat/temp
+十一月 24, 2026 12:29:10 下午 org.apache.catalina.core.AprLifecycleListener lifecycleEvent
+信息: 在java.library.path:[C:\Program Files\Java\jdk1.8.0_221\bin;C:\WINDOWS\Sun\Java\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\Users\13357\.qoder-cn\bin;C:\Users\13357\.qoder-cn\plugins\cache\qoderapp-bundler\qoder-context\1.0.102.7c750f24\bin;C:\Users\13357\.qoder-cn\plugins\cache\qoderapp-bundler\qoder-memory\0.1.2\bin;C:\Users\13357\bin;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\local\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Users\13357\bin;C:\Users\13357\.qoder-cn\bin;C:\Program Files\Git\cmd;C:\Users\13357\AppData\Local\pnpm;C:\WINDOWS\System32;C:\WINDOWS;%JAVA_HOME%\bin;C:\Users\13357\AppData\Local\Programs\Python\Python310;C:\Users\13357\AppData\Local\Programs\Python\Python310\Scripts;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\libnvvp;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\System32\OpenSSH;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\NVIDIA Corporation\NVIDIA NvDLISR;D:\Bandizip;F:\Microsoft VS Code\bin;C:\Program Files\NVIDIA Corporation\Nsight Compute 2023.3.0;C:\Program Files\dotnet;%CATALINA_HOME%\bin;%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SYSTEMROOT%\System32\WindowsPowerShell\v1.0;%SYSTEMROOT%\System32\OpenSSH;F:\JetBrains\PyCharm 2025.2\bin;F:\JetBrains\RustRover 2026.2.1\bin;C:\Users\13357\AppData\Local\Programs\nodejs;C:\Users\13357\.cudnn\v12.3\bin;F:\JetBrains\IntelliJ IDEA 2025.2\bin;D:\apache-maven-3.9.5-bin\apache-maven-3.9.5\bin;D:\mysql-8.0.25-winx64\mysql-8.0.25-winx64\bin;F:\miniconda3\condabin;C:\platform-tools\platform-tools;%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;C:\Program Files\Git\usr\bin\vendor_perl;C:\Program Files\Git\usr\bin\core_perl;.]上找不到基于APR的Apache Tomcat本机库，该库允许在生产环境中获得最佳性能
+十一月 24, 2026 12:29:10 下午 org.apache.coyote.AbstractProtocol init
+信息: 初始化协议处理器 ["http-nio-8081"]
+十一月 24, 2026 12:29:11 下午 org.apache.tomcat.util.net.NioSelectorPool getSharedSelector
+信息: Using a shared selector for servlet write/read
+十一月 24, 2026 12:29:11 下午 org.apache.catalina.startup.Catalina load
+信息: Initialization processed in 658 ms
+十一月 24, 2026 12:29:11 下午 org.apache.catalina.core.StandardService startInternal
+信息: 正在启动服务[Catalina]
+十一月 24, 2026 12:29:11 下午 org.apache.catalina.core.StandardEngine startInternal
+信息: Starting Servlet Engine: Apache Tomcat/8.5.60
+十一月 24, 2026 12:29:11 下午 org.apache.catalina.startup.HostConfig deployWAR
+信息: 正在部署web应用程序存档文件[D:\Qoder 高校创造力大赛\TomcatWorkflowDebuggingViewTool\work\s8-tomcat\webapps\ROOT.war]
+十一月 24, 2026 12:29:12 下午 org.apache.jasper.servlet.TldScanner scanJars
+信息: 至少有一个JAR被扫描用于TLD但尚未包含TLD。 为此记录器启用调试日志记录，以获取已扫描但未在其中找到TLD的完整JAR列表。 在扫描期间跳过不需要的JAR可以缩短启动时间和JSP编译时间。
+十一月 24, 2026 12:29:12 下午 org.apache.catalina.core.ApplicationContext log
+信息: 1 Spring WebApplicationInitializers detected on classpath
+十一月 24, 2026 12:29:12 下午 org.apache.catalina.core.ApplicationContext log
+信息: Initializing Spring root WebApplicationContext
+十一月 24, 2026 12:29:12 下午 org.springframework.web.context.ContextLoader initWebApplicationContext
+信息: Root WebApplicationContext: initialization started
+[traceboard-agent] transformed com.example.shop.service.OrderService
+[traceboard-agent] transformed com.example.shop.model.Order
+[traceboard-agent] transformed org.apache.ibatis.binding.MapperProxy
+十一月 24, 2026 12:29:13 下午 org.springframework.web.context.ContextLoader initWebApplicationContext
+信息: Root WebApplicationContext initialized in 856 ms
+十一月 24, 2026 12:29:13 下午 org.apache.catalina.core.ApplicationContext log
+信息: Initializing Spring DispatcherServlet 'dispatcher'
+十一月 24, 2026 12:29:13 下午 org.springframework.web.servlet.FrameworkServlet initServletBean
+信息: Initializing Servlet 'dispatcher'
+[traceboard-agent] transformed com.example.shop.controller.OrderController
+十一月 24, 2026 12:29:13 下午 org.springframework.web.servlet.FrameworkServlet initServletBean
+信息: Completed initialization in 428 ms
+十一月 24, 2026 12:29:13 下午 org.apache.catalina.startup.HostConfig deployWAR
+信息: web应用程序存档文件[D:\Qoder 高校创造力大赛\TomcatWorkflowDebuggingViewTool\work\s8-tomcat\webapps\ROOT.war]的部署已在[2,438]ms内完成
+十一月 24, 2026 12:29:13 下午 org.apache.coyote.AbstractProtocol start
+信息: 开始协议处理句柄["http-nio-8081"]
+十一月 24, 2026 12:29:13 下午 org.apache.catalina.startup.Catalina start
+信息: Server startup in 2470 ms
+[traceboard-agent] transformed org.apache.ibatis.executor.statement.PreparedStatementHandler
+十一月 24, 2026 12:29:31 下午 org.springframework.web.servlet.DispatcherServlet noHandlerFound
+警告: No mapping for GET /favicon.ico

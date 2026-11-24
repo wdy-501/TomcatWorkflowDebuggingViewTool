@@ -1,10 +1,10 @@
 # TraceBoard 阶段进度看板（S0–S10）
 
-> 更新时间：2026-11-24｜最新已验收：S7（`s7-baseline`）｜下一阶段：S8
-> 最近门禁：S0–S6 全量 **75 PASS / 0 FAIL** + S7 **35 PASS / 0 FAIL**（`S7 TEST (React18/Webpack5): PASS`）；S7 E2E A 7 span/B 3 span 全 EXACT
+> 更新时间：2026-11-24｜最新已验收：S8（`s8-baseline`）｜下一阶段：S9
+> 最近门禁：S0–S6 **75 PASS** + S7 **35 PASS** + S8 **18 PASS**；三栈本地矩阵已落
 > 权威计划：[SOLO-PLAN.md](SOLO-PLAN.md)、[00-master-plan.md](00-master-plan.md)
 > 用途：目标暂停/恢复/换账号后，以本文件 + git tag/阶段备份为准，不依赖聊天上下文。
-> 当前分支：`master`｜最新已验收 tag：`s7-baseline`
+> 当前分支：`master`｜最新已验收 tag：`s8-baseline`
 
 ## 1. 总览
 
@@ -18,8 +18,8 @@
 | **S5** | L1 与前端浅层：参数/字段、脱敏/截断、sourcemap、Vite/Vue 浅层、性能基线 | ✅ 已验收 | tag `s5-baseline`；`docs/plans/stages/S5/`；archive `stage-S5-2026-11-23/`；70/70；L1 100→0/脱敏/截断；manifest/source；perf 1.29 WARN |
 | **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | ✅ 已验收 | tag `s6-baseline`；`docs/plans/stages/S6/`；archive `stage-S6-2026-11-24/`；75/75；行级 100→0/×3、ASYNC/no-debug/loop fold、perf 1.037 |
 | **S7** | 第二栈：选择 React18/Webpack5 前端（Tomcat 留 S8 候选） | ✅ 已验收 | tag `s7-baseline`；`docs/plans/stages/S7/`；archive `stage-S7-2026-11-24/`；75+35 PASS；A 7 span/B 3 span；基础级 |
-| **S8** | 第三栈/矩阵：Tomcat WAR/SSM 或另一栈 + 兼容报告 | ⬜ 未开始 | 任务 #32；扩展 |
-| **S9** | 云端 Boot：上传/隔离/DB/预览/保留/启动诊断 | ⬜ 未开始 | 任务 #33；云端（后置） |
+| **S8** | 第三栈/矩阵：Tomcat 8.5 + SSM WAR + 本地三栈矩阵 | ✅ 已验收 | tag `s8-baseline`；`docs/plans/stages/S8/`；archive `stage-S8-2026-11-24/`；18 PASS；A 4-span EXACT/0 行；B 零 fetch |
+| **S9** | 云端 Boot：上传/沙箱/DB/预览/保留/启动诊断 | ⬜ 未开始 | 任务 #33；云端（后置） |
 | **S10** | 云端 WAR/发布：安全审查、发布/回滚/用户测试 | ⬜ 未开始 | 任务 #34；云端（后置） |
 
 ## 2. 多 agent 流水线执行记录
@@ -34,6 +34,7 @@
 | S5 | ✅ | ✅ | ✅（1 轮返工） | ✅ L1 demo/agent + 前端 manifest + collector/workbench values | ✅ **70/70** | ✅ | ✅ tag `s5-baseline` |
 | S6 | ✅ | ✅ | ✅ | ✅ L2 ASM + async/no-debug/loop + UI/perf | ✅ **75/75** | ✅ | ✅ tag `s6-baseline` |
 | S7 | ✅ | ✅ | ✅（0 blocker，R1–R8） | ✅ coder-react（独立 React 路径；后端/SDK 零改） | ✅ **35/35**（+75 回归） | ✅ | ✅ tag `s7-baseline` |
+| S8 | ✅ | ✅ | ✅（独立审阅 + 风险记录） | ✅ SSM WAR（Tomcat/JDK8；agent 零改） | ✅ **18/18**（+75+35 回归） | ✅ | ✅ tag `s8-baseline` |
 
 ## 3. 当前验证与质量门
 
@@ -65,12 +66,19 @@
 3. ✅ 回归 75/75 + S7 35/35；浏览器三张证据；G1 PASS；README/API §2.8+附录 H 已更新。
 4. ✅ 备份 `docs/plans/archive/stage-S7-2026-11-24/`；tag `s7-baseline`；下一阶段 S8（Tomcat 或第三栈/矩阵，需新分发书）。
 
+## 4.3 S8 收尾记录
+
+1. ✅ 第三栈：Tomcat 8.5.60 + SSM WAR（Spring MVC/MyBatis/H2），同 FQCN 复用 agent 4 点插桩；agent/SDK/collector 零改动。
+2. ✅ 后端 A：cancel 200、4 span 全 EXACT、controller.parent=header span、SQL 0 行、订单 CREATED；preview 注入 SDK 后 A 7 事件/B 3 事件零 fetch。
+3. ✅ 门禁：S8 18/18；S0–S6 75/75；S7 35/35（E4 迁移允许 S8）。已知限制：JUL manager 开关、无截图、仅本机 8.5/JDK8。
+4. ✅ 矩阵 `S8/matrix.md` 三栈+云端未做；备份/tag `s8-baseline`；下一阶段 S9 云端（后置），不开始。
+
 ## 5. 恢复方法（目标暂停后）
 
 1. 读本文件 + `SOLO-PLAN.md` 当前阶段行；不要依赖聊天记忆。
 2. 查 `git log --oneline --decorate -10` 与 `git tag` 确认最后验收点。
 3. 查 `docs/plans/stages/Sx/` 的 `progress.md`、`acceptance.md`、`test-report.md`。
-4. 未验收阶段（当前 S8）先完成剩余动作，不跨阶段；验收后才开始 Sx+1。
+4. 未验收阶段（当前 S9）先完成剩余动作，不跨阶段；验收后才开始 Sx+1。
 5. 每个阶段结束：更新本看板 + 新备份 + tag。
 
 ## 6. 关键入口
@@ -78,5 +86,6 @@
 - 总计划：[SOLO-PLAN.md](SOLO-PLAN.md)｜主计划：[00-master-plan.md](00-master-plan.md)｜索引：[README.md](README.md)
 - S6 计划/评审/测试：[s6a-plan.md](stages/S6/s6a-plan.md)、[s6b-plan.md](stages/S6/s6b-plan.md)、[test-report.md](stages/S6/test-report.md)
 - S7 计划/评审/测试：[s7-plan.md](stages/S7/s7-plan.md)、[plan-review.md](stages/S7/plan-review.md)、[test-report.md](stages/S7/test-report.md)
+- S8 计划/矩阵/测试：[s8-plan.md](stages/S8/s8-plan.md)、[matrix.md](stages/S8/matrix.md)、[test-report.md](stages/S8/test-report.md)
 - 启动器指南：[docs/guides/local-launcher.md](../guides/local-launcher.md)｜前端浅层插件：[docs/guides/frontend-shallow-plugin.md](../guides/frontend-shallow-plugin.md)
-- 阶段备份：`docs/plans/archive/stage-S0...stage-S7`
+- 阶段备份：`docs/plans/archive/stage-S0...stage-S8`

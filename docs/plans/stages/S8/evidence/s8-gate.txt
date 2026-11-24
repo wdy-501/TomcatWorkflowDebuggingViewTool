@@ -1,0 +1,21 @@
+S8 Tomcat 8.5 / SSM gate
+PASS S8-A1 WAR/SSM dependencies pinned
+PASS S8-A2 same FQCN controller/service/mapper
+PASS S8-A3 0-row defect + seed CREATED
+PASS S8-A4 page selectors/API/no B fetch
+PASS S8-A5 matrix has 3 local stacks + cloud unsupported
+PASS S8-A6 frozen surfaces unchanged (agent/collector/SDK/workbench clean)
+PASS S8-B1 WAR build exit 0 (12498 KiB)
+PASS S8-B2 collector healthy (8601)
+PASS S8-B3 WAR serves /api/orders CREATED (8081)
+PASS S8-B4 agent hello connected s_s8tomcat ({"sessionId":"s_s8tomcat","connected":true,"version":"0.1.0-)
+PASS S8-C1 cancel returns 200 (status=200)
+PASS S8-C2 4 backend spans all EXACT (sql,mapper,service,controller)
+PASS S8-C3 controller.parent=traceparent span (ffffffffffffffff)
+PASS S8-C4 SQL rowsAffected=0 + order CREATED
+PASS S8-E1 port 8081 free
+PASS S8-E1 port 8601 free
+PASS S8-E2 git changes limited to S8 (S8 only)
+PASS S8-E3 no S9+ work
+S8 SUMMARY: 18 PASS / 0 FAIL
+S8 TEST (Tomcat/SSM): PASS
