@@ -13,9 +13,8 @@
 
 ## 2. 发布阻塞
 
-- `prepare_site`（actionId `fcbab4bf-84d6-45b6-b460-a8ab786bbce3`，projectRoot `site/traceboard`，webDirectory `dist`，displayName `TraceBoard`，slug `traceboard-demo`，createNewSite=true）连续两次返回 `sites_unavailable`。
-- 未返回草稿/Deployment/发布状态；未调用 publish_site，未声称 `published: true`。
-- `list_sites` 可读且为空；`get_context` 正常。判断为 Sites 云端准备服务不可用/受限，不是站点构建失败。
+- `prepare_site`（actionId `fcbab4bf-84d6-45b6-b460-a8ab786bbce3`，projectRoot `site/traceboard`，webDirectory `dist`，displayName `TraceBoard`，slug `traceboard-demo`，createNewSite=true）已按同一 action/输入重试 4 次（含等待后重试），均返回 `sites_unavailable`；`get_publish_status` 返回 `sites_action_unavailable`，没有创建 action/草稿。
+- `openapi.qoder.com.cn` 与 `api.qoder.com.cn` 网络可达（HTTP 404 根路径，时延 <0.3s），`list_sites` 可读且为空；判断为 Sites 云端准备服务/账号能力不可用，而非本地构建或网络故障。
 
 ## 3. 恢复步骤
 
