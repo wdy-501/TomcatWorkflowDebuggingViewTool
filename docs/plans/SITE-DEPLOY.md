@@ -36,13 +36,12 @@ scripts/package-windows.ps1
 - 公开前检查 git 历史无 secret；demo 假值也复核。
 - 许可证由用户选（MIT/Apache-2.0）；第三方 NOTICE 保留。
 
-### 2.2 EXE 前置
+### 2.2 Windows 便携包
 
-- launcher `ui` 静态托管已补并冒烟 PASS：`ui --dir workbench/dist [--port 5173]`；仅回环、GET/HEAD、无目录列表、越界 404、405。
-- 记录：`docs/plans/RELEASE-UI-SMOKE.md`。
-- 仍缺：Eclipse Temurin JRE 8/21（GPLv2+CE，禁止再分发 Oracle JDK）+ jpackage/可选 WiX；未构建 EXE，不得宣称已有。
-- 便携 zip 优先；安装器 EXE 需签名/未签名 SmartScreen 提示。
-- EXE 是多进程启动器，不是把所有服务做成单进程；先验证干净 Windows 启动/退出/健康检查。
+- 已构建本地 portable zip：`dist/release/TraceBoard-0.1.0-win-x64-portable.zip`；SHA256 记录在 `docs/plans/RELEASE-UI-SMOKE.md`。
+- 启动/停止：`Run-TraceBoard.cmd` / `Stop-TraceBoard.cmd`；启动 collector 8601、demo 8080、workbench 5173（`ui --collector` 反代 `/api`）；实测 UI/API/agent/demo 均 200，停止后端口释放。
+- 要求本机 JDK8 + JDK21；不是自包含 EXE，也不是免 JDK。
+- 仍缺：GitHub Release 上传；自包含 EXE（Temurin 8/21 + jpackage/包装）；干净 Windows 验收。
 
 ### 2.3 GitHub 链接与可见性
 
