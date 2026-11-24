@@ -1,40 +1,39 @@
-# TraceBoard 站点（预置快照演示）
+# TraceBoard 公网站点（原版介绍 + 内嵌工作台）
 
-单页、无构建、无外部依赖的 TraceBoard 交互演示。
+公开访问：<https://traceboard-32843bp8pzz.qoder.zone>
 
-> 交付边界（v2）：Qoder Sites 只承载展示/静态资源/轻量 Functions，**不运行 Java JAR/WAR**。
-> 真实运行留在本地或单租户 Live Demo；S9 多租户沙箱后置。完整方案见 `docs/plans/SITE-DEPLOY.md`。
-
-## 本地预览
-
-```bash
-(cd "site/traceboard" && python -m http.server 5180 --bind 127.0.0.1)
-# http://127.0.0.1:5180/
-```
-
-交互：切换案例 A/B/L2、点击事实节点看详情、拖动/播放回放；案例 B 明确显示 fetchCount=0。
-数据为 S6/S7/S8 验收快照，**不是实时 collector**；云端上传/沙箱未实现，不宣称线上服务。
-
-## 发布/GitHub 状态
-
-- **本地验收 PASS**：A/B/L2、详情、回放、资产、截图均通过；报告 `ACCEPTANCE.md`，证据 `evidence/`。
-- **GitHub 已 public**：<https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool>（MIT）。
-- **Release v0.1.0 已实际存在**：4 个资产（portable zip、exe zip、双 SHA256）：
-  <https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases/tag/v0.1.0>
-- 站点介绍已加入 GitHub 源码 / Windows 包链接；本地复验通过。
-- **Qoder Site 仍未部署**：按约定最后一步；当前账号切换后再用新 action/slug 发布。
-- 私有 Pages 失败工作流已删除；不重加。
-- 不伪造 `published: true`，不另建 Qoder 站点。
+公网首页保留原版介绍风格（头部、矩阵、边界）；中间内嵌与本地 `http://127.0.0.1:5173` 相同的工作台静态版，
+并提供全屏入口 `/app/`。工作台从 `app/demo-data.js` 读取 7 个预置案例，不依赖 collector、后端或 Java；
+可以直接切换案例、查看树形链路、节点详情、请求体字段、变量、flags、时间轴关键帧和慢放回放。
 
 ## 文件
 
-- `index.html`：页面与 Nudge 变量消费入口
-- `assets/styles.css`：暗色仪表盘样式、响应式、reduced-motion
-- `assets/app.js`：三案例数据、事实树、详情、回放
-- `dist/`：准备发布的静态产物（`webDirectory=dist`）
-- `traceboard-site.tar.gz`：可直接上传任意静态托管的便携包
+- `dist/`：发布目录（`webDirectory=dist`）
+- `dist/index.html` + `dist/assets/`：原版介绍页
+- `dist/app/`：工作台构建 + `demo-data.js`（7 个案例快照）
+- `demo-data.js`：工作台源数据（由 `workbench/scripts/export-demo-data.mjs` 生成）
+- `.TraceBoard.qoder.site`：Qoder Site 描述（含当前 publication）
+- `overview/`：旧版介绍页备份，不在发布目录中
+- `traceboard-site.tar.gz`：当前 dist 便携包
 
-## GitHub Pages
+## 重新生成静态示例
 
-**已移除**：当前 GitHub 仓库是 private，Pages 工作流在私有仓库/账号能力下失败（deploy 跳过），不应继续触发。
-如果以后改为 public 并确认 Pages 可用，再单独加入静态工作流；当前没有公网 URL，也不把私有仓库链接放到公开站点。
+```bash
+# 1) 本地服务开启并产生示例数据
+node workbench/scripts/export-demo-data.mjs site/traceboard/demo-data.js
+# 2) 构建工作台
+(cd workbench && npm run build)
+# 3) 复制并注入 demo-data.js（保留 dist 目录，清空旧内容）
+# 原版首页复制到 dist 根；工作台复制到 dist/app；注入 demo-data.js
+# 在 dist/index.html 的 module script 前加入 <script src="./demo-data.js"></script>
+```
+
+随后用 Qoder Site 的 prepare/publish 流程发布 `site/traceboard`（`webDirectory=dist`）。
+
+## 边界
+
+- 页面是预置快照，不是实时 collector；不会上传、连接 Java 或写入数据库。
+- 页面只显示已采集到的数据；未采集节点显示原因/缺口，不伪造值。
+- 请求体来自内置 Demo 的 fetch 节点，本地演示不脱敏。
+- S9/S10 云端上传与沙箱按用户确认不做。
+- 发布状态：public，`published:true`。

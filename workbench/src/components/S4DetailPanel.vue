@@ -43,6 +43,15 @@ import {
   type NodeGroup,
 } from "../s4/derive";
 import {
+  compactNodeKey,
+  controlNameFor,
+  flagDescription,
+  kindLabel,
+  nodeSqlSummary,
+  repoSourcePath,
+  statusChinese,
+} from "../s4/labels";
+import {
   L1_STATIC_NOTE,
   VALUES_EMPTY_TEXT,
   hasL1Flag,
@@ -129,7 +138,8 @@ const selectionTitle = computed<string>(() => {
   }
   const total = selectedGroup.value.length;
   const index = invocationIndex.value >= 0 ? invocationIndex.value + 1 : 1;
-  return `${node.kind} · ${node.nodeKey} · 第 ${index}/${total} 次`;
+  const times = total > 1 ? ` · 第 ${index}/${total} 次` : "";
+  return `${kindLabel(node.kind)} · ${compactNodeKey(node.kind, node.nodeKey)}${times}`;
 });
 
 interface InvocationView {
@@ -201,22 +211,145 @@ const foldNoteText = computed<string | null>(() =>
 /** S5 rows verbatim in collected order (param → field → return); null/[] = empty. */
 const values = computed(() => (selectedNode.value === null ? [] : valueRows(selectedNode.value)));
 
+const requestValues = computed(() =>
+  values.value.filter(
+    (value) => value.name.startsWith("query.") || value.name.startsWith("body.")
+  )
+);
+
+const valueHeading = computed<string>(() => {
+  if (l2Node.value) {
+    return "采集到的值 · 行级局部变量";
+  }
+  if (requestValues.value.length > 0) {
+    return "请求参数与请求体";
+  }
+  return "采集到的值 · 参数 / 字段变化 / 返回值";
+});
+
 /** Value-row invocation denominator: collected spans sharing the nodeKey. */
 const valuesTotal = computed<number>(() => Math.max(1, selectedGroup.value.length));
 
 /** S5 source display from the graph node; manifest hits get the suffix. */
-const sourceLabel = computed<string>(() =>
-  selectedNode.value === null ? MISSING : s5SourceText(selectedNode.value)
+const sourceLabel = computed<string>(() => {
+  const node = selectedNode.value;
+  if (node === null) {
+    return MISSING;
+  }
+  const own = s5SourceText(node);
+  if (own !== MISSING || node.kind !== "ui_event") {
+    return own;
+  }
+  const controller = props.nodes.find(
+    (item) => item.kind === "controller" && item.source?.file
+  );
+  if (controller?.source?.file) {
+    const line = controller.source.line === null ? "" : `:${controller.source.line}`;
+    return `页面源码未采集；后端入口 ${controller.source.file}${line}`;
+  }
+  return own;
+});
+
+const selectedControlName = computed<string | null>(() => {
+  const node = selectedNode.value;
+  return node !== null && node.kind === "ui_event" ? controlNameFor(node.nodeKey) : null;
+});
+
+const selectedRepoPath = computed<string | null>(() =>
+  selectedNode.value === null ? null : repoSourcePath(selectedNode.value)
 );
+
+const hasValues = computed<boolean>(() => values.value.length > 0);
+
+/** Only show the value card when the node actually carries values or a value-mode flag. */
+const showValues = computed<boolean>(
+  () => hasValues.value || l1Badge.value || l2Node.value || noDebugNode.value || asyncNode.value
+);
+
+const hasSql = computed<boolean>(() => {
+  const node = selectedNode.value;
+  return node !== null && (node.kind === "sql" || node.sideEffects.length > 0);
+});
+
+const hasUi = computed<boolean>(() => {
+  const node = selectedNode.value;
+  return node !== null && (node.kind === "render" || selectedEffect.value !== null);
+});
+
+const effectiveTab = computed<DetailTab>(() => {
+  if (!hasSql.value) {
+    return "ui";
+  }
+  if (!hasUi.value) {
+    return "sql";
+  }
+  return tab.value;
+});
+
+const sqlText = computed<string>(() => {
+  const node = selectedNode.value;
+  return node === null ? "未采集" : nodeSqlSummary(node);
+});
+
+const reasonLabel = computed<string>(() =>
+  selectedNode.value === null ? "—" : reasonText(selectedNode.value)
+);
+
+const hasReason = computed<boolean>(
+  () => reasonLabel.value !== "—" && reasonLabel.value.length > 0
+);
+
+const hasUnknownTransaction = computed<boolean>(
+  () =>
+    selectedNode.value?.sideEffects.some(
+      (effect) => effect.transaction === "UNKNOWN" || effect.transaction === null
+    ) ?? false
+);
+
+function transactionLabel(value: string | null): string {
+  if (value === "COMMITTED") {
+    return "已提交";
+  }
+  if (value === "ROLLED_BACK") {
+    return "已回滚";
+  }
+  if (value === "UNKNOWN" || value === null) {
+    return "未采集";
+  }
+  return value;
+}
+
+function gapRuleText(rule: string): string {
+  if (rule === "FETCH_WITHOUT_BACKEND") {
+    return "请求未关联";
+  }
+  if (rule === "NOT_COLLECTED_REASON") {
+    return "状态未采集";
+  }
+  if (rule === "ROWS_NOT_COLLECTED") {
+    return "影响行数未采集";
+  }
+  return rule;
+}
+
+function transactionTitle(value: string | null): string {
+  return value === "UNKNOWN"
+    ? "UNKNOWN：没有采集事务提交/回滚边界"
+    : value === null
+      ? "未采集"
+      : value;
+}
+
+const gapCount = computed<number>(() => gaps.value.length);
 
 const emptyText = computed<string>(() => {
   if (props.nodes.length === 0) {
-    return "空态：暂无事实链节点（未采集）；选择请求后显示节点详情。";
+    return "暂无链路节点；选择一条请求后再点节点查看详情。";
   }
   if (props.selectedSpanId === null) {
-    return "尚未选择节点：点击左侧事实树节点或上方 ×N 分组查看节点详情。";
+    return "点击左侧链路中的节点，查看这里的中文摘要与技术细节。";
   }
-  return "所选节点不在当前事实链/回放窗口中（可能已切换 trace 或事件未发生）。";
+  return "所选节点不在当前链路或回放窗口中。";
 });
 
 function selectGroup(group: NodeGroup): void {
@@ -239,6 +372,10 @@ function onInvocationChange(event: Event): void {
 function onClose(): void {
   emit("close");
 }
+
+function valuePreview(text: string): string {
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+}
 </script>
 
 <template>
@@ -256,41 +393,48 @@ function onClose(): void {
       </button>
     </header>
 
-    <p class="s4-detail__hint">
-      {{ XN_DEMO_LABEL }} —— 同 nodeKey 的已采集 span 聚合（树行徽标 ×N；点击分组查看逐次调用）。
-    </p>
-
-    <div id="s4-group-badge" class="s4-group-badge" aria-label="×N 分组">
-      <button
-        v-for="group in multiGroups"
-        :key="group.nodeKey"
-        type="button"
-        class="s4-group-badge__item"
-        :class="{ 's4-group-badge__item--active': selectedNode !== null && selectedNode.nodeKey === group.nodeKey }"
-        :data-node-key="group.nodeKey"
-        :title="`${group.count} 次同 nodeKey 调用（前端聚合显示；运行时 ×3 见 L2DemoService#reconcileAmount / reconcileAsync）`"
-        @click="selectGroup(group)"
-      >
-        <span class="s4-xn">{{ group.badge }}</span>
-        <span class="s4-group-badge__kind">{{ group.kind }}</span>
-        <code class="s4-group-badge__key">{{ group.nodeKey }}</code>
-      </button>
-      <p v-if="multiGroups.length === 0" class="s4-detail__muted">
-        未发现 ×N 分组（所选 trace 内没有 N≥2 的同 nodeKey 调用）。
-      </p>
-    </div>
-
     <template v-if="selectedNode !== null">
-      <p id="s4-detail-title" class="s4-detail__title" :title="selectedNode.spanId">
-        {{ selectionTitle }}
-      </p>
-
-      <div id="s4-detail-status" class="s4-detail__status">
-        <span class="s3-status" :class="`s3-status--${statusMeta(selectedNode.status).tone}`">
-          {{ statusMeta(selectedNode.status).label }}
-        </span>
-        <span class="s4-detail__reason">reason：{{ reasonText(selectedNode) }}</span>
+      <div class="s4-hero">
+        <p id="s4-detail-title" class="s4-detail__title" :title="selectedNode.spanId">
+          {{ selectionTitle }}
+        </p>
+        <p class="s4-hero__facts">
+          <span class="s3-status" :class="`s3-status--${statusMeta(selectedNode.status).tone}`">
+            {{ statusChinese(selectedNode.status) }}
+          </span>
+          <span>返回：{{ returnText(selectedNode) }}</span>
+          <span v-if="selectedControlName" class="s4-hero__control">
+            控件：{{ selectedControlName }}
+          </span>
+        </p>
+        <p class="s4-hero__source">
+          来源：<code id="s5-source" :title="selectedRepoPath ?? undefined">{{ sourceLabel }}</code>
+        </p>
+        <div v-if="hasReason" id="s4-detail-status" class="s4-detail__status">
+          <span class="s4-detail__reason">原因：{{ reasonLabel }}</span>
+        </div>
       </div>
+
+      <details v-if="multiGroups.length > 0" id="s4-group-badge" class="s4-group-badge">
+        <summary class="s4-group-badge__summary">同一方法的多次调用（×N）</summary>
+        <p class="s4-detail__hint">{{ XN_DEMO_LABEL }}</p>
+        <div class="s4-group-badge__row">
+          <button
+            v-for="group in multiGroups"
+            :key="group.nodeKey"
+            type="button"
+            class="s4-group-badge__item"
+            :class="{ 's4-group-badge__item--active': selectedNode !== null && selectedNode.nodeKey === group.nodeKey }"
+            :data-node-key="group.nodeKey"
+            :title="`${group.count} 次同方法调用（前端聚合显示）`"
+            @click="selectGroup(group)"
+          >
+            <span class="s4-xn">{{ group.badge }}</span>
+            <span class="s4-group-badge__kind">{{ kindLabel(group.kind) }}</span>
+            <code class="s4-group-badge__key">{{ compactNodeKey(group.kind, group.nodeKey) }}</code>
+          </button>
+        </div>
+      </details>
 
       <div
         v-if="noDebugNode"
@@ -316,63 +460,81 @@ function onClose(): void {
         </p>
       </div>
 
-      <dl class="s4-facts">
-        <div class="s4-facts__row">
-          <dt>confidence</dt>
-          <dd>
-            <span
-              class="s3-conf"
-              :class="`s3-conf--${selectedNode.confidence === 'LOST' ? 'lost' : selectedNode.confidence === 'EXACT' ? 'exact' : selectedNode.confidence === 'MANUAL' ? 'manual' : 'neutral'}`"
-            >
-              {{ confidenceText(selectedNode.confidence) }}
-            </span>
-            <span class="s4-detail__muted">（LOST 只在 confidence，不伪装 status）</span>
-          </dd>
-        </div>
-        <div class="s4-facts__row">
-          <dt>return</dt>
-          <dd>{{ returnText(selectedNode) }}</dd>
-        </div>
-        <div class="s4-facts__row">
-          <dt>flags</dt>
-          <dd class="s4-facts__chips">
-            <span v-for="flag in selectedNode.flags" :key="flag" class="s3-flag">{{ flag }}</span>
-            <span v-if="selectedNode.flags.length === 0" class="s4-detail__muted">无记录（[]）</span>
-          </dd>
-        </div>
-        <div class="s4-facts__row">
-          <dt>thread</dt>
-          <dd>{{ threadText(selectedNode) }}</dd>
-        </div>
-        <div class="s4-facts__row">
-          <dt>source</dt>
-          <dd>
-            <code id="s5-source">{{ sourceLabel }}</code><span class="s4-detail__muted">（manifest 命中显示 file:line；缺失即未采集；无 .map 解码）</span>
-          </dd>
-        </div>
-        <div class="s4-facts__row">
-          <dt>时间</dt>
-          <dd>
-            relNs {{ formatNs(Math.max(0, selectedNode.startNs - minStartNs)) }} · dur {{ formatNs(selectedNode.durNs) }}
-            <span class="s4-detail__raw">（原始 startNs {{ selectedNode.startNs }} · durNs {{ selectedNode.durNs }}）</span>
-          </dd>
-        </div>
-        <div class="s4-facts__row">
-          <dt>spanId</dt>
-          <dd><code>{{ selectedNode.spanId }}</code></dd>
-        </div>
-      </dl>
+      <details class="s4-fold">
+        <summary class="s4-fold__summary">技术字段（关联方式、线程、原始时间、标识）</summary>
+        <dl class="s4-facts">
+          <div class="s4-facts__row">
+            <dt>关联方式</dt>
+            <dd>
+              <span
+                class="s3-conf"
+                :class="`s3-conf--${selectedNode.confidence === 'LOST' ? 'lost' : selectedNode.confidence === 'EXACT' ? 'exact' : selectedNode.confidence === 'MANUAL' ? 'manual' : 'neutral'}`"
+              >
+                {{ confidenceText(selectedNode.confidence) }}
+              </span>
+              <span class="s4-detail__muted">（未关联只在关联方式中显示，不伪装成执行状态）</span>
+            </dd>
+          </div>
+          <div class="s4-facts__row">
+            <dt>状态码</dt>
+            <dd><code>{{ selectedNode.status }}</code></dd>
+          </div>
+          <div class="s4-facts__row">
+            <dt>标记</dt>
+            <dd class="s4-facts__chips">
+              <span
+                v-for="flag in selectedNode.flags"
+                :key="flag"
+                class="s3-flag"
+                :title="flagDescription(flag)"
+              >{{ flag }}</span>
+              <span v-if="selectedNode.flags.length === 0" class="s4-detail__muted">无记录（[]）</span>
+            </dd>
+          </div>
+          <div class="s4-facts__row">
+            <dt>线程</dt>
+            <dd>{{ threadText(selectedNode) }}</dd>
+          </div>
+          <div class="s4-facts__row">
+            <dt>时间</dt>
+            <dd>
+              相对 {{ formatNs(Math.max(0, selectedNode.startNs - minStartNs)) }} · 耗时 {{ formatNs(selectedNode.durNs) }}
+              <span class="s4-detail__raw">（原始时间 {{ selectedNode.startNs }} · 原始耗时 {{ selectedNode.durNs }}）</span>
+            </dd>
+          </div>
+          <div class="s4-facts__row">
+            <dt>节点标识</dt>
+            <dd><code>{{ selectedNode.spanId }}</code></dd>
+          </div>
+        </dl>
+      </details>
 
-      <section id="s5-values" class="s5-values" aria-label="值（L1 参数/字段/返回；L2 行级局部变量）">
+      <details v-if="selectedNode.flags.length > 0" class="s4-fold">
+        <summary class="s4-fold__summary">标记说明（{{ selectedNode.flags.length }}）</summary>
+        <ul class="s4-flag-list">
+          <li v-for="flag in selectedNode.flags" :key="`help-${flag}`">
+            <code class="s3-flag">{{ flag }}</code>
+            <span>{{ flagDescription(flag) }}</span>
+          </li>
+        </ul>
+      </details>
+
+      <details v-if="!showValues" class="s4-fold">
+        <summary class="s4-fold__summary">变量与参数（未采集）</summary>
+        <p class="s4-detail__muted">
+          该节点没有采集到请求体、方法参数或局部变量。当前只在前端请求节点采集 query/body，
+          以及 L1/L2 插桩节点采集参数和局部变量。
+        </p>
+      </details>
+
+      <section v-if="showValues" id="s5-values" class="s5-values" aria-label="采集到的值">
         <header class="s5-values__head">
-          <h4 class="s4-detail__section-title">
-            {{ l2Node ? "Values · L2（行级局部变量 / 行号）" : "Values · L1（参数 / 字段写入 / 返回）" }}
-          </h4>
+          <h4 class="s4-detail__section-title">{{ valueHeading }}</h4>
           <span
             v-if="l1Badge"
             id="s5-l1-badge"
             class="s5-l1-badge"
-            title="该节点 flags 含 L1：L1 参数/字段写入/返回摘要（不是 L2）"
+            title="该节点含参数/字段写入/返回摘要（一级采集）"
           >
             L1
           </span>
@@ -380,7 +542,7 @@ function onClose(): void {
             v-if="l2Node"
             id="s6-l2-badge"
             class="s6-l2-badge"
-            title="该节点 flags 含 L2：LVT 行级局部变量（S6 演示方法 reconcileAmount / reconcileLoop）"
+            title="该节点含行级局部变量（二级采集）"
           >
             {{ L2_BADGE_TEXT }}
           </span>
@@ -388,23 +550,29 @@ function onClose(): void {
             v-if="asyncNode"
             id="s6-async-badge"
             class="s6-async-badge"
-            title="该节点 flags 含 ASYNC_INHERITED：上下文来自创建时继承的父帧且线程不同于父帧创建线程；不证明 @Async/CompletableFuture 或任务边界传播"
+            title="该节点在异步线程中继承了调用上下文"
           >
             {{ ASYNC_BADGE_TEXT }}
           </span>
         </header>
-        <p v-if="l2Node" id="s6-l2-note" class="s6-l2-note">{{ S6_L2_NOTE }}</p>
-        <p v-else id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
-        <p v-if="asyncNode" id="s6-async-note" class="s6-async-note">{{ ASYNC_LIMIT_NOTE }}</p>
+        <details class="s4-fold">
+          <summary class="s4-fold__summary">值采集说明</summary>
+          <p v-if="l2Node" id="s6-l2-note" class="s6-l2-note">{{ S6_L2_NOTE }}</p>
+          <p v-else-if="requestValues.length > 0" id="s5-values-note" class="s5-values__note">
+            这些值来自前端请求的查询参数与请求体；本地演示不做敏感字段脱敏，超长值仍会截断。
+          </p>
+          <p v-else id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
+          <p v-if="asyncNode" id="s6-async-note" class="s6-async-note">{{ ASYNC_LIMIT_NOTE }}</p>
+          <p class="s4-detail__hint">
+            字段变化显示为“旧值 → 新值”（例如 100 → 0）；参数和返回值显示采集到的结果。
+            值行的调用序号与技术字段仍按原始采集记录展示，不做推断。
+          </p>
+        </details>
         <p v-if="foldNoteText !== null" id="s6-fold-note" class="s6-fold-note" :title="FOLD_NOTE_TITLE">
           {{ foldNoteText }}
         </p>
         <p v-if="foldNoteText !== null" class="s6-fold-hint">
-          事件状态 TRUNCATED 表示列表被折叠（不是失败/异常）；保留项为首/尾/中段样本，from → to 原样不重算、单值未被截断。
-        </p>
-        <p class="s4-detail__hint">
-          字段写入/局部变量行显示 old → new（例如 100 → 0，高亮）；参数/返回行显示 to。
-          值行序号来自 values.invocation；S4 ×N 组序号来自同 nodeKey 的已采集 span 分组，两者不混用。
+          已折叠不是失败；保留首、尾和中段样本，单值未被截断。
         </p>
         <ul v-if="values.length > 0" class="s5-values__list">
           <li
@@ -424,8 +592,15 @@ function onClose(): void {
               :class="{ 's5-value__value--diff': isValueChange(value) }"
               title="值原样来自采集端（不重算脱敏/截断）"
             >
-              {{ valueLineText(value) }}
+              {{ valuePreview(valueLineText(value)) }}
             </span>
+            <details
+              v-if="valueLineText(value).length > 120"
+              class="s5-value__full"
+            >
+              <summary>查看完整值</summary>
+              <pre>{{ valueLineText(value) }}</pre>
+            </details>
             <span
               v-if="value.redacted"
               class="s5-value__lock"
@@ -448,7 +623,10 @@ function onClose(): void {
             >
               已截断
             </span>
-            <span class="s5-value__footer">
+            <span
+              v-if="!value.name.startsWith('query.') && !value.name.startsWith('body.')"
+              class="s5-value__footer"
+            >
               {{ lineFooterText(value) }} · {{ invocationText(value, valuesTotal) }}
             </span>
           </li>
@@ -456,177 +634,179 @@ function onClose(): void {
         <p v-else id="s5-values-empty" class="s4-detail__missing">{{ VALUES_EMPTY_TEXT }}</p>
       </section>
 
-      <div id="s4-detail-tabs" class="s4-tabs" role="tablist" aria-label="节点详情票签">
-        <button
-          type="button"
-          role="tab"
-          class="s4-tab"
-          :class="{ 's4-tab--active': tab === 'sql' }"
-          :aria-selected="tab === 'sql'"
-          @click="tab = 'sql'"
-        >
-          SQL/数据影响
-        </button>
-        <button
-          type="button"
-          role="tab"
-          class="s4-tab"
-          :class="{ 's4-tab--active': tab === 'ui' }"
-          :aria-selected="tab === 'ui'"
-          @click="tab = 'ui'"
-        >
-          UI 效果
-        </button>
-      </div>
-
-      <section
-        v-show="tab === 'sql'"
-        id="s4-sideeffects"
-        class="s4-ticket"
-        role="tabpanel"
-        aria-label="SQL/数据影响"
-      >
-        <p class="s4-detail__hint">
-          SQL/数据影响票签 = 所选 span 自身 sideEffects；缺失/空一律“未采集”，绝不为 0。
-        </p>
-        <table class="s4-sql">
-          <thead>
-            <tr>
-              <th scope="col">sqlId</th>
-              <th scope="col">rowsAffected</th>
-              <th scope="col">transaction</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(effect, index) in selectedNode.sideEffects" :key="`${effect.sqlId ?? 'sql'}-${index}`">
-              <td>{{ effect.sqlId ?? MISSING }}</td>
-              <td>{{ effect.rowsAffected === null ? MISSING : effect.rowsAffected }}</td>
-              <td>{{ effect.transaction ?? MISSING }}</td>
-            </tr>
-            <tr v-if="selectedNode.sideEffects.length === 0">
-              <td colspan="3" class="s4-detail__missing">
-                未采集（所选节点没有 sideEffects；不推断为 0 行）
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section
-        v-show="tab === 'ui'"
-        id="s4-ui-effects"
-        class="s4-ticket"
-        role="tabpanel"
-        aria-label="UI 效果"
-      >
-        <p class="s4-detail__hint">
-          UI 效果（ui_effect / render / callback）：SDK 显式 uiEffect(text) 记录的用户可见文案摘要。
-        </p>
-        <p v-if="selectedEffect !== null" class="s4-detail__effect">
-          所选节点 ui_effect：<strong>{{ selectedEffect }}</strong>
-        </p>
-        <p v-else class="s4-detail__muted">
-          所选节点不是 render/ui_effect 事件（该节点的 UI 效果未采集，不推断）。
-        </p>
-        <p class="s4-detail__hint">
-          本 trace 的 render 事件（按 trace 列出，未推断与所选节点的因果）：
-        </p>
-        <ul v-if="renderNodes.length > 0" class="s4-render-list">
-          <li v-for="render in renderNodes" :key="render.spanId" class="s4-render-list__item">
-            <code>{{ render.nodeKey }}</code>
-            <span>· {{ uiEffectText(render) ?? MISSING }}</span>
-            <span>· relNs {{ formatNs(Math.max(0, render.startNs - minStartNs)) }}</span>
-            <code>spanId {{ render.spanId }}</code>
-          </li>
-        </ul>
-        <p v-else class="s4-detail__missing">
-          未采集（本 trace 无 render / ui_effect 事件；UI 效果不会被推断）
-        </p>
-      </section>
-
-      <section id="s4-invocations" class="s4-detail__section" aria-label="逐次调用">
-        <h4 class="s4-detail__section-title">逐次调用（per-invocation）· 同 nodeKey ×N</h4>
-        <p class="s4-detail__hint">
-          按 startNs 升序、同值 spanId 字典序；逐次状态独立展示，不合并、不伪造聚合 OK。
-        </p>
-        <template v-if="selectedGroup.length >= 2">
-          <label class="s4-detail__select-label" for="s4-invocation-select">选择第几次调用</label>
-          <select
-            id="s4-invocation-select"
-            class="s4-detail__select"
-            :value="selectedNode.spanId"
-            @change="onInvocationChange"
+      <template v-if="hasSql || hasUi">
+        <div v-if="hasSql && hasUi" id="s4-detail-tabs" class="s4-tabs" role="tablist" aria-label="节点详情票签">
+          <button
+            type="button"
+            role="tab"
+            class="s4-tab"
+            aria-controls="s4-sideeffects"
+            :class="{ 's4-tab--active': effectiveTab === 'sql' }"
+            :aria-selected="effectiveTab === 'sql'"
+            @click="tab = 'sql'"
           >
-            <option v-for="invocation in invocations" :key="invocation.node.spanId" :value="invocation.node.spanId">
-              第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次 · {{ invocation.node.spanId }} · {{ statusMeta(invocation.node.status).label }}<template v-if="invocation.diff"> · {{ VALUE_CHANGE_TEXT }}</template>
-            </option>
-          </select>
-          <ol class="s4-invocation-list">
-            <li
-              v-for="invocation in invocations"
-              :key="invocation.node.spanId"
-              :data-invocation-diff="invocation.diff ? 'true' : undefined"
+            SQL/数据影响
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="s4-tab"
+            aria-controls="s4-ui-effects"
+            :class="{ 's4-tab--active': effectiveTab === 'ui' }"
+            :aria-selected="effectiveTab === 'ui'"
+            @click="tab = 'ui'"
+          >
+            UI 效果
+          </button>
+        </div>
+
+        <section
+          v-show="effectiveTab === 'sql'"
+          id="s4-sideeffects"
+          class="s4-ticket"
+          role="tabpanel"
+          aria-label="SQL/数据影响"
+        >
+          <h4 class="s4-detail__section-title">SQL/数据影响</h4>
+          <p class="s4-detail__hint">当前节点：{{ sqlText }}。缺失时如实显示“未采集”，不推断为 0。</p>
+          <table v-if="selectedNode.sideEffects.length > 0" class="s4-sql">
+            <thead>
+              <tr>
+                <th scope="col" title="sqlId">SQL 标识</th>
+                <th scope="col" title="rowsAffected">影响行数</th>
+                <th scope="col" title="transaction">事务状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(effect, index) in selectedNode.sideEffects" :key="`${effect.sqlId ?? 'sql'}-${index}`">
+                <td>{{ effect.sqlId ?? MISSING }}</td>
+                <td>{{ effect.rowsAffected === null ? MISSING : effect.rowsAffected }}</td>
+                <td :title="transactionTitle(effect.transaction)">
+                  {{ transactionLabel(effect.transaction) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="hasUnknownTransaction" class="s4-detail__muted">
+            “事务状态未采集”表示这次只确认了影响行数，没有采集提交/回滚边界；不推断成功或失败。
+          </p>
+          <p v-else-if="selectedNode.sideEffects.length === 0" class="s4-detail__missing">
+            未采集（所选节点没有 sideEffects；不推断为 0 行）
+          </p>
+        </section>
+
+        <section
+          v-show="effectiveTab === 'ui'"
+          id="s4-ui-effects"
+          class="s4-ticket"
+          role="tabpanel"
+          aria-label="UI 效果"
+        >
+          <h4 class="s4-detail__section-title">UI 效果</h4>
+          <p v-if="selectedEffect !== null" class="s4-detail__effect">
+            当前节点：<strong>{{ selectedEffect }}</strong>
+          </p>
+          <p v-else class="s4-detail__muted">
+            当前节点没有直接的页面效果记录。
+          </p>
+          <details v-if="renderNodes.length > 0" class="s4-fold">
+            <summary class="s4-fold__summary">本链路中的页面效果（{{ renderNodes.length }} 条）</summary>
+            <ul class="s4-render-list">
+              <li v-for="render in renderNodes" :key="render.spanId" class="s4-render-list__item">
+                <code>{{ compactNodeKey(render.kind, render.nodeKey) }}</code>
+                <span>· {{ uiEffectText(render) ?? MISSING }}</span>
+                <span>· 相对时间 {{ formatNs(Math.max(0, render.startNs - minStartNs)) }}</span>
+              </li>
+            </ul>
+          </details>
+        </section>
+      </template>
+
+      <details
+        v-if="selectedGroup.length >= 2"
+        id="s4-invocations"
+        class="s4-detail__section s4-fold"
+        aria-label="逐次调用"
+      >
+        <summary class="s4-fold__summary">逐次调用（同一方法共 {{ selectedGroup.length }} 次，点击展开）</summary>
+        <label class="s4-detail__select-label" for="s4-invocation-select">选择第几次调用</label>
+        <select
+          id="s4-invocation-select"
+          class="s4-detail__select"
+          :value="selectedNode.spanId"
+          @change="onInvocationChange"
+        >
+          <option v-for="invocation in invocations" :key="invocation.node.spanId" :value="invocation.node.spanId">
+            第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次 · {{ statusChinese(invocation.node.status) }}<template v-if="invocation.diff"> · {{ VALUE_CHANGE_TEXT }}</template>
+          </option>
+        </select>
+        <ol class="s4-invocation-list">
+          <li
+            v-for="invocation in invocations"
+            :key="invocation.node.spanId"
+            :data-invocation-diff="invocation.diff ? 'true' : undefined"
+          >
+            <button
+              type="button"
+              class="s4-invocation"
+              :class="{
+                's4-invocation--active': invocation.node.spanId === selectedNode.spanId,
+                's4-invocation--diff': invocation.diff,
+              }"
+              @click="emit('select', invocation.node.spanId)"
             >
-              <button
-                type="button"
-                class="s4-invocation"
-                :class="{
-                  's4-invocation--active': invocation.node.spanId === selectedNode.spanId,
-                  's4-invocation--diff': invocation.diff,
-                }"
-                @click="emit('select', invocation.node.spanId)"
-              >
-                <span class="s4-invocation__line">
-                  <strong>第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次</strong>
-                  <span class="s3-status" :class="`s3-status--${statusMeta(invocation.node.status).tone}`">
-                    {{ statusMeta(invocation.node.status).label }}
-                  </span>
-                  <span v-if="invocation.diff" class="s4-invocation__diff">{{ VALUE_CHANGE_TEXT }}</span>
-                  <code>{{ invocation.node.spanId }}</code>
+              <span class="s4-invocation__line">
+                <strong>第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次</strong>
+                <span class="s3-status" :class="`s3-status--${statusMeta(invocation.node.status).tone}`">
+                  {{ statusChinese(invocation.node.status) }}
                 </span>
-                <span class="s4-invocation__line">return：{{ returnText(invocation.node) }}</span>
-                <span class="s4-invocation__line">
-                  SQL rows：{{ rowsText(invocation.rows) }}
-                  <template v-if="invocation.rows.source === 'child_sql'">
-                    （子 sql：{{ invocation.rows.sqlSpanIds.join(', ') }}）
-                  </template>
-                  <template v-else-if="invocation.rows.source === 'self'">
-                    （自身 sql sideEffects）
-                  </template>
-                  <template v-else>（无 sql 子节点，rows 未采集，绝不为 0）</template>
-                </span>
-                <span class="s4-invocation__line">
-                  relNs {{ formatNs(Math.max(0, invocation.node.startNs - minStartNs)) }}
-                </span>
-              </button>
-            </li>
-          </ol>
-        </template>
-        <p v-else class="s4-detail__muted">
-          该 nodeKey 在所选 trace 内仅 1 次调用（N=1，不显示 ×N）。
-        </p>
-        <p class="s4-detail__note">{{ RUNTIME_X3_NOTE }}</p>
-      </section>
+                <span v-if="invocation.diff" class="s4-invocation__diff">{{ VALUE_CHANGE_TEXT }}</span>
+              </span>
+              <span class="s4-invocation__line">返回：{{ returnText(invocation.node) }}</span>
+              <span class="s4-invocation__line">
+                SQL 影响行数：{{ rowsText(invocation.rows) }}
+                <template v-if="invocation.rows.source === 'child_sql'">（来自子 SQL 节点）</template>
+                <template v-else-if="invocation.rows.source === 'self'">（来自当前节点）</template>
+                <template v-else>（未采集，不推断为 0）</template>
+              </span>
+            </button>
+          </li>
+        </ol>
+      </details>
     </template>
 
     <p v-else class="s4-detail__empty">{{ emptyText }}</p>
 
-    <section id="s4-gaps" class="s4-detail__section" aria-label="缺口清单">
-      <h4 class="s4-detail__section-title">缺口清单（只读派生）</h4>
-      <p class="s4-detail__hint">
-        按 span 去重（优先级 F &gt; N &gt; R），每个 span 最多一条；不跨 span 合并。
-      </p>
-      <ul v-if="gaps.length > 0" class="s4-gap-list">
+    <details
+      v-if="gapCount > 0"
+      id="s4-gaps"
+      class="s4-detail__section s4-fold"
+      aria-label="缺口清单"
+    >
+      <summary class="s4-fold__summary">采集缺口（{{ gapCount }} 条，点击展开）</summary>
+      <ul class="s4-gap-list">
         <li v-for="gap in gaps" :key="gap.spanId" class="s4-gap">
-          <span class="s4-gap__rule" :title="gap.rule">{{ gap.ruleLabel }} · {{ gap.rule }}</span>
-          <span class="s4-gap__kind">{{ gap.kind }}</span>
-          <code class="s4-gap__key">{{ gap.nodeKey }}</code>
-          <span class="s4-gap__text">{{ gap.text }}</span>
-          <span class="s4-detail__muted">spanId {{ gap.spanId }} · reason {{ gap.internalReason }}</span>
+          <span class="s4-gap__rule" :title="`${gap.ruleLabel} · ${gap.rule}`">{{ gapRuleText(gap.rule) }}</span>
+          <span class="s4-gap__kind">{{ kindLabel(gap.kind) }}</span>
+          <code class="s4-gap__key">{{ compactNodeKey(gap.kind, gap.nodeKey) }}</code>
+          <span class="s4-gap__text" :title="gap.internalReason">{{ gap.text }}</span>
         </li>
       </ul>
-      <p v-else class="s4-detail__muted">{{ GAP_EMPTY_TEXT }}</p>
-      <p class="s4-detail__note">{{ RUNTIME_X3_NOTE }}；{{ FETCH_WITHOUT_BACKEND_TEXT }} 只有在 fetch 未被后端节点引用时出现。</p>
-    </section>
+      <p class="s4-detail__note">
+        未采集表示没有收到这部分事实，不等于 0，也不代表失败。{{ FETCH_WITHOUT_BACKEND_TEXT }}
+        只表示前端请求没有找到对应后端节点。
+      </p>
+    </details>
+    <p v-else class="s4-detail__muted">{{ GAP_EMPTY_TEXT }}</p>
+
+    <details class="s4-help">
+      <summary class="s4-help__summary">阅读说明</summary>
+      <p class="s4-detail__note" :title="RUNTIME_X3_NOTE">
+        ×N 表示同一方法在本次链路中被采集到多次；数量来自已采集节点，不做推算。
+      </p>
+      <p class="s4-detail__note">
+        缺口按节点去重，优先级从高到低为前端请求、普通节点、页面渲染；每条缺口只报告一次。
+      </p>
+    </details>
   </aside>
 </template>

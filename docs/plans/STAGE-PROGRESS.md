@@ -84,6 +84,22 @@
 - 阻塞：Qoder Site 未部署（等用户切换有 Sites 能力的账号）；当前账号不重试。
 - S9/S10 按用户确认不做；站点只静态展示内置程序。
 
+## 4.5 工作台摘要化 UI（2026-11-24，待用户审查）
+
+- 反馈：信息过密、看不出请求从哪里开始。
+- 改动：起点横幅 + 主链摘要 + 请求卡精简 + **自上而下矩形树（父节点在上、子节点/叶子在下、树形连线、主链编号、可只看主链）** + 右侧详情按需显示；控件名称、后端方法链（悬停根目录路径）、请求时间/耗时已加入；**时间轴每个节点一个可点击关键帧（点击进入回放并选中节点）**；**回放超慢档 0.0001×–4×，默认 0.01×，按真实帧间隔推进**；**Demo 新增 JSON 请求体接口，SDK 采集 query/body 字段（本地不脱敏，仅截断），工作台显示请求参数与请求体**；**Demo 新增无调试/未知订单/未接入后端三个采集缺口演示**；**flags 增加中文 tooltip 与标记说明**。最终上线界面已移除 S0/S1/S2 历史面板（仅 `?legacy=1` 调试入口保留）。
+- 验证：`npm run build` PASS；50 个 S3/S4/S5/S6 静态门禁 token 仍存在；默认 DOM 无 S0/S1/S2 面板；真实浏览器 A/B/L1/回放 PASS；控制台无错误。
+- 证据：`docs/plans/stages/S3/evidence/workbench-production.png`、`workbench-summary-case-{a,b}.png`、`...-l1.png`；总结 `docs/plans/stages/S3/ui-summary-2026-11-24.md`；备份 `docs/plans/archive/ui-summary-2026-11-24/`。
+- 状态：本地三服务运行中（5174/5173/8080/8601/5180），会话 `s_s3demo` 保留 A/B/L1 各一条；等待用户审查，未提交/未发布。
+
+## 4.6 站点发布准备（2026-11-24）
+
+- 静态站升级为 5 个案例：A、B、L2、请求体、采集缺口；本地浏览器验证 PASS。
+- 发布产物：`site/traceboard/dist/`（index + assets）、`traceboard-site.tar.gz`。
+- 本地 Qoder Site 描述：`site/traceboard/.TraceBoard.qoder.site`（仅 design，无 publication）。
+- 已切换到有 Sites 能力的账号并发布：`https://traceboard-32843bp8pzz.qoder.zone`，`published:true`，访问策略 public。站点为原版介绍风格首页 + 内嵌 5173 工作台 `/app/`（7 案例、请求体、缺口、树形链路、关键帧/慢放），public。
+- 源码/站点改动仍在工作树，未自动提交/推送；发布前按需提交。
+
 ## 5. 恢复方法（目标暂停后）
 
 1. 读本文件 + `SOLO-PLAN.md` 当前阶段行；不要依赖聊天记忆。

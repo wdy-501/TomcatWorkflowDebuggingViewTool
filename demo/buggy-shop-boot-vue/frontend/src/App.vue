@@ -32,6 +32,24 @@ const discountStatus = ref<string | null>(null);
 const discountError = ref<string | null>(null);
 const discountPending = ref(false);
 
+// Case C: real JSON request body. The SDK captures query/body fields on the fetch span;
+// this is a local-only demo, so values (including `token`) are shown verbatim.
+const remarkReason = ref("改约配送时间");
+const remarkOperator = ref("demo-user");
+const remarkPriority = ref("2");
+const remarkNote = ref("请在本周内处理");
+const remarkToken = ref("demo-token-123");
+const remarkRaw = ref("");
+const remarkStatus = ref<string | null>(null);
+const remarkError = ref<string | null>(null);
+const remarkPending = ref(false);
+
+// Case D: intentional collection gaps. These are demo facts, not product errors.
+const gapRaw = ref("");
+const gapStatus = ref<string | null>(null);
+const gapError = ref<string | null>(null);
+const gapPending = ref<string | null>(null);
+
 // S6a L2 demo: fixed URL, plain click handler (no wrapFn). The agent (not the SDK) collects the
 // line-level local of L2DemoService#reconcileAmount; the button never refreshes the order list.
 const reconcileRaw = ref("");
@@ -147,6 +165,61 @@ async function previewDiscount(): Promise<void> {
 }
 
 const previewDiscountWrapped = traceboard.wrapFn("previewDiscount", previewDiscount);
+
+// Case C: JSON request body. The endpoint accepts @RequestBody; the SDK captures the body
+// fields on the fetch span before sending. `token` is redacted by the SDK and never echoed.
+async function submitRemark(): Promise<void> {
+  remarkPending.value = true;
+  remarkError.value = null;
+  try {
+    const response = await fetch("/api/orders/1/remark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reason: remarkReason.value,
+        operator: remarkOperator.value,
+        priority: Number(remarkPriority.value),
+        note: remarkNote.value,
+        token: remarkToken.value,
+      }),
+    });
+    const text = await response.text();
+    remarkRaw.value = text;
+    remarkStatus.value = `HTTP ${response.status}`;
+    if (!response.ok) {
+      remarkError.value = `HTTP ${response.status} ${response.statusText}`;
+      return;
+    }
+  } catch (cause) {
+    remarkError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    remarkPending.value = false;
+  }
+}
+
+// Case D: show three honest collection gaps:
+// - no-debug: the service has no LocalVariableTable, so variables are NOT_COLLECTED.
+// - unknown order: only controller+service run; mapper/sql spans never appear.
+// - unjoined: a frontend fetch to the uninstrumented list endpoint has no backend span.
+async function runGap(kind: "noDebug" | "unknown" | "unjoined"): Promise<void> {
+  gapPending.value = kind;
+  gapError.value = null;
+  try {
+    const response =
+      kind === "noDebug"
+        ? await fetch("/api/orders/1/no-debug", { method: "POST" })
+        : kind === "unknown"
+          ? await fetch("/api/orders/999/cancel", { method: "POST" })
+          : await fetch("/api/orders?probe=1");
+    const text = await response.text();
+    gapRaw.value = text;
+    gapStatus.value = `HTTP ${response.status}`;
+  } catch (cause) {
+    gapError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    gapPending.value = null;
+  }
+}
 
 // Case S6a: fixed-URL reconcile. Plain click handling (NOT wrapped by the SDK): the line-level L2
 // facts come from the agent's probes inside L2DemoService#reconcileAmount. No loadOrders(), no DB.
@@ -307,6 +380,68 @@ onMounted(loadOrders);
       <p v-if="discountStatus" id="discount-status" class="hint">状态：{{ discountStatus }}</p>
       <pre id="discount-json">{{ discountRaw || "（尚未发送折扣预览请求）" }}</pre>
       <p v-if="discountError" id="discount-error" class="error">{{ discountError }}</p>
+    </section>
+
+    <section id="case-request-body" class="card">
+      <h2>案例 C · JSON 请求体（字段与值）</h2>
+      <p class="hint">
+        固定请求 <code>POST /api/orders/1/remark</code>，请求体为 JSON。SDK 在请求节点采集
+        <code>body.reason</code>、<code>body.operator</code>、<code>body.priority</code>、
+        <code>body.note</code>、<code>body.token</code>；本地演示不做敏感字段脱敏，token 会原样显示。
+        后端接收并返回确认，不写数据库。
+      </p>
+      <div class="form-row">
+        <label for="remark-reason">原因</label>
+        <input id="remark-reason" v-model="remarkReason" />
+        <label for="remark-operator">操作人</label>
+        <input id="remark-operator" v-model="remarkOperator" />
+        <label for="remark-priority">优先级</label>
+        <input id="remark-priority" v-model="remarkPriority" type="number" min="1" max="5" />
+      </div>
+      <div class="form-row">
+        <label for="remark-note">备注</label>
+        <input id="remark-note" v-model="remarkNote" />
+        <label for="remark-token">Token（敏感）</label>
+        <input id="remark-token" v-model="remarkToken" />
+        <button id="btn-remark" type="button" :disabled="remarkPending" @click="submitRemark">
+          {{ remarkPending ? "请求中…" : "提交请求体" }}
+        </button>
+      </div>
+      <p v-if="remarkStatus" id="remark-status" class="hint">状态：{{ remarkStatus }}</p>
+      <pre id="remark-json">{{ remarkRaw || "（尚未发送请求体）" }}</pre>
+      <p v-if="remarkError" id="remark-error" class="error">{{ remarkError }}</p>
+    </section>
+
+    <section id="case-gaps" class="card">
+      <h2>案例 D · 采集缺口演示（真实未采集）</h2>
+      <p class="hint">
+        三个场景分别展示“变量未采集”“链路节点缺失”“前端请求未接入后端”：
+        无调试信息接口会让 service 显示 NOT_COLLECTED_NO_DEBUG_INFO；未知订单只产生 controller/service；
+        订单列表接口没有插桩，因此只有前端点击/请求，置信度为 LOST。这些都是演示事实，不是程序错误。
+      </p>
+      <div class="actions">
+        <button
+          id="btn-no-debug"
+          type="button"
+          :disabled="gapPending !== null"
+          @click="runGap('noDebug')"
+        >无调试信息</button>
+        <button
+          id="btn-unknown-cancel"
+          type="button"
+          :disabled="gapPending !== null"
+          @click="runGap('unknown')"
+        >未知订单取消</button>
+        <button
+          id="btn-unjoined"
+          type="button"
+          :disabled="gapPending !== null"
+          @click="runGap('unjoined')"
+        >未接入后端请求</button>
+      </div>
+      <p v-if="gapStatus" id="gap-status" class="hint">状态：{{ gapStatus }}</p>
+      <pre id="gap-json">{{ gapRaw || "（尚未触发缺口场景）" }}</pre>
+      <p v-if="gapError" id="gap-error" class="error">{{ gapError }}</p>
     </section>
 
     <section id="case-s6a" class="card">

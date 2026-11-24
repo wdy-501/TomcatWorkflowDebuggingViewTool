@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="TraceBoard 全链路事实调试：浏览器点击、请求体、Spring 后端、SQL 0 行与采集缺口同一条只读时间线。预置采集快照演示。">
+  <title>TraceBoard · 全链路事实调试</title>
+  <link rel="stylesheet" href="./assets/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">跳到事实浏览器</a>
+  <header class="topbar">
+    <a class="brand" href="#main" aria-label="TraceBoard 首页">
+      <span class="brand-mark" aria-hidden="true">TB</span>
+      <span class="brand-text"><strong>TraceBoard</strong><span>全链路事实调试</span></span>
+    </a>
+    <div class="topbar-meta">
+      <span class="pill pill-live"><span class="dot" aria-hidden="true"></span>预置采集快照</span>
+      <span class="topbar-note">非实时接入 · 无上传</span>
+    </div>
+    <nav class="topnav" aria-label="页面导航">
+      <a href="#demo">工作台演示</a>
+      <a href="#matrix">三栈矩阵</a>
+      <a href="#boundaries">边界</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="intro" aria-labelledby="intro-title">
+      <div>
+        <p class="eyebrow">CASE A / B / L2 / 请求体 / 缺口 · 只读回放</p>
+        <h1 id="intro-title">把“看起来成功”拆成一条可核对的因果链。</h1>
+        <div class="intro-links">
+          <a class="cta cta-primary" href="#demo">开始体验 ↓</a>
+          <a class="cta" href="https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool" target="_blank" rel="noopener">GitHub 源码 ↗</a>
+          <a class="cta" href="https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases/latest" target="_blank" rel="noopener">下载 Windows 包 ↗</a>
+          <span class="cta-note">MIT · 私有数据不入库 · 包内说明见 Release</span>
+        </div>
+      </div>
+      <p class="intro-copy">同一份 trace 里看浏览器点击、请求体字段、Spring 控制器、Service、MyBatis 与 SQL 行数；切换到纯前端案例，确认本次点击<strong>没有发请求</strong>；缺口案例则明确展示哪些事实<strong>没有采集到</strong>。以下为预置采集快照，非实时。</p>
+      <div class="intro-metrics" aria-label="项目验证摘要">
+        <div><strong>75</strong><span>S0–S6 门禁</span></div>
+        <div><strong>35</strong><span>S7 React 门禁</span></div>
+        <div><strong>18</strong><span>S8 Tomcat 门禁</span></div>
+        <div><strong>7</strong><span>内置案例</span></div>
+      </div>
+    </section>
+
+    <section class="interactive" id="demo" aria-labelledby="demo-title">
+      <div class="section-head">
+        <div><p class="eyebrow">INTERACTIVE WORKBENCH</p><h2 id="demo-title">直接体验工作台。</h2></div>
+        <p>下面内嵌的是与本地 5173 相同的 TraceBoard 工作台静态版。切换 7 个内置案例、点击树节点、查看变量/请求体/flags，并拖动时间轴慢放。</p>
+      </div>
+      <div class="interactive-shell">
+        <div class="interactive-bar">
+          <span>静态预置快照 · 7 个案例 · 无 Java / 无上传</span>
+          <a href="./app/" target="_blank" rel="noopener">全屏打开工作台 ↗</a>
+        </div>
+        <iframe
+          src="./app/"
+          title="TraceBoard 工作台交互示例"
+          loading="eager"
+        ></iframe>
+      </div>
+      <p class="interactive-note">若内嵌区域滚动不便，请使用“全屏打开工作台”。页面数据来自预置事件快照，不是实时 collector。</p>
+    </section>
+
+    <section class="matrix" id="matrix" aria-labelledby="matrix-title">
+      <div class="section-head">
+        <div><p class="eyebrow">LOCAL MATRIX</p><h2 id="matrix-title">三栈本地可用，云端诚实后置。</h2></div>
+        <p>同一个“点击 → 请求 → 后端 → SQL”结论，在三种本地环境各有门禁证据。云端上传/沙箱尚未实现。</p>
+      </div>
+      <div class="matrix-grid">
+        <article class="matrix-card">
+          <div class="matrix-top"><span class="stack-index">01</span><span class="status status-ok">已验收</span></div>
+          <h3>Spring Boot 2.7 + Vue3</h3>
+          <p>主路径。0 行、纯前端、L1/L2、异步与只读回放。</p>
+          <div class="matrix-meta"><span>75 PASS</span><span>S0–S6</span></div>
+        </article>
+        <article class="matrix-card">
+          <div class="matrix-top"><span class="stack-index">02</span><span class="status status-basic">基础</span></div>
+          <h3>React 18 + Webpack5</h3>
+          <p>案例 A 7 span EXACT；案例 B 3 span、零 fetch。</p>
+          <div class="matrix-meta"><span>35 PASS</span><span>S7</span></div>
+        </article>
+        <article class="matrix-card">
+          <div class="matrix-top"><span class="stack-index">03</span><span class="status status-basic">基础</span></div>
+          <h3>Tomcat 8.5 + SSM</h3>
+          <p>WAR 复用 agent 同 FQCN；4 后端 span、SQL 0 行。</p>
+          <div class="matrix-meta"><span>18 PASS</span><span>S8</span></div>
+        </article>
+        <article class="matrix-card matrix-card-muted">
+          <div class="matrix-top"><span class="stack-index">04</span><span class="status status-no">后置</span></div>
+          <h3>云端上传 / 沙箱</h3>
+          <p>需要容器/强隔离运行时；当前没有，未做，不作为承诺。</p>
+          <div class="matrix-meta"><span>未做</span><span>S9–S10</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="boundaries" id="boundaries" aria-labelledby="boundaries-title">
+      <div class="section-head">
+        <div><p class="eyebrow">SCOPE</p><h2 id="boundaries-title">只展示能被复跑的证据。</h2></div>
+        <p>站点是本地工具的预置快照演示；实时 ingest、用户项目接入、云端上传不在本站点内。</p>
+      </div>
+      <div class="boundary-grid">
+        <div><h3>可见</h3><p>案例 A/B/L2 的点击、请求、后端方法、SQL 行数与行级值；EXACT/LOST 语义；只读回放。</p></div>
+        <div><h3>不可见</h3><p>任意方法的全部局部变量、后端 controller 方法参数、Cookie、像素回放；请求体只在 Demo 的请求节点按采集到的字段显示。</p></div>
+        <div><h3>运行时</h3><p>Boot 2.7/JDK8；React18/Webpack5；Tomcat 8.5/JDK8。Tomcat 握手需 JUL manager 开关。</p></div>
+      </div>
+      <p class="closing">TraceBoard · 事件流是唯一事实源 · 回放 0 写 · 未采集有原因。</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>TraceBoard v0.1.0 · 预置采集快照 · 请求体/缺口演示</span>
+    <span>无 Cookie · 无上传 · 无外部资源</span>
+  </footer>
+  <div class="sr-only" id="announcer" aria-live="polite"></div>
+</body>
+</html>

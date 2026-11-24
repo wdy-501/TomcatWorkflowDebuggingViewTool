@@ -8,7 +8,7 @@ import { defineStore } from "pinia";
 export const useAppStore = defineStore("app", {
   state: () => ({
     appVersion: "0.1.0",
-    mode: "S3 前端事实与只读回放",
+    mode: "只读追踪与回放",
     selectedRequestId: null as string | null,
     selectedNodeKey: null as string | null,
   }),

@@ -44,7 +44,7 @@ export const useS3Store = defineStore("s3", {
     mode: "live" as S3Mode,
     sliderNs: 0,
     playing: false,
-    speed: 1,
+    speed: 0.01,
     replay: null as ReplayResponse | null,
     replayStatus: "idle" as S3LoadStatus,
     replayError: null as S3Error | null,

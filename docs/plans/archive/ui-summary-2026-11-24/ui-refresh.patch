@@ -1,0 +1,3681 @@
+diff --git a/README.md b/README.md
+index 16015b7..4de56ea 100644
+--- a/README.md
++++ b/README.md
+@@ -12,12 +12,14 @@
+ - **EXACT 关联**：浏览器 SDK 在 fetch 上带 `traceparent` + `X-TraceBoard-Click`；agent 反射读头，controller 继承 trace/parent/root，children 继承 EXACT；无头/非法头保持 S2 的 4-span `LOST` 链，不合成成功。
+ - **agent 握手/诊断**：agent premain 异步 POST `/ingest/v1/agent-hello`；collector `GET /api/v1/sessions/{id}/agent` 返回 connected/version/pid/lastSeen；launcher `diagnose` 做 7 项 PASS/FAIL/WARN/SKIP 检查。
+ - **collector（JDK21，内存 append-only）**：NDJSON ingest（202/400/413/415、逐行 schema 校验、幂等、seq）；sessions/events/requests/graph 只读派生；`replay` 只读时间窗（0 写）；meta 5 键（`ingestEvents=true,realtime=false,replay=true`）。
+-- **runtime SDK（`frontend/sdk`）**：ESM + IIFE 两种产物；点击/fetch/XHR/wrapFn/uiEffect；案例 A（0 行 + EXACT）与案例 B（纯前端校验，1500ms 观察窗后 `fetchCount=0`，确认本次点击没有请求）；不采集请求体/表单值/cookie/query。
++- **runtime SDK（`frontend/sdk`）**：ESM + IIFE 两种产物；点击/fetch/XHR/wrapFn/uiEffect；案例 A（0 行 + EXACT）与案例 B（纯前端校验，1500ms 观察窗后 `fetchCount=0`，确认本次点击没有请求）；本地 Demo 的请求节点采集 `query.*`/`body.*` 字段和值（不脱敏，超长值截断），不采响应体/cookie。
+ - **workbench（Vue3+TS）**：S3 混合事实树/状态图例/时间轴只读回放；**S4 节点详情**（status/reason/return/flags/thread/source/confidence、SQL/UI 页签、逐次调用、按 nodeKey ×N、缺口清单）；S0/S1/S2 面板保留为次级。
+ - **launcher（`server/launcher`，Java21）**：`idea` 打印 IDEA VM options；`jar` 用 JDK8 启动 demo+agent（detach/PID/日志/健康等待）、`stop`；`preview` 反代静态 HTML 并注入外部 `config.js`+`sdk.js`（仅 200 text/html、无内联脚本/CSP 改写、`not-injected:*` 原因）；`diagnose` 复核 collector/app/handshake/events/preview/SDK。
+ - **S5 L1 + 前端浅层**：demo `preview-discount` 在内存把 `amount 100→0`、DB 仍 100；agent 采 5 项 values（`requestedAmount` 100、`demoSecret` `[REDACTED len=6]`、`note` 截断 2KB、`amount` 100→0、`return` 0），不采局部变量/L2；graph 增加 `values`（15 字段）；workbench 详情显示 L1/脱敏/截断/old→new；`frontend/build-plugin` 生成函数 manifest，SDK 写入 `source {file,line}` + `SOURCE_MAPPED`；demo 开启 `build.sourcemap`。性能基线 ratio 1.29（WARN）。
+ - **S6 L2 + 异步**：`L2DemoService#reconcileAmount` ASM 行探针，第 2 次调用 `local 100→0`（行 23/25）；`reconcileBatch` ×3 逐次可指哪次坏；`reconcileAsync` 新建 worker 线程继承上下文（`ASYNC_INHERITED`，长生命周期池/@Async/CompletableFuture 不自动传播）；`NoDebugService#compute` 无 LVT → `NOT_COLLECTED_NO_DEBUG_INFO` + reason、无 values；`reconcileLoop` 100 次 local 写入折叠为 20 样本（`VALUES_CAPPED=82`/`VALUES_TOTAL=102`、`TRUNCATED`、坏 `50→0` 保留）；L2 perf ratio **1.037**。
+ - **S7 React18 + Webpack5（本地基础）**：`demo/buggy-shop-boot-react/frontend/`（5175）复用 Boot/H2 后端；案例 A `#btn-cancel` 经 devServer `/api` 代理形成 click→fetch→controller→service→mapper→sql→render 7 span、全部 EXACT、SQL `rowsAffected=0`；案例 B `validateForm` 纯前端 `RETURNED_FALSE`、3 span、`fetchCount=0`；SDK 经 `/ingest` 代理发事件。**无** React 构建插件/sourcemap/组件映射/JS 局部变量；静态 dist 无代理。
++- **请求体演示（本地）**：Demo 案例 C 提供 JSON 请求体表单 `POST /api/orders/1/remark`；SDK 在 fetch 节点采集 `body.reason/operator/priority/note/token` 与 `query.*`，工作台在“网络请求”节点显示字段和原值（本地不脱敏，超长值截断）；agent 为 `OrderController#remark` 增加 controller span，保持 EXACT 关联。
++- **采集缺口演示（本地）**：Demo 案例 D 提供无调试信息、未知订单取消、未接入后端请求三个入口，分别展示 `NOT_COLLECTED_NO_DEBUG_INFO`、链路缺 mapper/SQL、fetch-only `LOST` 与缺口提示。
+ - **S8 Tomcat 8.5 + SSM WAR（本地基础）**：`demo/buggy-shop-ssm-war/`（JDK8、ROOT.war、8081、Spring MVC/MyBatis/H2）复用 agent 同 FQCN 4 点插桩；案例 A 带 header cancel 4 后端 span 全 EXACT、SQL 0 行、订单 CREATED；preview 注入 SDK 后 A 7 事件/B 3 事件。Tomcat 启动需 `-Djava.util.logging.manager=java.util.logging.LogManager`（规避 agent hello/JULI 死锁）；仅本机 8.5/JDK8。
+ 
+ ## 明确未实现（勿据此承诺）
+diff --git a/agent/src/main/java/io/traceboard/agent/SpanContext.java b/agent/src/main/java/io/traceboard/agent/SpanContext.java
+index 0b12959..4b99004 100644
+--- a/agent/src/main/java/io/traceboard/agent/SpanContext.java
++++ b/agent/src/main/java/io/traceboard/agent/SpanContext.java
+@@ -58,6 +58,8 @@ public final class SpanContext {
+     /** S5: preview-discount controller/service span keys (L1 values live on the service only). */
+     static final String PREVIEW_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#previewDiscount";
+     static final String PREVIEW_SERVICE_NODE_KEY = SERVICE_CLASS + "#previewDiscount";
++    /** Request-body demo controller span (no child service/mapper/sql spans). */
++    static final String REMARK_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#remark";
+     static final String MAPPER_CLASS = "com.example.shop.mapper.OrderMapper";
+     static final String MAPPER_METHOD = "cancelById";
+     static final String MAPPER_NODE_KEY = MAPPER_CLASS + "#" + MAPPER_METHOD;
+@@ -236,6 +238,11 @@ public final class SpanContext {
+         enterController(enterNs, PREVIEW_CONTROLLER_NODE_KEY);
+     }
+ 
++    /** Request-body demo controller span; header join / LOST rules are unchanged. */
++    public static void enterRemarkController(long enterNs) {
++        enterController(enterNs, REMARK_CONTROLLER_NODE_KEY);
++    }
++
+     private static void enterController(long enterNs, String nodeKey) {
+         RequestHeaders.Link link = null;
+         try {
+diff --git a/agent/src/main/java/io/traceboard/agent/TraceAgent.java b/agent/src/main/java/io/traceboard/agent/TraceAgent.java
+index 845a2f4..afbcd1d 100644
+--- a/agent/src/main/java/io/traceboard/agent/TraceAgent.java
++++ b/agent/src/main/java/io/traceboard/agent/TraceAgent.java
+@@ -126,6 +126,8 @@ public final class TraceAgent {
+                 .type(ElementMatchers.named(CONTROLLER_TYPE))
+                 .transform(advice(ControllerAdvice.class,
+                         ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))
++                .transform(advice(RemarkControllerAdvice.class,
++                        ElementMatchers.named("remark").and(ElementMatchers.takesArguments(2))))
+                 .transform(advice(PreviewControllerAdvice.class,
+                         ElementMatchers.named("previewDiscount").and(ElementMatchers.takesArguments(
+                                 long.class, double.class, String.class, String.class))))
+diff --git a/demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/controller/OrderController.java b/demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/controller/OrderController.java
+index d5f5422..0a80c9d 100644
+--- a/demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/controller/OrderController.java
++++ b/demo/buggy-shop-boot-vue/backend/src/main/java/com/example/shop/controller/OrderController.java
+@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
+ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.PathVariable;
+ import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RequestBody;
+ import org.springframework.web.bind.annotation.RequestMapping;
+ import org.springframework.web.bind.annotation.RequestParam;
+ import org.springframework.web.bind.annotation.RestController;
+@@ -59,6 +60,25 @@ public class OrderController {
+         return ResponseEntity.status(status).body(body);
+     }
+ 
++    /**
++     * Request-body demo: accepts a JSON object and confirms it. The frontend SDK records the
++     * request body fields on the fetch span; this endpoint never writes the database and does
++     * not echo the sensitive {@code token} field.
++     */
++    @PostMapping("/{id}/remark")
++    public ResponseEntity<Map<String, Object>> remark(@PathVariable long id,
++                                                      @RequestBody Map<String, Object> request) {
++        Map<String, Object> data = new LinkedHashMap<String, Object>();
++        data.put("id", Long.valueOf(id));
++        data.put("reason", request.get("reason"));
++        data.put("operator", request.get("operator"));
++        data.put("priority", request.get("priority"));
++        data.put("accepted", Boolean.TRUE);
++        Map<String, Object> body = new LinkedHashMap<String, Object>();
++        body.put("data", data);
++        return ResponseEntity.ok(body);
++    }
++
+     /**
+      * S5 L1 demo (api.v1.md Appendix D): always {@code 200 {"data":0}} - for known ids the service
+      * mutates the in-memory amount (100 -> 0, DB untouched), for unknown ids {@code findById=null}
+diff --git a/demo/buggy-shop-boot-vue/frontend/src/App.vue b/demo/buggy-shop-boot-vue/frontend/src/App.vue
+index 47bd7fd..6c78abf 100644
+--- a/demo/buggy-shop-boot-vue/frontend/src/App.vue
++++ b/demo/buggy-shop-boot-vue/frontend/src/App.vue
+@@ -32,6 +32,24 @@ const discountStatus = ref<string | null>(null);
+ const discountError = ref<string | null>(null);
+ const discountPending = ref(false);
+ 
++// Case C: real JSON request body. The SDK captures query/body fields on the fetch span;
++// this is a local-only demo, so values (including `token`) are shown verbatim.
++const remarkReason = ref("改约配送时间");
++const remarkOperator = ref("demo-user");
++const remarkPriority = ref("2");
++const remarkNote = ref("请在本周内处理");
++const remarkToken = ref("demo-token-123");
++const remarkRaw = ref("");
++const remarkStatus = ref<string | null>(null);
++const remarkError = ref<string | null>(null);
++const remarkPending = ref(false);
++
++// Case D: intentional collection gaps. These are demo facts, not product errors.
++const gapRaw = ref("");
++const gapStatus = ref<string | null>(null);
++const gapError = ref<string | null>(null);
++const gapPending = ref<string | null>(null);
++
+ // S6a L2 demo: fixed URL, plain click handler (no wrapFn). The agent (not the SDK) collects the
+ // line-level local of L2DemoService#reconcileAmount; the button never refreshes the order list.
+ const reconcileRaw = ref("");
+@@ -148,6 +166,61 @@ async function previewDiscount(): Promise<void> {
+ 
+ const previewDiscountWrapped = traceboard.wrapFn("previewDiscount", previewDiscount);
+ 
++// Case C: JSON request body. The endpoint accepts @RequestBody; the SDK captures the body
++// fields on the fetch span before sending. `token` is redacted by the SDK and never echoed.
++async function submitRemark(): Promise<void> {
++  remarkPending.value = true;
++  remarkError.value = null;
++  try {
++    const response = await fetch("/api/orders/1/remark", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({
++        reason: remarkReason.value,
++        operator: remarkOperator.value,
++        priority: Number(remarkPriority.value),
++        note: remarkNote.value,
++        token: remarkToken.value,
++      }),
++    });
++    const text = await response.text();
++    remarkRaw.value = text;
++    remarkStatus.value = `HTTP ${response.status}`;
++    if (!response.ok) {
++      remarkError.value = `HTTP ${response.status} ${response.statusText}`;
++      return;
++    }
++  } catch (cause) {
++    remarkError.value = cause instanceof Error ? cause.message : String(cause);
++  } finally {
++    remarkPending.value = false;
++  }
++}
++
++// Case D: show three honest collection gaps:
++// - no-debug: the service has no LocalVariableTable, so variables are NOT_COLLECTED.
++// - unknown order: only controller+service run; mapper/sql spans never appear.
++// - unjoined: a frontend fetch to the uninstrumented list endpoint has no backend span.
++async function runGap(kind: "noDebug" | "unknown" | "unjoined"): Promise<void> {
++  gapPending.value = kind;
++  gapError.value = null;
++  try {
++    const response =
++      kind === "noDebug"
++        ? await fetch("/api/orders/1/no-debug", { method: "POST" })
++        : kind === "unknown"
++          ? await fetch("/api/orders/999/cancel", { method: "POST" })
++          : await fetch("/api/orders?probe=1");
++    const text = await response.text();
++    gapRaw.value = text;
++    gapStatus.value = `HTTP ${response.status}`;
++  } catch (cause) {
++    gapError.value = cause instanceof Error ? cause.message : String(cause);
++  } finally {
++    gapPending.value = null;
++  }
++}
++
+ // Case S6a: fixed-URL reconcile. Plain click handling (NOT wrapped by the SDK): the line-level L2
+ // facts come from the agent's probes inside L2DemoService#reconcileAmount. No loadOrders(), no DB.
+ // Stable DOM selectors for the e2e suites: #btn-reconcile, #btn-reconcile-async, #btn-reconcile-loop.
+@@ -309,6 +382,68 @@ onMounted(loadOrders);
+       <p v-if="discountError" id="discount-error" class="error">{{ discountError }}</p>
+     </section>
+ 
++    <section id="case-request-body" class="card">
++      <h2>案例 C · JSON 请求体（字段与值）</h2>
++      <p class="hint">
++        固定请求 <code>POST /api/orders/1/remark</code>，请求体为 JSON。SDK 在请求节点采集
++        <code>body.reason</code>、<code>body.operator</code>、<code>body.priority</code>、
++        <code>body.note</code>、<code>body.token</code>；本地演示不做敏感字段脱敏，token 会原样显示。
++        后端接收并返回确认，不写数据库。
++      </p>
++      <div class="form-row">
++        <label for="remark-reason">原因</label>
++        <input id="remark-reason" v-model="remarkReason" />
++        <label for="remark-operator">操作人</label>
++        <input id="remark-operator" v-model="remarkOperator" />
++        <label for="remark-priority">优先级</label>
++        <input id="remark-priority" v-model="remarkPriority" type="number" min="1" max="5" />
++      </div>
++      <div class="form-row">
++        <label for="remark-note">备注</label>
++        <input id="remark-note" v-model="remarkNote" />
++        <label for="remark-token">Token（敏感）</label>
++        <input id="remark-token" v-model="remarkToken" />
++        <button id="btn-remark" type="button" :disabled="remarkPending" @click="submitRemark">
++          {{ remarkPending ? "请求中…" : "提交请求体" }}
++        </button>
++      </div>
++      <p v-if="remarkStatus" id="remark-status" class="hint">状态：{{ remarkStatus }}</p>
++      <pre id="remark-json">{{ remarkRaw || "（尚未发送请求体）" }}</pre>
++      <p v-if="remarkError" id="remark-error" class="error">{{ remarkError }}</p>
++    </section>
++
++    <section id="case-gaps" class="card">
++      <h2>案例 D · 采集缺口演示（真实未采集）</h2>
++      <p class="hint">
++        三个场景分别展示“变量未采集”“链路节点缺失”“前端请求未接入后端”：
++        无调试信息接口会让 service 显示 NOT_COLLECTED_NO_DEBUG_INFO；未知订单只产生 controller/service；
++        订单列表接口没有插桩，因此只有前端点击/请求，置信度为 LOST。这些都是演示事实，不是程序错误。
++      </p>
++      <div class="actions">
++        <button
++          id="btn-no-debug"
++          type="button"
++          :disabled="gapPending !== null"
++          @click="runGap('noDebug')"
++        >无调试信息</button>
++        <button
++          id="btn-unknown-cancel"
++          type="button"
++          :disabled="gapPending !== null"
++          @click="runGap('unknown')"
++        >未知订单取消</button>
++        <button
++          id="btn-unjoined"
++          type="button"
++          :disabled="gapPending !== null"
++          @click="runGap('unjoined')"
++        >未接入后端请求</button>
++      </div>
++      <p v-if="gapStatus" id="gap-status" class="hint">状态：{{ gapStatus }}</p>
++      <pre id="gap-json">{{ gapRaw || "（尚未触发缺口场景）" }}</pre>
++      <p v-if="gapError" id="gap-error" class="error">{{ gapError }}</p>
++    </section>
++
+     <section id="case-s6a" class="card">
+       <h2>案例 S6a · 逐次对账（行级局部变量 L2）</h2>
+       <p class="hint">
+diff --git a/docs/plans/STAGE-PROGRESS.md b/docs/plans/STAGE-PROGRESS.md
+index cc6f6d5..10a1430 100644
+--- a/docs/plans/STAGE-PROGRESS.md
++++ b/docs/plans/STAGE-PROGRESS.md
+@@ -84,6 +84,14 @@
+ - 阻塞：Qoder Site 未部署（等用户切换有 Sites 能力的账号）；当前账号不重试。
+ - S9/S10 按用户确认不做；站点只静态展示内置程序。
+ 
++## 4.5 工作台摘要化 UI（2026-11-24，待用户审查）
++
++- 反馈：信息过密、看不出请求从哪里开始。
++- 改动：起点横幅 + 主链摘要 + 请求卡精简 + **自上而下矩形树（父节点在上、子节点/叶子在下、树形连线、主链编号、可只看主链）** + 右侧详情按需显示；控件名称、后端方法链（悬停根目录路径）、请求时间/耗时已加入；**时间轴每个节点一个可点击关键帧（点击进入回放并选中节点）**；**回放超慢档 0.0001×–4×，默认 0.01×，按真实帧间隔推进**；**Demo 新增 JSON 请求体接口，SDK 采集 query/body 字段（本地不脱敏，仅截断），工作台显示请求参数与请求体**；**Demo 新增无调试/未知订单/未接入后端三个采集缺口演示**；**flags 增加中文 tooltip 与标记说明**。最终上线界面已移除 S0/S1/S2 历史面板（仅 `?legacy=1` 调试入口保留）。
++- 验证：`npm run build` PASS；50 个 S3/S4/S5/S6 静态门禁 token 仍存在；默认 DOM 无 S0/S1/S2 面板；真实浏览器 A/B/L1/回放 PASS；控制台无错误。
++- 证据：`docs/plans/stages/S3/evidence/workbench-production.png`、`workbench-summary-case-{a,b}.png`、`...-l1.png`；总结 `docs/plans/stages/S3/ui-summary-2026-11-24.md`；备份 `docs/plans/archive/ui-summary-2026-11-24/`。
++- 状态：本地三服务运行中（5174/5173/8080/8601/5180），会话 `s_s3demo` 保留 A/B/L1 各一条；等待用户审查，未提交/未发布。
++
+ ## 5. 恢复方法（目标暂停后）
+ 
+ 1. 读本文件 + `SOLO-PLAN.md` 当前阶段行；不要依赖聊天记忆。
+diff --git a/frontend/sdk/src/index.ts b/frontend/sdk/src/index.ts
+index ebef12c..c9997b5 100644
+--- a/frontend/sdk/src/index.ts
++++ b/frontend/sdk/src/index.ts
+@@ -69,6 +69,16 @@ interface EventReturn {
+   value?: unknown;
+ }
+ 
++/** Request query/body value captured on the fetch span (schema values[] item). */
++interface EventValue {
++  name: string;
++  kind: "param";
++  line: null;
++  to: unknown;
++  truncated: boolean;
++  redacted: boolean;
++}
++
+ /** Manifest-derived source fact: relative POSIX file + 1-based original line. */
+ interface SourceRef {
+   file: string;
+@@ -91,6 +101,7 @@ interface SpanEvent {
+   durNs: number;
+   status: FrontendStatus;
+   return: EventReturn | null;
++  values?: EventValue[];
+   confidence: "EXACT";
+   flags: string[];
+ }
+@@ -122,6 +133,7 @@ interface RequestPlan {
+   startPerfMs: number;
+   nodeKey: string;
+   requestInit: any;
++  values: EventValue[];
+ }
+ 
+ const EVENT_SCHEMA = "traceboard.event.v1";
+@@ -131,6 +143,8 @@ const MAX_BATCH_LINES = 100;
+ const MAX_BATCH_BYTES = 4 * 1024 * 1024;
+ const MAX_KEEPALIVE_BYTES = 60 * 1024;
+ const MANIFEST_URL = "/traceboard-manifest.json";
++const MAX_REQUEST_VALUE_CHARS = 2048;
++const MAX_REQUEST_VALUES = 50;
+ 
+ /** Build-plugin manifest: function name -> {file, line}. Loaded once per page (fail-open). */
+ let manifestSources: Map<string, SourceRef> | null = null;
+@@ -282,6 +296,88 @@ function safeUrl(text: string, baseHref: string): URL | null {
+   }
+ }
+ 
++function valueText(raw: unknown): string {
++  if (typeof raw === "string") {
++    return raw;
++  }
++  if (typeof raw === "number" || typeof raw === "boolean") {
++    return String(raw);
++  }
++  if (raw === null || raw === undefined) {
++    return "null";
++  }
++  try {
++    const json = JSON.stringify(raw);
++    return json === undefined ? String(raw) : json;
++  } catch {
++    return String(raw);
++  }
++}
++
++function requestValue(name: string, raw: unknown): EventValue {
++  const original = valueText(raw);
++  const truncated = original.length > MAX_REQUEST_VALUE_CHARS;
++  return {
++    name: truncate(name, 128),
++    kind: "param",
++    line: null,
++    to: truncated ? original.slice(0, MAX_REQUEST_VALUE_CHARS) : original,
++    truncated,
++    redacted: false
++  };
++}
++
++function collectRequestValues(parsed: URL, body: unknown): EventValue[] {
++  const values: EventValue[] = [];
++  const push = (name: string, raw: unknown): void => {
++    if (values.length >= MAX_REQUEST_VALUES) {
++      return;
++    }
++    values.push(requestValue(name, raw));
++  };
++  try {
++    parsed.searchParams.forEach((value, key) => push(`query.${key}`, value));
++  } catch {
++    // no query values
++  }
++  if (body === null || body === undefined) {
++    return values;
++  }
++  if (typeof body === "string") {
++    try {
++      const json = JSON.parse(body);
++      if (json !== null && typeof json === "object" && !Array.isArray(json)) {
++        for (const [key, value] of Object.entries(json)) {
++          push(`body.${key}`, value);
++        }
++        return values;
++      }
++      push("body", json);
++      return values;
++    } catch {
++      push("body", body);
++      return values;
++    }
++  }
++  const anyBody = body as any;
++  if (typeof anyBody.forEach === "function" && typeof anyBody.entries === "function") {
++    try {
++      anyBody.forEach((value: unknown, key: unknown) => push(`body.${String(key)}`, value));
++      return values;
++    } catch {
++      // fall through to the generic representation
++    }
++  }
++  if (typeof body === "object" && !Array.isArray(body)) {
++    for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
++      push(`body.${key}`, value);
++    }
++    return values;
++  }
++  push("body", body);
++  return values;
++}
++
+ function pathOf(urlText: string, baseHref: string): string {
+   const parsed = safeUrl(urlText, baseHref);
+   return parsed ? parsed.pathname : urlText;
+@@ -715,7 +811,8 @@ class TraceBoardRuntime {
+     endPerfMs: number,
+     status: FrontendStatus,
+     returnValue: EventReturn | null,
+-    source: SourceRef | null = null
++    source: SourceRef | null = null,
++    values: EventValue[] | null = null
+   ): void {
+     if (op.rootEmitted) {
+       this.drops += 1;
+@@ -747,6 +844,9 @@ class TraceBoardRuntime {
+     if (source) {
+       event.source = source;
+     }
++    if (values !== null && values.length > 0) {
++      event.values = values;
++    }
+     this.enqueue(event);
+   }
+ 
+@@ -964,13 +1064,15 @@ class TraceBoardRuntime {
+     }
+     op.pending += 1;
+     this.pendingCount += 1;
++    const body = init && typeof init === "object" ? (init as any).body : null;
+     return {
+       op,
+       spanId,
+       parentSpanId,
+       startPerfMs,
+       nodeKey: `${method} ${parsed.pathname}`,
+-      requestInit
++      requestInit,
++      values: collectRequestValues(parsed, body)
+     };
+   }
+ 
+@@ -987,7 +1089,9 @@ class TraceBoardRuntime {
+       plan.startPerfMs,
+       perfNow(),
+       ok ? "OK" : "THREW",
+-      ok ? { type: "http", value: statusCode } : null
++      ok ? { type: "http", value: statusCode } : null,
++      null,
++      plan.values
+     );
+     this.afterChild(op);
+   }
+@@ -1021,7 +1125,7 @@ class TraceBoardRuntime {
+       XHR.prototype.send = function (this: any, body?: any): any {
+         let plan: (Omit<RequestPlan, "requestInit"> & { xhr: any }) | null = null;
+         try {
+-          plan = runtime.prepareXhr(this, states.get(this));
++          plan = runtime.prepareXhr(this, states.get(this), body);
+         } catch {
+           plan = null;
+         }
+@@ -1059,7 +1163,8 @@ class TraceBoardRuntime {
+ 
+   private prepareXhr(
+     xhr: any,
+-    state: { method: string; url: string } | undefined
++    state: { method: string; url: string } | undefined,
++    body?: unknown
+   ): (Omit<RequestPlan, "requestInit"> & { xhr: any }) | null {
+     if (!state) {
+       return null;
+@@ -1091,7 +1196,8 @@ class TraceBoardRuntime {
+       parentSpanId,
+       startPerfMs,
+       nodeKey: `${state.method} ${parsed.pathname}`,
+-      xhr
++      xhr,
++      values: collectRequestValues(parsed, body)
+     };
+   }
+ 
+diff --git a/frontend/sdk/test/sdk.test.js b/frontend/sdk/test/sdk.test.js
+index f300d75..919cf34 100644
+--- a/frontend/sdk/test/sdk.test.js
++++ b/frontend/sdk/test/sdk.test.js
+@@ -211,6 +211,32 @@ test("fetch inside a click: traceparent + X-TraceBoard-Click, response event; in
+   assert.equal(ingestHeaders.get("X-TraceBoard-Click"), null);
+ });
+ 
++test("fetch request body: query/body fields captured verbatim (local, no redaction)", async () => {
++  businessImpl = async () => ({ status: 200 });
++  click(el({ id: "btn-body" }));
++  const long = "x".repeat(2100);
++  await globalThis.fetch("/api/orders/1/remark?token=query-token", {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({ reason: "改约", operator: "demo-user", token: "raw-token", long })
++  });
++  await sleep(80);
++
++  const root = latestRoot("#btn-body");
++  assert.ok(root);
++  const fetchEvent = eventsForTrace(root.traceId).find((e) => e.kind === "fetch");
++  assert.ok(fetchEvent);
++  const values = Object.fromEntries(fetchEvent.values.map((v) => [v.name, v]));
++  assert.equal(values["query.token"].to, "query-token");
++  assert.equal(values["query.token"].redacted, false);
++  assert.equal(values["body.reason"].to, "改约");
++  assert.equal(values["body.operator"].to, "demo-user");
++  assert.equal(values["body.token"].to, "raw-token");
++  assert.equal(values["body.token"].redacted, false);
++  assert.equal(values["body.long"].truncated, true);
++  assert.equal(values["body.long"].to.length, 2048);
++});
++
+ test("cross-origin fetch: event kept, headers not added", async () => {
+   businessImpl = async () => ({ status: 204 });
+   click(el({ id: "btn-cross" }));
+diff --git a/workbench/src/App.vue b/workbench/src/App.vue
+index 9a9e21e..20d4c63 100644
+--- a/workbench/src/App.vue
++++ b/workbench/src/App.vue
+@@ -4,9 +4,10 @@ import FixturePanel from "./components/FixturePanel.vue";
+ import S1Panel from "./components/S1Panel.vue";
+ import S2Panel from "./components/S2Panel.vue";
+ import S3Panel from "./components/S3Panel.vue";
+-import { S6_BANNER } from "./s6/canonical";
+ 
+ const app = useAppStore();
++const showLegacyPanels =
++  new URLSearchParams(window.location.search).get("legacy") === "1";
+ </script>
+ 
+ <template>
+@@ -18,43 +19,39 @@ const app = useAppStore();
+         <span class="app-header__mode">{{ app.mode }}</span>
+       </div>
+       <p class="app-header__note">
+-        S3 · runtime SDK 前端事实（点击/请求/DOM） + 案例 B 确认没发 + 只读回放 ·
+-        S4 节点详情/×N 聚合/缺口（只读前端派生）·
+-        S5 L1 值（参数/字段写入/返回；脱敏/截断可见；节点详情只读）·
+-        {{ S6_BANNER }} ·
+-        非实时（无 SSE/WS）· 回放不重发请求/不写数据库
++        从页面点击到 SQL 的只读追踪：点击起点、请求、控制器、服务、数据访问和结果。
++        支持回放，不重发请求、不写数据库；界面为非实时刷新。
+       </p>
+     </header>
+ 
+     <S3Panel />
+ 
+-    <details class="secondary-panel">
+-      <summary class="secondary-panel__summary">
+-        S2 · 0 行事实链（次级面板 · 默认 s_s2agent · 只读）
+-      </summary>
+-      <p class="secondary-panel__note">
+-        S2 面板保留为次级：读取 requests / graph 的 0 行后端事实链，与上方 S3 板的
+-        s_s3demo 前端事实链相互独立，不可当作同一请求。
+-      </p>
+-      <S2Panel />
+-    </details>
++    <template v-if="showLegacyPanels">
++      <details class="secondary-panel">
++        <summary class="secondary-panel__summary">
++          S2 · 0 行事实链（历史演示，与当前请求无关）
++        </summary>
++        <p class="secondary-panel__note">
++          读取独立会话的后端 0 行事实链，仅用于阶段回归，不属于最终产品界面。
++        </p>
++        <S2Panel />
++      </details>
+ 
+-    <details class="secondary-panel">
+-      <summary class="secondary-panel__summary">S1 walking skeleton（假数据，非 S3 事实链）</summary>
+-      <p class="secondary-panel__note">
+-        以下是 S1 的假前端事件 → ingest → 读回演示，与 S3 的 runtime SDK / S2 的 agent
+-        4-span 链无关联，不可当作同一请求（点击按钮才会 POST 假批次）。
+-      </p>
+-      <S1Panel />
+-    </details>
++      <details class="secondary-panel">
++        <summary class="secondary-panel__summary">S1 · 采集闭环演示（历史，假数据）</summary>
++        <p class="secondary-panel__note">
++          早期用假点击验证采集闭环，数据不是真实请求，仅用于阶段回归。
++        </p>
++        <S1Panel />
++      </details>
+ 
+-    <details class="secondary-panel">
+-      <summary class="secondary-panel__summary">S0 fixture 事实摘要（次级 · 只读）</summary>
+-      <p class="secondary-panel__note">
+-        S0 的 case-a-zero-rows fixture 摘要保留，只用于展示契约形状，不是运行时事实、
+-        也不冒充 S3 的“没发请求”证据。
+-      </p>
+-      <FixturePanel />
+-    </details>
++      <details class="secondary-panel">
++        <summary class="secondary-panel__summary">S0 · 数据契约样例（历史，静态）</summary>
++        <p class="secondary-panel__note">
++          静态 fixture 摘要，只展示数据形状，不是运行时事实。
++        </p>
++        <FixturePanel />
++      </details>
++    </template>
+   </div>
+ </template>
+diff --git a/workbench/src/components/S3Panel.vue b/workbench/src/components/S3Panel.vue
+index 3e16a1d..b088a50 100644
+--- a/workbench/src/components/S3Panel.vue
++++ b/workbench/src/components/S3Panel.vue
+@@ -10,17 +10,26 @@ import {
+   type GraphNode,
+   type RequestSummary,
+   type SessionSummary,
+-  type SideEffectItem,
+ } from "../api";
+ import { useS3Store, type S3Error, type S3Tab } from "../stores/s3";
+ import S4DetailPanel from "./S4DetailPanel.vue";
+-import { groupNodesByNodeKey } from "../s4/derive";
++import FlowTreeNode from "./FlowTreeNode.vue";
++import {
++  compactNodeKey,
++  confidenceBrief,
++  controlNameFor,
++  kindLabel,
++  nodeSqlSummary,
++  repoSourcePath,
++} from "../s4/labels";
+ import { S6_BANNER } from "../s6/canonical";
+ 
+ const s3 = useS3Store();
+ 
+ /** S4: selected graph node (detail drawer); selection is display-only. */
+ const selectedSpanId = ref<string | null>(null);
++const autoSelectedTraceId = ref<string | null>(null);
++const showBranches = ref(true);
+ 
+ /** Low-frequency polling only while LIVE and visible — this is not realtime. */
+ const POLL_INTERVAL_MS = 5000;
+@@ -28,11 +37,11 @@ const POLL_INTERVAL_MS = 5000;
+ const CLOCK_INTERVAL_MS = 1000;
+ /** Slider drags are debounced before calling GET /replay (read-only). */
+ const REPLAY_DEBOUNCE_MS = 150;
+-const PLAY_INTERVAL_MS = 100;
++const PLAY_INTERVAL_MS = 32;
++const MAX_PLAY_FRAME_MS = 500;
+ const DEFAULT_OBSERVE_MS = 1500;
+ const MISSING = "未采集";
+ const THREW_STATUS = "THREW";
+-const TICK_KINDS = new Set(["ui_event", "fetch", "sql", "render"]);
+ 
+ const sessionDraft = ref(s3.sessionId);
+ const nowNs = ref(Date.now() * 1_000_000);
+@@ -41,7 +50,9 @@ let pollTimer: number | null = null;
+ let clockTimer: number | null = null;
+ let replayTimer: number | null = null;
+ let playTimer: number | null = null;
++let playAnchorMs = 0;
+ let replayRequestSeq = 0;
++let graphRequestSeq = 0;
+ 
+ function describeError(cause: unknown, scope: "requests" | "graph" | "replay"): S3Error {
+   if (cause instanceof CollectorUnreachableError) {
+@@ -109,13 +120,30 @@ function onGraphChanged(): void {
+ }
+ 
+ async function loadGraphFor(traceId: string): Promise<void> {
++  const seq = ++graphRequestSeq;
+   s3.beginGraph();
+   try {
+     const graph = await fetchGraph(s3.sessionId, traceId);
++    if (seq !== graphRequestSeq || traceId !== s3.selectedTraceId) {
++      return;
++    }
+     s3.setGraph(graph);
++    const root = findRootNode(graph.nodes);
++    if (autoSelectedTraceId.value !== traceId) {
++      autoSelectedTraceId.value = traceId;
++      selectedSpanId.value = root?.spanId ?? null;
++      showBranches.value = true;
++    } else if (
++      selectedSpanId.value !== null &&
++      !graph.nodes.some((node) => node.spanId === selectedSpanId.value)
++    ) {
++      selectedSpanId.value = root?.spanId ?? null;
++    }
+     onGraphChanged();
+   } catch (cause) {
+-    s3.failGraph(describeError(cause, "graph"));
++    if (seq === graphRequestSeq && traceId === s3.selectedTraceId) {
++      s3.failGraph(describeError(cause, "graph"));
++    }
+   }
+ }
+ 
+@@ -169,6 +197,7 @@ function selectRequest(traceId: string): void {
+   }
+   s3.selectTrace(traceId);
+   selectedSpanId.value = null;
++  showBranches.value = true;
+   void loadGraphFor(traceId);
+ }
+ 
+@@ -265,15 +294,191 @@ const tabCounts = computed(() => ({
+   ).length,
+ }));
+ 
+-const rootNode = computed<GraphNode | null>(() => {
+-  const nodes = s3.graph?.nodes ?? [];
++function findRootNode(nodes: readonly GraphNode[]): GraphNode | null {
+   return (
+     nodes.find((node) => node.parentSpanId === null && node.kind === "ui_event") ??
+     nodes.find((node) => node.parentSpanId === null) ??
+     null
+   );
++}
++
++const rootNode = computed<GraphNode | null>(() =>
++  findRootNode(s3.graph?.nodes ?? [])
++);
++
++const startTitle = computed<string>(() => {
++  const root = rootNode.value;
++  if (root !== null) {
++    if (root.kind === "ui_event") {
++      return `页面点击 ${root.nodeKey}`;
++    }
++    if (root.kind === "fetch") {
++      return `网络请求 ${root.nodeKey}`;
++    }
++    return `${kindLabel(root.kind)} ${compactNodeKey(root.kind, root.nodeKey)}`;
++  }
++  const request = selectedRequest.value;
++  if (request === null) {
++    return "尚未选择请求";
++  }
++  const kind = request.rootKind ?? "";
++  const key = request.nodeKey ?? "";
++  if (kind === "ui_event") {
++    return `页面点击 ${key || "未采集"}`;
++  }
++  if (kind === "fetch") {
++    return `网络请求 ${key || "未采集"}`;
++  }
++  return kind.length > 0 ? `${kindLabel(kind)} ${key || "未采集"}` : "起点未采集";
++});
++
++const startControlName = computed<string | null>(() => {
++  const root = rootNode.value;
++  if (root !== null) {
++    return root.kind === "ui_event" ? controlNameFor(root.nodeKey) : null;
++  }
++  const request = selectedRequest.value;
++  return request?.rootKind === "ui_event" ? controlNameFor(request.nodeKey) : null;
++});
++
++const startSource = computed<string | null>(() => {
++  const source = rootNode.value?.source ?? null;
++  if (source?.file) {
++    return source.line === null ? source.file : `${source.file}:${source.line}`;
++  }
++  return null;
++});
++
++const backendEntrySource = computed<string | null>(() => {
++  const controller = visibleNodes.value.find((node) => node.kind === "controller") ?? null;
++  const source = controller?.source ?? null;
++  if (source?.file) {
++    return source.line === null ? source.file : `${source.file}:${source.line}`;
++  }
++  return null;
++});
++
++const startSourceFull = computed<string | null>(() =>
++  rootNode.value === null ? null : repoSourcePath(rootNode.value)
++);
++
++const backendEntryFull = computed<string | null>(() => {
++  const controller = visibleNodes.value.find((node) => node.kind === "controller") ?? null;
++  return controller === null ? null : repoSourcePath(controller);
++});
++
++const startSourceKind = computed<string>(() => {
++  const kind = rootNode.value?.kind ?? "";
++  return kind === "ui_event" || kind === "fetch" || kind === "js_method" || kind === "render"
++    ? "页面源码"
++    : "后端入口";
+ });
+ 
++const showBackendEntry = computed<boolean>(
++  () => backendEntrySource.value !== null && backendEntrySource.value !== startSource.value
++);
++
++const startConfidence = computed<string>(() =>
++  confidenceBrief(rootConfidence.value)
++);
++
++const sqlSummary = computed<string>(() => {
++  if (s3.graphStatus === "error") {
++    return "SQL 影响读取失败";
++  }
++  if (s3.graphStatus === "loading") {
++    return "SQL 影响读取中";
++  }
++  const sql = visibleNodes.value.find((node) => node.kind === "sql") ?? null;
++  if (sql === null) {
++    const anySql = (s3.graph?.nodes ?? []).some((node) => node.kind === "sql");
++    return anySql ? "SQL 影响尚未发生" : "SQL 影响未采集";
++  }
++  return nodeSqlSummary(sql);
++});
++
++const startMeta = computed<string>(() => {
++  const request = selectedRequest.value;
++  if (request === null) {
++    return "";
++  }
++  return `${request.spanCount} 个节点 · 后端 ${request.backendSpanCount} 个 · ${request.fetchCount} 次请求`;
++});
++
++const NEXT_KIND_PREFS: Record<string, string[]> = {
++  ui_event: ["fetch", "js_method", "render"],
++  js_method: ["fetch", "render"],
++  fetch: ["controller", "js_method"],
++  controller: ["service"],
++  service: ["mapper"],
++  mapper: ["sql"],
++};
++
++/**
++ * The short story line: start at the root and follow the first meaningful child.
++ * Secondary fetches (for example the list refresh) stay in the full tree.
++ */
++function pickMainChild(parent: GraphNode, children: readonly GraphNode[]): GraphNode | null {
++  const prefs = NEXT_KIND_PREFS[parent.kind] ?? [];
++  for (const kind of prefs) {
++    const candidates = children.filter((child) => child.kind === kind);
++    if (candidates.length === 0) {
++      continue;
++    }
++    if (kind === "fetch") {
++      const write = candidates.find(
++        (child) => !child.nodeKey.trim().toUpperCase().startsWith("GET ")
++      );
++      if (write !== undefined) {
++        return write;
++      }
++    }
++    return candidates[0];
++  }
++  return null;
++}
++
++const mainChain = computed<GraphNode[]>(() => {
++  const root = rootNode.value;
++  if (root === null) {
++    return [];
++  }
++  const ids = new Set(visibleNodes.value.map((node) => node.spanId));
++  if (!ids.has(root.spanId)) {
++    return [];
++  }
++  const children = new Map<string, GraphNode[]>();
++  for (const node of visibleNodes.value) {
++    if (node.parentSpanId === null || !ids.has(node.parentSpanId)) {
++      continue;
++    }
++    const list = children.get(node.parentSpanId) ?? [];
++    list.push(node);
++    children.set(node.parentSpanId, list);
++  }
++  for (const list of children.values()) {
++    list.sort(sortNodes);
++  }
++  const chain: GraphNode[] = [root];
++  const seen = new Set<string>([root.spanId]);
++  while (chain.length < 8) {
++    const current = chain[chain.length - 1];
++    const next = pickMainChild(current, children.get(current.spanId) ?? []);
++    if (next === null || seen.has(next.spanId)) {
++      break;
++    }
++    chain.push(next);
++    seen.add(next.spanId);
++  }
++  return chain;
++});
++
++const backendMethods = computed<GraphNode[]>(() =>
++  mainChain.value.filter((node) =>
++    node.kind === "controller" || node.kind === "service" || node.kind === "mapper"
++  )
++);
++
+ const observeFlag = computed<string | null>(() => {
+   const flag = rootNode.value?.flags.find((item) => item.startsWith("OBSERVE_MS="));
+   return flag ?? null;
+@@ -333,7 +538,7 @@ const caseB = computed<CaseBView>(() => {
+       kind: "unable",
+       text: "无法确认：前端采集未接入",
+       detail:
+-        "sdkActive=false：会话中没有带 SDK_ACTIVE 的 click 根，不能推断“本次点击没发请求”。",
++        "前端采集未接入（sdkActive=false）：会话中没有带采集标记的点击起点，不能推断“本次点击没发请求”。",
+     };
+   }
+   const request = selectedRequest.value;
+@@ -341,14 +546,14 @@ const caseB = computed<CaseBView>(() => {
+     return {
+       kind: "none",
+       text: "暂无请求，不判定为“没发请求”",
+-      detail: "空态不是成功：没有 click 根/请求事实可判读。",
++      detail: "空态不是成功：没有点击起点或请求事实可判读。",
+     };
+   }
+   if (s3.graphStatus === "error") {
+     return {
+       kind: "orphan",
+-      text: "无法确认：事实链读取失败（graph error），不判定为“没发请求”",
+-      detail: "graph 未加载时无法核对 click 根与 OBSERVE_MS；先修复读取错误。",
++      text: "无法确认：请求链路读取失败，不判定为“没发请求”",
++      detail: "链路未加载时无法核对点击起点与观察窗；先修复读取错误。",
+     };
+   }
+   if (s3.graphStatus === "loading" || s3.graph === null) {
+@@ -361,30 +566,30 @@ const caseB = computed<CaseBView>(() => {
+   if (rootNode.value === null) {
+     return {
+       kind: "orphan",
+-      text: "无法确认：未读到 click 根（graph 缺根），不判定为“没发请求”",
+-      detail: "需要 graph 中的 ui_event 根 + OBSERVE_MS 才能确认观察窗已关闭。",
++      text: "无法确认：没有读到点击起点，不判定为“没发请求”",
++      detail: "需要点击起点与观察窗记录才能确认观察窗已关闭。",
+     };
+   }
+   const rootKind = rootNode.value.kind || request.rootKind || "";
+   if (rootKind !== "ui_event") {
+     return {
+       kind: "orphan",
+-      text: `游离请求（无 frontend click 根）· confidence ${rootConfidence.value || MISSING}`,
+-      detail: "游离后端请求不参与“没发请求”判定；confidence=LOST 不是状态。",
++      text: `游离请求（没有前端点击起点）· 关联方式 ${rootConfidence.value || MISSING}`,
++      detail: "游离的后端请求不参与“没发请求”判定；未关联只表示前后端没有连上。",
+     };
+   }
+   if (request.fetchCount > 0 && !request.hasBackend) {
+     return {
+       kind: "lost",
+       text: "前端已发请求但后端未采集（LOST）",
+-      detail: `fetchCount=${request.fetchCount} · hasBackend=false · backendSpanCount=${request.backendSpanCount}；失败 fetch 节点单独标失败，不并入“没发”。`,
++      detail: `前端请求 ${request.fetchCount} 次；后端节点 ${request.backendSpanCount} 个；失败的请求节点会单独标记，不并入“没发”。`,
+     };
+   }
+   if (rootConfidence.value !== "EXACT") {
+     return {
+       kind: "orphan",
+-      text: `根 confidence=${rootConfidence.value || MISSING}，不满足 EXACT，不判定为“没发请求”`,
+-      detail: "只有 EXACT 的 ui_event 根才能进入案例 B 判定。",
++      text: `起点关联方式为 ${confidenceBrief(rootConfidence.value)}，不满足“前后端已关联”，不判定为“没发请求”`,
++      detail: "只有已关联的点击起点才能进入案例 B 判定。",
+     };
+   }
+   if (request.fetchCount === 0 && !request.hasBackend) {
+@@ -396,8 +601,8 @@ const caseB = computed<CaseBView>(() => {
+         kind: "confirmed",
+         text: "已确认：本次点击因果链内没有网络请求",
+         detail:
+-          `SDK 在线；观察窗 ${observeMs.value}ms 已关闭（${observeFlag.value ?? `OBSERVE_MS 未记录，按默认 ${DEFAULT_OBSERVE_MS}ms`}）；` +
+-          `fetch/XHR=0；后端 span=0${earlyClosed ? "；观察窗提前关闭（OBSERVE_MS < 1500）" : ""}。`,
++          `前端采集已接入；观察窗 ${observeMs.value} 毫秒已关闭；` +
++          `网络请求 0 次；后端节点 0 个${earlyClosed ? "；观察窗提前关闭" : ""}。`,
+       };
+     }
+     const elapsedMs = Math.max(0, elapsedNs / 1_000_000);
+@@ -405,20 +610,20 @@ const caseB = computed<CaseBView>(() => {
+     return {
+       kind: "observing",
+       text: "观察中…",
+-      detail: `观察窗 ${observeMs.value}ms 尚未关闭：已过 ${elapsedMs.toFixed(0)}ms，剩余 ${remainingMs.toFixed(0)}ms；关闭前不下结论。`,
++      detail: `观察窗 ${observeMs.value} 毫秒尚未关闭：已过 ${elapsedMs.toFixed(0)} 毫秒，剩余 ${remainingMs.toFixed(0)} 毫秒；关闭前不下结论。`,
+     };
+   }
+   if (request.fetchCount === 0 && request.hasBackend) {
+     return {
+       kind: "partial",
+-      text: "存在后端事实但本次点击未采集 fetch，不判定为“没发请求”",
+-      detail: `fetchCount=0 · hasBackend=true · backendSpanCount=${request.backendSpanCount}；需检查前端采集。`,
++      text: "存在后端节点但本次点击未采集到前端请求，不判定为“没发请求”",
++      detail: `后端节点 ${request.backendSpanCount} 个；前端请求 0 次；需要检查前端采集。`,
+     };
+   }
+   return {
+     kind: "joined",
+-    text: "已关联：前端 fetch ↔ 后端事实链（EXACT），不写“没发请求”",
+-    detail: `fetchCount=${request.fetchCount} · backendSpanCount=${request.backendSpanCount} · confidence ${request.confidence}`,
++    text: "已关联：前端请求 ↔ 后端链路（EXACT），不写“没发请求”",
++    detail: `前端请求 ${request.fetchCount} 次 · 后端节点 ${request.backendSpanCount} 个 · 关联方式 ${request.confidence}`,
+   };
+ });
+ 
+@@ -470,6 +675,7 @@ const sliderPct = computed<number>(() => {
+ 
+ interface TimelineTick {
+   id: string;
++  spanId: string;
+   kind: string;
+   label: string;
+   nodeKey: string;
+@@ -477,30 +683,22 @@ interface TimelineTick {
+   pct: number;
+ }
+ 
+-const TICK_LABELS: Record<string, string> = {
+-  ui_event: "click",
+-  fetch: "fetch",
+-  sql: "sql",
+-  render: "render",
+-};
+-
+ const timelineTicks = computed<TimelineTick[]>(() => {
+-  const nodes = s3.graph?.nodes ?? [];
++  const nodes = [...(s3.graph?.nodes ?? [])].sort(sortNodes);
+   const max = maxRel.value;
+   const base = minStartNs.value;
+-  return nodes
+-    .filter((node) => TICK_KINDS.has(node.kind))
+-    .map((node) => {
+-      const relNs = Math.max(0, node.startNs - base);
+-      return {
+-        id: node.spanId,
+-        kind: node.kind,
+-        label: TICK_LABELS[node.kind] ?? node.kind,
+-        nodeKey: node.nodeKey,
+-        relNs,
+-        pct: max <= 0 ? 0 : Math.min(100, (relNs / max) * 100),
+-      };
+-    });
++  return nodes.map((node) => {
++    const relNs = Math.max(0, node.startNs - base);
++    return {
++      id: node.spanId,
++      spanId: node.spanId,
++      kind: node.kind,
++      label: kindLabel(node.kind),
++      nodeKey: node.nodeKey,
++      relNs,
++      pct: max <= 0 ? 0 : Math.min(100, (relNs / max) * 100),
++    };
++  });
+ });
+ 
+ const visibleNodes = computed<GraphNode[]>(() => {
+@@ -518,13 +716,6 @@ const hiddenNodes = computed<GraphNode[]>(() => {
+   return (s3.graph?.nodes ?? []).filter((node) => node.startNs > cutoffNs.value);
+ });
+ 
+-interface TreeRow {
+-  node: GraphNode;
+-  depth: number;
+-  orphan: boolean;
+-  running: boolean;
+-}
+-
+ function sortNodes(a: GraphNode, b: GraphNode): number {
+   if (a.startNs !== b.startNs) {
+     return a.startNs - b.startNs;
+@@ -532,90 +723,71 @@ function sortNodes(a: GraphNode, b: GraphNode): number {
+   return a.spanId.localeCompare(b.spanId);
+ }
+ 
+-/**
+- * Depth comes from parentSpanId only; sibling order is startNs (then spanId).
+- * A node whose parent is missing from the visible window is shown as an
+- * orphan root instead of silently disappearing.
+- */
+-function buildRows(nodes: readonly GraphNode[]): TreeRow[] {
+-  const byId = new Map<string, GraphNode>();
+-  for (const node of nodes) {
+-    byId.set(node.spanId, node);
+-  }
+-  const children = new Map<string, GraphNode[]>();
+-  const roots: GraphNode[] = [];
+-  for (const node of nodes) {
+-    if (
+-      node.parentSpanId !== null &&
+-      node.parentSpanId !== node.spanId &&
+-      byId.has(node.parentSpanId)
+-    ) {
+-      const list = children.get(node.parentSpanId) ?? [];
+-      list.push(node);
+-      children.set(node.parentSpanId, list);
+-    } else {
+-      roots.push(node);
++const mainNodeIds = computed<Set<string>>(
++  () => new Set(mainChain.value.map((node) => node.spanId))
++);
++
++function isMainNode(spanId: string): boolean {
++  return mainNodeIds.value.has(spanId);
++}
++
++
++const treeNodes = computed<GraphNode[]>(() =>
++  showBranches.value
++    ? visibleNodes.value
++    : visibleNodes.value.filter((node) => isMainNode(node.spanId))
++);
++
++const treeChildrenByParent = computed<Map<string, GraphNode[]>>(() => {
++  const map = new Map<string, GraphNode[]>();
++  const ids = new Set(treeNodes.value.map((node) => node.spanId));
++  for (const node of treeNodes.value) {
++    if (node.parentSpanId === null || !ids.has(node.parentSpanId)) {
++      continue;
+     }
++    const list = map.get(node.parentSpanId) ?? [];
++    list.push(node);
++    map.set(node.parentSpanId, list);
+   }
+-  roots.sort(sortNodes);
+-  for (const list of children.values()) {
++  for (const list of map.values()) {
+     list.sort(sortNodes);
+   }
+-  const rows: TreeRow[] = [];
+-  const visited = new Set<string>();
+-  const walk = (node: GraphNode, depth: number): void => {
+-    if (visited.has(node.spanId)) {
+-      return;
+-    }
+-    visited.add(node.spanId);
+-    rows.push({
+-      node,
+-      depth,
+-      orphan: node.parentSpanId !== null && !byId.has(node.parentSpanId),
+-      running:
+-        s3.mode === "replay" &&
+-        node.startNs <= cutoffNs.value &&
+-        node.startNs + node.durNs > cutoffNs.value,
+-    });
+-    const list = children.get(node.spanId) ?? [];
++  return map;
++});
++
++const treeRoots = computed<GraphNode[]>(() => {
++  const childIds = new Set<string>();
++  for (const list of treeChildrenByParent.value.values()) {
+     for (const child of list) {
+-      walk(child, depth + 1);
++      childIds.add(child.spanId);
+     }
+-  };
+-  for (const root of roots) {
+-    walk(root, 0);
+   }
+-  // Defensive: a cycle would leave nodes unvisited; show them flat, never drop.
+-  for (const node of nodes) {
+-    if (!visited.has(node.spanId)) {
+-      walk(node, 0);
+-    }
+-  }
+-  return rows;
+-}
+-
+-const treeRows = computed<TreeRow[]>(() => buildRows(visibleNodes.value));
++  return treeNodes.value.filter((node) => !childIds.has(node.spanId)).sort(sortNodes);
++});
+ 
+-// ---------------------------------------------------------------------------
+-// S4: selected node, ×N grouping (display only) and detail drawer
+-// ---------------------------------------------------------------------------
++const mainSteps = computed<Map<string, number>>(
++  () => new Map(mainChain.value.map((node, index) => [node.spanId, index + 1]))
++);
+ 
+-const nodeGroups = computed(() =>
+-  groupNodesByNodeKey(s3.graph?.nodes ?? [])
++const branchCount = computed<number>(() =>
++  visibleNodes.value.filter((node) => !isMainNode(node.spanId)).length
+ );
+ 
+-const groupCounts = computed<Map<string, number>>(() => {
+-  const counts = new Map<string, number>();
+-  for (const group of nodeGroups.value) {
+-    counts.set(group.nodeKey, group.count);
++function toggleBranches(): void {
++  if (
++    showBranches.value &&
++    selectedSpanId.value !== null &&
++    !isMainNode(selectedSpanId.value)
++  ) {
++    selectedSpanId.value = rootNode.value?.spanId ?? null;
+   }
+-  return counts;
+-});
+-
+-function groupCount(nodeKey: string): number {
+-  return groupCounts.value.get(nodeKey) ?? 1;
++  showBranches.value = !showBranches.value;
+ }
+ 
++// ---------------------------------------------------------------------------
++// S4: selected node, ×N grouping (display only) and detail drawer
++// ---------------------------------------------------------------------------
++
+ function selectSpan(spanId: string): void {
+   selectedSpanId.value = spanId;
+ }
+@@ -634,18 +806,18 @@ const replayTraceEventCount = computed<number>(() => {
+ 
+ const replayWindowText = computed<string>(() => {
+   if (s3.mode !== "replay") {
+-    return "LIVE：事实树来自 GET /graph；切到 REPLAY 后拖动滑块走 GET /replay 只读窗口。";
++    return "实时：显示全部已存事件；切到回放后可拖动滑块查看历史时刻。";
+   }
+   if (s3.replayStatus === "loading") {
+-    return "正在读取 GET /replay 窗口…";
++    return "正在读取回放窗口…";
+   }
+   const replay = s3.replay;
+   if (replay === null) {
+-    return "REPLAY：等待回放窗口…（本地 graph 过滤仍只读）";
++    return "回放：等待回放窗口…（本地过滤仍只读）";
+   }
+   return (
+-    `GET /replay · fromNs ${replay.fromNs} → toNs ${replay.toNs} · 窗口 ${replay.events.length} 事件` +
+-    `（当前 trace ${replayTraceEventCount.value} 条）· mode=${replay.mode} · readOnly=${replay.readOnly ? "true" : "false"}`
++    `回放窗口：${replay.events.length} 个事件（当前链路 ${replayTraceEventCount.value} 个）· ` +
++    `只读=${replay.readOnly ? "是" : "否"}`
+   );
+ });
+ 
+@@ -721,6 +893,21 @@ function onSliderInput(event: Event): void {
+   scheduleReplayLoad();
+ }
+ 
++function jumpToTick(tick: TimelineTick): void {
++  if (s3.mode === "live") {
++    stopPolling();
++    s3.setMode("replay");
++  }
++  s3.setPlaying(false);
++  stopPlayTimer();
++  s3.setSlider(Math.min(Math.max(tick.relNs, 0), maxRel.value));
++  scheduleReplayLoad(true);
++  selectedSpanId.value = tick.spanId;
++  if (!isMainNode(tick.spanId)) {
++    showBranches.value = true;
++  }
++}
++
+ function togglePlay(): void {
+   if (s3.mode !== "replay") {
+     return;
+@@ -736,12 +923,19 @@ function togglePlay(): void {
+   }
+   s3.setPlaying(true);
+   stopPlayTimer();
++  playAnchorMs = performance.now();
+   playTimer = window.setInterval(() => {
+     if (!s3.playing || s3.mode !== "replay") {
+       stopPlayTimer();
+       return;
+     }
+-    const stepNs = PLAY_INTERVAL_MS * 1_000_000 * s3.speed;
++    const nowMs = performance.now();
++    const elapsedMs = Math.min(
++      MAX_PLAY_FRAME_MS,
++      Math.max(0, nowMs - playAnchorMs)
++    );
++    playAnchorMs = nowMs;
++    const stepNs = Math.round(elapsedMs * 1_000_000 * s3.speed);
+     const next = Math.min(maxRel.value, effectiveSliderNs.value + stepNs);
+     s3.setSlider(next);
+     scheduleReplayLoad();
+@@ -797,24 +991,24 @@ function notCollectedReason(status: string): string {
+ 
+ function statusMeta(status: string): StatusMeta {
+   if (status === "OK") {
+-    return { tone: "ok", label: "OK", hint: null, reason: null, lock: false };
++    return { tone: "ok", label: "正常", hint: null, reason: null, lock: false };
+   }
+   if (status === "RETURNED_FALSE") {
+     return {
+       tone: "false",
+-      label: "RETURNED_FALSE",
++      label: "正常返回 false",
+       hint: "正常返回 false",
+       reason: null,
+       lock: false,
+     };
+   }
+   if (status === THREW_STATUS) {
+-    return { tone: "threw", label: "THREW", hint: "异常/断线", reason: null, lock: false };
++    return { tone: "threw", label: "抛出异常", hint: "异常/断线", reason: null, lock: false };
+   }
+   if (status.startsWith("NOT_COLLECTED")) {
+     return {
+       tone: "notcollected",
+-      label: status,
++      label: "未采集",
+       hint: "未采集",
+       reason: notCollectedReason(status),
+       lock: false,
+@@ -823,7 +1017,7 @@ function statusMeta(status: string): StatusMeta {
+   if (status === "TRUNCATED") {
+     return {
+       tone: "truncated",
+-      label: "TRUNCATED",
++      label: "已截断/已折叠",
+       hint: "已截断/已折叠",
+       reason: null,
+       lock: false,
+@@ -832,14 +1026,14 @@ function statusMeta(status: string): StatusMeta {
+   if (status === "REDACTED") {
+     return {
+       tone: "redacted",
+-      label: "REDACTED",
++      label: "已脱敏",
+       hint: "已脱敏",
+       reason: null,
+       lock: true,
+     };
+   }
+   if (status === "UNKNOWN") {
+-    return { tone: "unknown", label: "UNKNOWN", hint: "未知", reason: null, lock: false };
++    return { tone: "unknown", label: "未知", hint: "未知", reason: null, lock: false };
+   }
+   return {
+     tone: "neutral",
+@@ -858,10 +1052,6 @@ function statusHint(status: string): string | null {
+   return statusMeta(status).hint;
+ }
+ 
+-function statusReason(status: string): string | null {
+-  return statusMeta(status).reason;
+-}
+-
+ function statusLock(status: string): boolean {
+   return statusMeta(status).lock;
+ }
+@@ -912,6 +1102,36 @@ const CONFIDENCE_LEGEND = [
+ // Formatting helpers
+ // ---------------------------------------------------------------------------
+ 
++function pad2(value: number): string {
++  return String(value).padStart(2, "0");
++}
++
++function requestTime(ns: number): string {
++  if (!Number.isFinite(ns) || ns <= 0) {
++    return "时间未采集";
++  }
++  const date = new Date(Math.round(ns / 1_000_000));
++  if (Number.isNaN(date.getTime())) {
++    return "时间未采集";
++  }
++  return (
++    `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ` +
++    `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
++  );
++}
++
++function requestTimeTitle(ns: number): string {
++  if (!Number.isFinite(ns) || ns <= 0) {
++    return "开始时间未采集";
++  }
++  const date = new Date(Math.round(ns / 1_000_000));
++  return Number.isNaN(date.getTime()) ? "开始时间未采集" : date.toLocaleString("zh-CN");
++}
++
++function requestControlName(request: RequestSummary): string | null {
++  return request.rootKind === "ui_event" ? controlNameFor(request.nodeKey) : null;
++}
++
+ function formatNs(ns: number): string {
+   if (!Number.isFinite(ns) || ns < 0) {
+     return "—";
+@@ -936,94 +1156,21 @@ function shortTrace(traceId: string): string {
+ }
+ 
+ function rootLabel(request: RequestSummary): string {
+-  const kind = request.rootKind ?? "root";
+-  return `${kind} · ${request.nodeKey ?? "无根（未采集）"}`;
+-}
+-
+-function formatValue(value: unknown): string {
+-  if (value === null) {
+-    return "null";
++  const kind = request.rootKind ?? "";
++  const key = request.nodeKey ?? "";
++  if (kind === "ui_event") {
++    return `页面点击 ${key || "未采集"}`;
+   }
+-  if (
+-    typeof value === "string" ||
+-    typeof value === "number" ||
+-    typeof value === "boolean"
+-  ) {
+-    return String(value);
+-  }
+-  const json = JSON.stringify(value);
+-  if (json === undefined) {
+-    return String(value);
+-  }
+-  return json.length > 120 ? `${json.slice(0, 117)}…` : json;
+-}
+-
+-function nodeReturnText(node: GraphNode): string {
+-  if (node.return === null) {
+-    return `${MISSING}（无返回摘要）`;
+-  }
+-  if (node.return.value === undefined) {
+-    return `${node.return.type} = ${MISSING}`;
+-  }
+-  return `${node.return.type} = ${formatValue(node.return.value)}`;
+-}
+-
+-function describeSideEffect(effect: SideEffectItem): string {
+-  const sqlId = effect.sqlId ?? `${MISSING} sqlId`;
+-  const rows =
+-    effect.rowsAffected === null
+-      ? "rowsAffected 未采集"
+-      : `rowsAffected ${effect.rowsAffected}`;
+-  const tx = effect.transaction ?? "transaction 未采集";
+-  return `${effect.type} · ${sqlId} · ${rows} · ${tx}`;
+-}
+-
+-function nodeSideEffectsText(node: GraphNode): string {
+-  if (node.sideEffects.length === 0) {
+-    return node.kind === "sql" ? `${MISSING}（事件未携带 sideEffects）` : "无记录";
++  if (kind === "fetch") {
++    return `网络请求 ${key || "未采集"}`;
+   }
+-  return node.sideEffects.map(describeSideEffect).join("；");
+-}
+-
+-function threadText(node: GraphNode): string {
+-  if (node.thread === null) {
+-    return `${MISSING}（事件未携带线程）`;
++  if (kind.length === 0) {
++    return "起点未采集";
+   }
+-  return `${node.thread.name} #${node.thread.id}`;
++  return `${kindLabel(kind)} ${key || "未采集"}`;
+ }
+ 
+-const linkedFetchIds = computed<Set<string>>(() => {
+-  const set = new Set<string>();
+-  for (const node of s3.graph?.nodes ?? []) {
+-    if (node.kind === "controller" && node.parentSpanId !== null) {
+-      set.add(node.parentSpanId);
+-    }
+-  }
+-  return set;
+-});
+-
+-/** Node-level annotations; never a business verdict. */
+-function nodeNotes(node: GraphNode): string[] {
+-  const notes: string[] = [];
+-  if (node.kind === "js_method") {
+-    notes.push("JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）");
+-  }
+-  if (node.kind === "fetch") {
+-    if (!(selectedRequest.value?.hasBackend ?? false)) {
+-      notes.push("后端未采集（本 trace 无后端 span）");
+-    } else if (!linkedFetchIds.value.has(node.spanId)) {
+-      notes.push("后端未采集（未关联 controller）");
+-    }
+-  }
+-  if (node.kind === "sql" && node.sideEffects.length === 0) {
+-    notes.push("sideEffects 未采集（不推断 0 行）");
+-  }
+-  return notes;
+-}
+ 
+-function rawTimeTitle(node: GraphNode): string {
+-  return `raw startNs ${node.startNs} · durNs ${node.durNs} · relNs ${node.startNs - minStartNs.value}`;
+-}
+ </script>
+ 
+ <template>
+@@ -1031,19 +1178,17 @@ function rawTimeTitle(node: GraphNode): string {
+     <header class="s3-panel__header">
+       <div>
+         <h2 id="s3-panel-title" class="s3-panel__title">
+-          S3 · runtime SDK 前端事实 + 只读回放（案例 A/B）
++          请求追踪台
+         </h2>
+         <p class="s3-panel__note">
+-          点击/控件/请求/DOM 事实来自 collector 的 requests / graph 只读查询；状态语义区分
+-          OK / RETURNED_FALSE / THREW / NOT_COLLECTED_* / TRUNCATED / REDACTED。
+-          {{ S6_BANNER }} · 非实时（无 SSE/WS）。
++          从一次页面点击开始，沿请求、控制器、服务、数据访问和 SQL 查看结果；支持只读回放，非实时。
+         </p>
+       </div>
+-      <span class="s3-panel__badge">S3 · GET requests / graph / replay</span>
++      <span class="s3-panel__badge">只读事实 · 点击查看详情</span>
+     </header>
+ 
+     <div class="s3-controls">
+-      <label class="s3-controls__label" for="s3-session">会话 sessionId</label>
++      <label class="s3-controls__label" for="s3-session">会话编号</label>
+       <input
+         id="s3-session"
+         v-model="sessionDraft"
+@@ -1069,13 +1214,13 @@ function rawTimeTitle(node: GraphNode): string {
+         {{ s3.refreshing ? "刷新中…" : "刷新" }}
+       </button>
+       <span class="s3-controls__hint">
+-        默认 s_s3demo · 输入会话 id 后回车切换 · LIVE 每 5 秒刷新（非实时）
++        默认会话 s_s3demo · 输入后回车切换 · 每 5 秒刷新（非实时）
+       </span>
+     </div>
+     <p class="s3-controls__status">
+       当前会话 <code>{{ s3.sessionId }}</code>
+       <span class="s3-chip" :class="s3.sdkActive ? 's3-chip--on' : 's3-chip--off'">
+-        sdkActive {{ s3.sdkActive ? "true" : "false" }}
++        前端采集（sdkActive）{{ s3.sdkActive ? "已接入" : "未接入" }}
+       </span>
+       <span v-if="s3.lastRefreshedAt"> · 最近刷新 {{ s3.lastRefreshedAt }}</span>
+       <span v-else> · 尚未刷新</span>
+@@ -1112,7 +1257,7 @@ function rawTimeTitle(node: GraphNode): string {
+         :aria-selected="s3.tab === 'requests'"
+         @click="selectTab('requests')"
+       >
+-        请求 <span class="s3-tab__count">{{ tabCounts.requests }}</span>
++        含请求 <span class="s3-tab__count">{{ tabCounts.requests }}</span>
+       </button>
+       <button
+         type="button"
+@@ -1122,13 +1267,80 @@ function rawTimeTitle(node: GraphNode): string {
+         :aria-selected="s3.tab === 'clicks'"
+         @click="selectTab('clicks')"
+       >
+-        点击 <span class="s3-tab__count">{{ tabCounts.clicks }}</span>
++        纯点击 <span class="s3-tab__count">{{ tabCounts.clicks }}</span>
+       </button>
+     </div>
+ 
++    <section
++      v-if="selectedRequest !== null"
++      id="s3-start"
++      class="s3-start"
++      aria-labelledby="s3-start-title"
++    >
++      <div class="s3-start__badge" aria-hidden="true">起点</div>
++      <div class="s3-start__body">
++        <p class="s3-start__eyebrow">这次请求从哪开始</p>
++        <h3 id="s3-start-title" class="s3-start__title">
++          {{ startTitle }}
++          <span v-if="startControlName" class="s3-start__control-name">控件：{{ startControlName }}</span>
++        </h3>
++        <p v-if="backendMethods.length > 0" class="s3-start__methods">
++          后端方法：
++          <template v-for="(node, index) in backendMethods" :key="node.spanId">
++            <span
++              class="s3-start__method"
++              :title="repoSourcePath(node) ?? node.nodeKey"
++            >{{ compactNodeKey(node.kind, node.nodeKey) }}</span>
++            <span v-if="index < backendMethods.length - 1" class="s3-start__method-arrow">→</span>
++          </template>
++        </p>
++        <p class="s3-start__source">
++          <template v-if="startSource !== null">
++            {{ startSourceKind }}：<code :title="startSourceFull ?? startSource ?? undefined">{{ startSource }}</code>
++            <span class="s3-start__dot">·</span>
++          </template>
++          <template v-else>
++            {{ startSourceKind }}未采集
++            <span class="s3-start__dot">·</span>
++          </template>
++          <template v-if="showBackendEntry">
++            后端入口：<code :title="backendEntryFull ?? backendEntrySource ?? undefined">{{ backendEntrySource }}</code>
++            <span class="s3-start__dot">·</span>
++          </template>
++          {{ startConfidence }}
++          <span class="s3-start__dot">·</span>
++          {{ startMeta }}
++          <span class="s3-start__dot">·</span>
++          {{ sqlSummary }}
++        </p>
++        <ol v-if="mainChain.length > 0" class="s3-start__chain" aria-label="主要调用路径">
++          <li
++            v-for="(step, index) in mainChain"
++            :key="step.spanId"
++            class="s3-start__step"
++            :class="{ 's3-start__step--root': index === 0 }"
++          >
++            <span class="s3-start__step-no">{{ index + 1 }}</span>
++            <span class="s3-start__step-kind">{{ kindLabel(step.kind) }}</span>
++            <code
++              class="s3-start__step-key"
++              :title="repoSourcePath(step) ?? undefined"
++            >{{ compactNodeKey(step.kind, step.nodeKey) }}</code>
++          </li>
++        </ol>
++        <p v-else-if="s3.graphStatus === 'error'" class="s3-start__loading">
++          请求链路读取失败，暂时无法显示调用路径。
++        </p>
++        <p v-else-if="s3.graphStatus === 'loading'" class="s3-start__loading">
++          正在读取调用路径…
++        </p>
++        <p v-else class="s3-start__loading">该请求只有起点，没有已采集的后续调用。</p>
++      </div>
++    </section>
++
+     <div class="s3-body">
+       <section class="s3-ops-wrap" aria-labelledby="s3-ops-title">
+-        <h3 id="s3-ops-title" class="s3-subtitle">请求列表（requests · 点选切换）</h3>
++        <h3 id="s3-ops-title" class="s3-subtitle">最近请求</h3>
+         <div id="s3-ops" class="s3-ops" role="tablist" aria-label="请求切换">
+           <button
+             v-for="request in visibleRequests"
+@@ -1141,29 +1353,28 @@ function rawTimeTitle(node: GraphNode): string {
+             :title="request.traceId"
+             @click="selectRequest(request.traceId)"
+           >
++            <span class="s3-req__root">{{ rootLabel(request) }}</span>
++            <span class="s3-req__meta">
++              <span>{{ request.spanCount }} 个节点</span>
++              <span>后端 {{ request.backendSpanCount }} 个</span>
++              <span>{{ request.fetchCount }} 次请求</span>
++              <span v-if="requestControlName(request)">控件 {{ requestControlName(request) }}</span>
++              <span v-if="request.confidence !== 'EXACT'">关联：{{ confidenceBrief(request.confidence) }}</span>
++              <span v-if="request.hasError" class="s3-req__error">含异常</span>
++            </span>
++            <span class="s3-req__time" :title="requestTimeTitle(request.startedAtNs)">
++              {{ requestTime(request.startedAtNs) }} · 耗时 {{ formatNs(request.durNs) }}
++            </span>
+             <span class="s3-req__line">
+-              <code class="s3-req__trace">traceId {{ shortTrace(request.traceId) }}</code>
++              <code class="s3-req__trace">链路 {{ shortTrace(request.traceId) }}</code>
+               <span class="s3-status" :class="statusClass(request.status)">
+                 <span v-if="statusLock(request.status)" class="s3-lock" aria-hidden="true"></span>
+                 {{ statusMeta(request.status).label }}
+               </span>
+-              <span class="s3-chip" :class="s3.sdkActive ? 's3-chip--on' : 's3-chip--off'">
+-                sdkActive {{ s3.sdkActive ? "true" : "false" }}
++              <span v-if="statusHint(request.status) && statusHint(request.status) !== statusMeta(request.status).label" class="s3-req__hint">
++                {{ statusHint(request.status) }}
+               </span>
+             </span>
+-            <span class="s3-req__root">{{ rootLabel(request) }}</span>
+-            <span class="s3-req__meta">
+-              <span>spanCount {{ request.spanCount }}</span>
+-              <span>confidence {{ request.confidence }}</span>
+-              <span>fetchCount {{ request.fetchCount }}</span>
+-              <span>hasBackend {{ request.hasBackend ? "true" : "false" }}</span>
+-              <span>backendSpanCount {{ request.backendSpanCount }}</span>
+-              <span>hasError {{ request.hasError ? "true" : "false" }}</span>
+-            </span>
+-            <span v-if="statusHint(request.status)" class="s3-req__hint">
+-              {{ statusHint(request.status) }}
+-              <template v-if="statusReason(request.status)"> · {{ statusReason(request.status) }}</template>
+-            </span>
+           </button>
+         </div>
+ 
+@@ -1190,14 +1401,16 @@ function rawTimeTitle(node: GraphNode): string {
+ 
+       <section class="s3-chain" aria-labelledby="s3-chain-title">
+         <h3 id="s3-chain-title" class="s3-subtitle">
+-          混合事实树（graph · 按 startNs · click → js_method → fetch → 后端 → render）
++          请求流程树 <span class="s3-subtitle__hint">矩形节点按父子层级展开，点击节点查看右侧详情</span>
+         </h3>
+-        <p class="s3-chain__note">
+-          中性事实：不判定业务对错；OK 的 0/false 不是异常，LOST 只在 confidence。
+-        </p>
+ 
+-        <div id="s3-caseb" class="s3-caseb" :class="`s3-caseb--${caseB.kind}`">
+-          <span class="s3-caseb__label">案例 B 判定</span>
++        <div
++          v-if="caseB.kind !== 'joined'"
++          id="s3-caseb"
++          class="s3-caseb"
++          :class="`s3-caseb--${caseB.kind}`"
++        >
++          <span class="s3-caseb__label">本次判定</span>
+           <strong class="s3-caseb__text">{{ caseB.text }}</strong>
+           <p v-if="caseB.detail" class="s3-caseb__detail">{{ caseB.detail }}</p>
+         </div>
+@@ -1208,14 +1421,10 @@ function rawTimeTitle(node: GraphNode): string {
+ 
+         <template v-if="selectedRequest !== null">
+           <p class="s3-chain__meta">
+-            traceId <code>{{ selectedRequest.traceId }}</code>
+-            · {{ s3.graph?.nodes.length ?? 0 }} 节点 / {{ s3.graph?.edges.length ?? 0 }} 边
+-            · 根 confidence <strong>{{ confidenceMeta(rootConfidence).text }}</strong>
+-            <span class="s3-conf" :class="`s3-conf--${confidenceMeta(rootConfidence).tone}`">
+-              {{ confidenceMeta(rootConfidence).text }}
+-            </span>
++            链路 <code>{{ shortTrace(selectedRequest.traceId) }}</code>
++            · {{ s3.graph?.nodes.length ?? 0 }} 个节点 / {{ s3.graph?.edges.length ?? 0 }} 条连线
+             <span v-if="rootConfidence === 'LOST'" class="s3-chain__lost">
+-              游离：前端/后端未关联，LOST 只在 confidence，不作为 status
++              前端与后端未关联；这是关联状态，不是执行状态。
+             </span>
+           </p>
+ 
+@@ -1228,85 +1437,56 @@ function rawTimeTitle(node: GraphNode): string {
+             空态：无事实树可显示；请先选择一条请求。
+           </p>
+           <template v-else>
+-            <p v-if="s3.mode === 'replay' && hiddenNodes.length > 0" class="s3-tree__future">
+-              未发生：{{ hiddenNodes.length }} 个事件在回放点 t={{ formatNs(effectiveSliderNs) }}（relNs）之后，
+-              已隐藏：{{ hiddenNodes.map((node) => `${node.kind} ${node.nodeKey}`).join("；") }}
++            <div v-if="s3.mode === 'replay' && hiddenNodes.length > 0" class="s3-tree__future">
++              <p>尚未发生：回放点之后还有 {{ hiddenNodes.length }} 个事件，当前已隐藏。</p>
++              <details>
++                <summary>查看被隐藏的事件</summary>
++                <ul>
++                  <li v-for="node in hiddenNodes" :key="node.spanId">
++                    {{ kindLabel(node.kind) }} · {{ compactNodeKey(node.kind, node.nodeKey) }}
++                  </li>
++                </ul>
++              </details>
++            </div>
++
++            <div class="s3-tree__viewbar">
++              <span>
++                树形链路 · 主链 {{ mainChain.length }} 步
++                <template v-if="branchCount > 0"> · {{ branchCount }} 个旁支/叶子节点</template>
++              </span>
++              <button
++                v-if="branchCount > 0"
++                type="button"
++                class="s3-tree__branch-toggle"
++                :aria-pressed="showBranches"
++                @click="toggleBranches"
++              >
++                {{ showBranches ? "只看主链" : `显示全部旁支（${branchCount}）` }}
++              </button>
++            </div>
++
++            <div
++              v-if="treeNodes.length > 0"
++              class="s3-tree__canvas"
++              aria-label="请求流程树"
++            >
++              <div
++                v-for="root in treeRoots"
++                :key="root.spanId"
++                class="s3-tree__root"
++              >
++                <FlowTreeNode
++                  :node="root"
++                  :children-by-parent="treeChildrenByParent"
++                  :selected-span-id="selectedSpanId"
++                  :main-steps="mainSteps"
++                  @select="selectSpan"
++                />
++              </div>
++            </div>
++            <p v-else-if="visibleNodes.length > 0" class="s3-state">
++              当前没有可显示的节点；点击“显示全部旁支”查看。
+             </p>
+-
+-            <ol v-if="treeRows.length > 0" class="s3-tree__list">
+-              <li v-for="row in treeRows" :key="row.node.spanId" class="s3-tree__row">
+-                <span
+-                  class="s3-tree__indent"
+-                  :class="`s3-tone--${statusMeta(row.node.status).tone}`"
+-                  aria-hidden="true"
+-                >
+-                  <span v-for="level in row.depth" :key="level" class="s3-tree__spacer"></span>
+-                  <span v-if="row.depth > 0" class="s3-tree__elbow"></span>
+-                </span>
+-                <div
+-                  class="s3-node"
+-                  :class="[
+-                    `s3-node--${statusMeta(row.node.status).tone}`,
+-                    { 's3-node--selected': selectedSpanId === row.node.spanId },
+-                  ]"
+-                  role="button"
+-                  tabindex="0"
+-                  :aria-pressed="selectedSpanId === row.node.spanId"
+-                  :title="`点击查看节点详情：${row.node.kind} · ${row.node.nodeKey}`"
+-                  @click="selectSpan(row.node.spanId)"
+-                  @keydown.enter="selectSpan(row.node.spanId)"
+-                  @keydown.space.prevent="selectSpan(row.node.spanId)"
+-                >
+-                  <div class="s3-node__head">
+-                    <span v-if="row.node.parentSpanId === null" class="s3-node__root-tag">根</span>
+-                    <span class="s3-node__kind">{{ row.node.kind }}</span>
+-                    <code class="s3-node__key">{{ row.node.nodeKey }}</code>
+-                    <span class="s3-status" :class="statusClass(row.node.status)">
+-                      <span
+-                        v-if="statusLock(row.node.status)"
+-                        class="s3-lock"
+-                        aria-hidden="true"
+-                      ></span>
+-                      {{ statusMeta(row.node.status).label }}
+-                    </span>
+-                    <span
+-                      v-if="groupCount(row.node.nodeKey) >= 2"
+-                      class="s4-xn"
+-                      :title="`该 nodeKey 在所选 trace 内已采集 ${groupCount(row.node.nodeKey)} 次（前端 ×N 聚合；运行时 ×3 见 L2DemoService#reconcileAmount / reconcileAsync）`"
+-                    >×{{ groupCount(row.node.nodeKey) }}</span>
+-                    <span v-if="selectedSpanId === row.node.spanId" class="s4-node-selected">节点详情已打开</span>
+-                    <span v-if="statusHint(row.node.status)" class="s3-node__hint">
+-                      {{ statusHint(row.node.status) }}
+-                    </span>
+-                    <span v-if="row.running" class="s3-node__running">进行中（未结束）</span>
+-                    <span v-if="row.orphan" class="s3-node__orphan">父 span 未采集/未发生</span>
+-                  </div>
+-                  <p v-if="statusReason(row.node.status)" class="s3-node__reason">
+-                    reason：{{ statusReason(row.node.status) }}
+-                  </p>
+-                  <div class="s3-node__facts">
+-                    <span>return：{{ nodeReturnText(row.node) }}</span>
+-                    <span>sideEffects：{{ nodeSideEffectsText(row.node) }}</span>
+-                  </div>
+-                  <div class="s3-node__flags">
+-                    <span
+-                      v-for="flag in row.node.flags"
+-                      :key="flag"
+-                      class="s3-flag"
+-                    >{{ flag }}</span>
+-                  </div>
+-                  <p v-for="note in nodeNotes(row.node)" :key="note" class="s3-node__note">
+-                    {{ note }}
+-                  </p>
+-                  <div class="s3-node__detail" :title="rawTimeTitle(row.node)">
+-                    线程 {{ threadText(row.node) }}
+-                    · relNs {{ formatNs(row.node.startNs - minStartNs) }}
+-                    · dur {{ formatNs(row.node.durNs) }}
+-                    · spanId <code>{{ row.node.spanId }}</code>
+-                  </div>
+-                </div>
+-              </li>
+-            </ol>
+             <p
+               v-else-if="s3.graphStatus === 'ready' && s3.graph !== null"
+               class="s3-state"
+@@ -1325,8 +1505,13 @@ function rawTimeTitle(node: GraphNode): string {
+           />
+         </div>
+ 
+-        <div class="s3-legend">
+-          <p class="s3-legend__title">状态语义图例（颜色 + 文字，不靠颜色单独传达）</p>
++        <details class="s3-legend">
++          <summary class="s3-legend__summary">状态与关联说明（点击展开）</summary>
++          <p class="s3-legend__note">
++            技术字段仍保留原始名称（fetchCount / spanCount / backendSpanCount / sdkActive），
++            界面主文案用中文解释。JS 内部变量本次未采集（局部变量属 L2/S6；S5 manifest 只提供函数/文件/行号）
++          </p>
++          <p class="s3-legend__title">原始状态码对照（颜色 + 文字，不靠颜色单独传达）</p>
+           <ul class="s3-legend__list">
+             <li
+               v-for="item in STATUS_LEGEND"
+@@ -1340,7 +1525,7 @@ function rawTimeTitle(node: GraphNode): string {
+               <span class="s3-legend__hint">{{ item.hint }}</span>
+             </li>
+           </ul>
+-          <p class="s3-legend__title">confidence（不是 status）</p>
++          <p class="s3-legend__title">关联方式（不是执行状态）</p>
+           <ul class="s3-legend__list">
+             <li
+               v-for="item in CONFIDENCE_LEGEND"
+@@ -1353,16 +1538,16 @@ function rawTimeTitle(node: GraphNode): string {
+               <span class="s3-legend__hint">{{ item.hint }}</span>
+             </li>
+           </ul>
+-        </div>
++        </details>
+       </section>
+     </div>
+ 
+     <section id="s3-timeline" class="s3-timeline" aria-labelledby="s3-timeline-title">
+       <div class="s3-timeline__header">
+         <h3 id="s3-timeline-title" class="s3-subtitle">
+-          时间轴（relNs = startNs − minStartNs；滑块与刻度均为相对时间）
++          时间轴（相对时间）
+         </h3>
+-        <div id="s3-replay-toggle" class="s3-mode" role="group" aria-label="LIVE/REPLAY 切换">
++        <div id="s3-replay-toggle" class="s3-mode" role="group" aria-label="实时/回放切换">
+           <button
+             type="button"
+             class="s3-mode__button"
+@@ -1370,7 +1555,7 @@ function rawTimeTitle(node: GraphNode): string {
+             :aria-pressed="s3.mode === 'live'"
+             @click="enterLive"
+           >
+-            LIVE
++            实时
+           </button>
+           <button
+             type="button"
+@@ -1379,7 +1564,7 @@ function rawTimeTitle(node: GraphNode): string {
+             :aria-pressed="s3.mode === 'replay'"
+             @click="enterReplay"
+           >
+-            REPLAY
++            回放
+           </button>
+         </div>
+         <span id="s3-readonly" class="s3-readonly">只读：不会重发请求/不写数据库</span>
+@@ -1387,19 +1572,22 @@ function rawTimeTitle(node: GraphNode): string {
+ 
+       <template v-if="s3.graph !== null">
+         <div class="s3-timeline__labels">
+-          <span>0（relNs）</span>
+-          <span class="s3-timeline__now">t = {{ formatNs(effectiveSliderNs) }}</span>
++          <span>0（相对时间）</span>
++          <span class="s3-timeline__now">当前时刻 = {{ formatNs(effectiveSliderNs) }}</span>
+           <span>{{ formatNs(maxRel) }}</span>
+         </div>
+-        <div class="s3-timeline__track" aria-hidden="true">
+-          <span
++        <div class="s3-timeline__track" role="group" aria-label="节点关键帧">
++          <button
+             v-for="tick in timelineTicks"
+             :key="tick.id"
++            type="button"
+             class="s3-tick"
+             :class="`s3-tick--${tick.kind}`"
+             :style="{ left: `${tick.pct}%` }"
+-            :title="`${tick.label} · ${tick.nodeKey} · relNs ${tick.relNs}`"
+-          ></span>
++            :title="`跳到 ${tick.label} · ${tick.nodeKey}（相对时间 ${formatNs(tick.relNs)}）`"
++            :aria-label="`跳到 ${tick.label} ${tick.nodeKey} 开始时刻`"
++            @click="jumpToTick(tick)"
++          ></button>
+           <span class="s3-cursor" :style="{ left: `${sliderPct}%` }"></span>
+         </div>
+         <input
+@@ -1411,7 +1599,7 @@ function rawTimeTitle(node: GraphNode): string {
+           step="1"
+           :value="effectiveSliderNs"
+           :disabled="s3.mode !== 'replay'"
+-          aria-label="回放时间轴（relNs）"
++          aria-label="回放时间轴（相对时间）"
+           @input="onSliderInput"
+         />
+         <div class="s3-timeline__controls">
+@@ -1425,27 +1613,44 @@ function rawTimeTitle(node: GraphNode): string {
+           </button>
+           <label class="s3-timeline__speed">
+             速度
+-            <select :value="s3.speed" @change="onSpeedChange">
+-              <option :value="0.5">0.5×</option>
+-              <option :value="1">1×</option>
+-              <option :value="2">2×</option>
+-              <option :value="4">4×</option>
++            <select :value="s3.speed" title="毫秒级链路建议 0.001×–0.01×" @change="onSpeedChange">
++              <optgroup label="超慢放">
++                <option :value="0.0001">0.0001×（极慢）</option>
++                <option :value="0.001">0.001×</option>
++                <option :value="0.005">0.005×</option>
++                <option :value="0.01">0.01×（默认）</option>
++                <option :value="0.05">0.05×</option>
++              </optgroup>
++              <optgroup label="常规">
++                <option :value="0.1">0.1×</option>
++                <option :value="0.5">0.5×</option>
++                <option :value="1">1×（实时）</option>
++                <option :value="2">2×</option>
++                <option :value="4">4×</option>
++              </optgroup>
+             </select>
+           </label>
++          <span class="s3-timeline__speed-hint">毫秒级建议 0.001×–0.01×</span>
+           <span class="s3-timeline__mode">
+-            {{ s3.mode === "live" ? "LIVE：显示全部已存事件（切到 REPLAY 才能拖动）" : "REPLAY：只读窗口；未来事件隐藏/未发生" }}
++            {{ s3.mode === "live" ? "实时：显示全部已存事件（切到回放才能拖动）" : "回放：只读窗口；未来事件隐藏/未发生" }}
+           </span>
+         </div>
+         <p class="s3-timeline__window">{{ replayWindowText }}</p>
++        <p class="s3-timeline__hint">
++          关键帧：每个节点一个；点击轨道标记或下方文字，直接跳到该节点出现的时刻并选中它。
++        </p>
+         <ul class="s3-ticks">
+-          <li
+-            v-for="tick in timelineTicks"
+-            :key="`list-${tick.id}`"
+-            class="s3-tick-row"
+-            :class="`s3-tick-row--${tick.kind}`"
+-          >
+-            <span class="s3-tick-row__dot" aria-hidden="true"></span>
+-            {{ tick.label }} · {{ tick.nodeKey }} · relNs {{ formatNs(tick.relNs) }}
++          <li v-for="tick in timelineTicks" :key="`list-${tick.id}`">
++            <button
++              type="button"
++              class="s3-tick-row"
++              :class="`s3-tick-row--${tick.kind}`"
++              :title="`跳到 ${tick.label} · ${tick.nodeKey}（相对时间 ${formatNs(tick.relNs)}）`"
++              @click="jumpToTick(tick)"
++            >
++              <span class="s3-tick-row__dot" aria-hidden="true"></span>
++              {{ tick.label }} · {{ tick.nodeKey }} · 相对时间 {{ formatNs(tick.relNs) }}
++            </button>
+           </li>
+         </ul>
+         <p v-if="s3.replayError" class="s3-banner s3-banner--info">
+@@ -1459,11 +1664,14 @@ function rawTimeTitle(node: GraphNode): string {
+       </p>
+     </section>
+ 
+-    <p class="s3-panel__footnote">
+-      本板只读：GET requests / graph / replay。回放不会重发请求、不写数据库、不调用 demo、不执行程序；
+-      时间轴按所选 trace 的 min(startNs) 归一化显示，API 参数仍是原始 epoch-ns。
+-      S4 节点详情 / ×N 分组 / 缺口清单均为已采集 graph 的只读前端派生；
+-      {{ S6_BANNER }}、无图库/SSE/WS。S0/S1/S2 面板保留在下方折叠区。
+-    </p>
++    <details class="s3-help">
++      <summary class="s3-help__summary">说明与边界</summary>
++      <p class="s3-panel__footnote">
++        本板只读：GET requests / graph / replay。回放不会重发请求、不写数据库、不调用 demo、不执行程序；
++        时间轴按所选链路的相对时间显示，接口参数仍是原始时间戳。
++        节点详情、×N 分组和缺口清单均为已采集数据的只读派生，不推断业务对错。
++      </p>
++      <p class="s3-panel__footnote">{{ S6_BANNER }}</p>
++    </details>
+   </section>
+ </template>
+diff --git a/workbench/src/components/S4DetailPanel.vue b/workbench/src/components/S4DetailPanel.vue
+index 9d2f6ce..06d9d54 100644
+--- a/workbench/src/components/S4DetailPanel.vue
++++ b/workbench/src/components/S4DetailPanel.vue
+@@ -42,6 +42,15 @@ import {
+   type InvocationRows,
+   type NodeGroup,
+ } from "../s4/derive";
++import {
++  compactNodeKey,
++  controlNameFor,
++  flagDescription,
++  kindLabel,
++  nodeSqlSummary,
++  repoSourcePath,
++  statusChinese,
++} from "../s4/labels";
+ import {
+   L1_STATIC_NOTE,
+   VALUES_EMPTY_TEXT,
+@@ -129,7 +138,8 @@ const selectionTitle = computed<string>(() => {
+   }
+   const total = selectedGroup.value.length;
+   const index = invocationIndex.value >= 0 ? invocationIndex.value + 1 : 1;
+-  return `${node.kind} · ${node.nodeKey} · 第 ${index}/${total} 次`;
++  const times = total > 1 ? ` · 第 ${index}/${total} 次` : "";
++  return `${kindLabel(node.kind)} · ${compactNodeKey(node.kind, node.nodeKey)}${times}`;
+ });
+ 
+ interface InvocationView {
+@@ -201,22 +211,145 @@ const foldNoteText = computed<string | null>(() =>
+ /** S5 rows verbatim in collected order (param → field → return); null/[] = empty. */
+ const values = computed(() => (selectedNode.value === null ? [] : valueRows(selectedNode.value)));
+ 
++const requestValues = computed(() =>
++  values.value.filter(
++    (value) => value.name.startsWith("query.") || value.name.startsWith("body.")
++  )
++);
++
++const valueHeading = computed<string>(() => {
++  if (l2Node.value) {
++    return "采集到的值 · 行级局部变量";
++  }
++  if (requestValues.value.length > 0) {
++    return "请求参数与请求体";
++  }
++  return "采集到的值 · 参数 / 字段变化 / 返回值";
++});
++
+ /** Value-row invocation denominator: collected spans sharing the nodeKey. */
+ const valuesTotal = computed<number>(() => Math.max(1, selectedGroup.value.length));
+ 
+ /** S5 source display from the graph node; manifest hits get the suffix. */
+-const sourceLabel = computed<string>(() =>
+-  selectedNode.value === null ? MISSING : s5SourceText(selectedNode.value)
++const sourceLabel = computed<string>(() => {
++  const node = selectedNode.value;
++  if (node === null) {
++    return MISSING;
++  }
++  const own = s5SourceText(node);
++  if (own !== MISSING || node.kind !== "ui_event") {
++    return own;
++  }
++  const controller = props.nodes.find(
++    (item) => item.kind === "controller" && item.source?.file
++  );
++  if (controller?.source?.file) {
++    const line = controller.source.line === null ? "" : `:${controller.source.line}`;
++    return `页面源码未采集；后端入口 ${controller.source.file}${line}`;
++  }
++  return own;
++});
++
++const selectedControlName = computed<string | null>(() => {
++  const node = selectedNode.value;
++  return node !== null && node.kind === "ui_event" ? controlNameFor(node.nodeKey) : null;
++});
++
++const selectedRepoPath = computed<string | null>(() =>
++  selectedNode.value === null ? null : repoSourcePath(selectedNode.value)
++);
++
++const hasValues = computed<boolean>(() => values.value.length > 0);
++
++/** Only show the value card when the node actually carries values or a value-mode flag. */
++const showValues = computed<boolean>(
++  () => hasValues.value || l1Badge.value || l2Node.value || noDebugNode.value || asyncNode.value
+ );
+ 
++const hasSql = computed<boolean>(() => {
++  const node = selectedNode.value;
++  return node !== null && (node.kind === "sql" || node.sideEffects.length > 0);
++});
++
++const hasUi = computed<boolean>(() => {
++  const node = selectedNode.value;
++  return node !== null && (node.kind === "render" || selectedEffect.value !== null);
++});
++
++const effectiveTab = computed<DetailTab>(() => {
++  if (!hasSql.value) {
++    return "ui";
++  }
++  if (!hasUi.value) {
++    return "sql";
++  }
++  return tab.value;
++});
++
++const sqlText = computed<string>(() => {
++  const node = selectedNode.value;
++  return node === null ? "未采集" : nodeSqlSummary(node);
++});
++
++const reasonLabel = computed<string>(() =>
++  selectedNode.value === null ? "—" : reasonText(selectedNode.value)
++);
++
++const hasReason = computed<boolean>(
++  () => reasonLabel.value !== "—" && reasonLabel.value.length > 0
++);
++
++const hasUnknownTransaction = computed<boolean>(
++  () =>
++    selectedNode.value?.sideEffects.some(
++      (effect) => effect.transaction === "UNKNOWN" || effect.transaction === null
++    ) ?? false
++);
++
++function transactionLabel(value: string | null): string {
++  if (value === "COMMITTED") {
++    return "已提交";
++  }
++  if (value === "ROLLED_BACK") {
++    return "已回滚";
++  }
++  if (value === "UNKNOWN" || value === null) {
++    return "未采集";
++  }
++  return value;
++}
++
++function gapRuleText(rule: string): string {
++  if (rule === "FETCH_WITHOUT_BACKEND") {
++    return "请求未关联";
++  }
++  if (rule === "NOT_COLLECTED_REASON") {
++    return "状态未采集";
++  }
++  if (rule === "ROWS_NOT_COLLECTED") {
++    return "影响行数未采集";
++  }
++  return rule;
++}
++
++function transactionTitle(value: string | null): string {
++  return value === "UNKNOWN"
++    ? "UNKNOWN：没有采集事务提交/回滚边界"
++    : value === null
++      ? "未采集"
++      : value;
++}
++
++const gapCount = computed<number>(() => gaps.value.length);
++
+ const emptyText = computed<string>(() => {
+   if (props.nodes.length === 0) {
+-    return "空态：暂无事实链节点（未采集）；选择请求后显示节点详情。";
++    return "暂无链路节点；选择一条请求后再点节点查看详情。";
+   }
+   if (props.selectedSpanId === null) {
+-    return "尚未选择节点：点击左侧事实树节点或上方 ×N 分组查看节点详情。";
++    return "点击左侧链路中的节点，查看这里的中文摘要与技术细节。";
+   }
+-  return "所选节点不在当前事实链/回放窗口中（可能已切换 trace 或事件未发生）。";
++  return "所选节点不在当前链路或回放窗口中。";
+ });
+ 
+ function selectGroup(group: NodeGroup): void {
+@@ -239,6 +372,10 @@ function onInvocationChange(event: Event): void {
+ function onClose(): void {
+   emit("close");
+ }
++
++function valuePreview(text: string): string {
++  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
++}
+ </script>
+ 
+ <template>
+@@ -256,42 +393,49 @@ function onClose(): void {
+       </button>
+     </header>
+ 
+-    <p class="s4-detail__hint">
+-      {{ XN_DEMO_LABEL }} —— 同 nodeKey 的已采集 span 聚合（树行徽标 ×N；点击分组查看逐次调用）。
+-    </p>
+-
+-    <div id="s4-group-badge" class="s4-group-badge" aria-label="×N 分组">
+-      <button
+-        v-for="group in multiGroups"
+-        :key="group.nodeKey"
+-        type="button"
+-        class="s4-group-badge__item"
+-        :class="{ 's4-group-badge__item--active': selectedNode !== null && selectedNode.nodeKey === group.nodeKey }"
+-        :data-node-key="group.nodeKey"
+-        :title="`${group.count} 次同 nodeKey 调用（前端聚合显示；运行时 ×3 见 L2DemoService#reconcileAmount / reconcileAsync）`"
+-        @click="selectGroup(group)"
+-      >
+-        <span class="s4-xn">{{ group.badge }}</span>
+-        <span class="s4-group-badge__kind">{{ group.kind }}</span>
+-        <code class="s4-group-badge__key">{{ group.nodeKey }}</code>
+-      </button>
+-      <p v-if="multiGroups.length === 0" class="s4-detail__muted">
+-        未发现 ×N 分组（所选 trace 内没有 N≥2 的同 nodeKey 调用）。
+-      </p>
+-    </div>
+-
+     <template v-if="selectedNode !== null">
+-      <p id="s4-detail-title" class="s4-detail__title" :title="selectedNode.spanId">
+-        {{ selectionTitle }}
+-      </p>
+-
+-      <div id="s4-detail-status" class="s4-detail__status">
+-        <span class="s3-status" :class="`s3-status--${statusMeta(selectedNode.status).tone}`">
+-          {{ statusMeta(selectedNode.status).label }}
+-        </span>
+-        <span class="s4-detail__reason">reason：{{ reasonText(selectedNode) }}</span>
++      <div class="s4-hero">
++        <p id="s4-detail-title" class="s4-detail__title" :title="selectedNode.spanId">
++          {{ selectionTitle }}
++        </p>
++        <p class="s4-hero__facts">
++          <span class="s3-status" :class="`s3-status--${statusMeta(selectedNode.status).tone}`">
++            {{ statusChinese(selectedNode.status) }}
++          </span>
++          <span>返回：{{ returnText(selectedNode) }}</span>
++          <span v-if="selectedControlName" class="s4-hero__control">
++            控件：{{ selectedControlName }}
++          </span>
++        </p>
++        <p class="s4-hero__source">
++          来源：<code id="s5-source" :title="selectedRepoPath ?? undefined">{{ sourceLabel }}</code>
++        </p>
++        <div v-if="hasReason" id="s4-detail-status" class="s4-detail__status">
++          <span class="s4-detail__reason">原因：{{ reasonLabel }}</span>
++        </div>
+       </div>
+ 
++      <details v-if="multiGroups.length > 0" id="s4-group-badge" class="s4-group-badge">
++        <summary class="s4-group-badge__summary">同一方法的多次调用（×N）</summary>
++        <p class="s4-detail__hint">{{ XN_DEMO_LABEL }}</p>
++        <div class="s4-group-badge__row">
++          <button
++            v-for="group in multiGroups"
++            :key="group.nodeKey"
++            type="button"
++            class="s4-group-badge__item"
++            :class="{ 's4-group-badge__item--active': selectedNode !== null && selectedNode.nodeKey === group.nodeKey }"
++            :data-node-key="group.nodeKey"
++            :title="`${group.count} 次同方法调用（前端聚合显示）`"
++            @click="selectGroup(group)"
++          >
++            <span class="s4-xn">{{ group.badge }}</span>
++            <span class="s4-group-badge__kind">{{ kindLabel(group.kind) }}</span>
++            <code class="s4-group-badge__key">{{ compactNodeKey(group.kind, group.nodeKey) }}</code>
++          </button>
++        </div>
++      </details>
++
+       <div
+         v-if="noDebugNode"
+         id="s6-no-debug"
+@@ -316,63 +460,81 @@ function onClose(): void {
+         </p>
+       </div>
+ 
+-      <dl class="s4-facts">
+-        <div class="s4-facts__row">
+-          <dt>confidence</dt>
+-          <dd>
+-            <span
+-              class="s3-conf"
+-              :class="`s3-conf--${selectedNode.confidence === 'LOST' ? 'lost' : selectedNode.confidence === 'EXACT' ? 'exact' : selectedNode.confidence === 'MANUAL' ? 'manual' : 'neutral'}`"
+-            >
+-              {{ confidenceText(selectedNode.confidence) }}
+-            </span>
+-            <span class="s4-detail__muted">（LOST 只在 confidence，不伪装 status）</span>
+-          </dd>
+-        </div>
+-        <div class="s4-facts__row">
+-          <dt>return</dt>
+-          <dd>{{ returnText(selectedNode) }}</dd>
+-        </div>
+-        <div class="s4-facts__row">
+-          <dt>flags</dt>
+-          <dd class="s4-facts__chips">
+-            <span v-for="flag in selectedNode.flags" :key="flag" class="s3-flag">{{ flag }}</span>
+-            <span v-if="selectedNode.flags.length === 0" class="s4-detail__muted">无记录（[]）</span>
+-          </dd>
+-        </div>
+-        <div class="s4-facts__row">
+-          <dt>thread</dt>
+-          <dd>{{ threadText(selectedNode) }}</dd>
+-        </div>
+-        <div class="s4-facts__row">
+-          <dt>source</dt>
+-          <dd>
+-            <code id="s5-source">{{ sourceLabel }}</code><span class="s4-detail__muted">（manifest 命中显示 file:line；缺失即未采集；无 .map 解码）</span>
+-          </dd>
+-        </div>
+-        <div class="s4-facts__row">
+-          <dt>时间</dt>
+-          <dd>
+-            relNs {{ formatNs(Math.max(0, selectedNode.startNs - minStartNs)) }} · dur {{ formatNs(selectedNode.durNs) }}
+-            <span class="s4-detail__raw">（原始 startNs {{ selectedNode.startNs }} · durNs {{ selectedNode.durNs }}）</span>
+-          </dd>
+-        </div>
+-        <div class="s4-facts__row">
+-          <dt>spanId</dt>
+-          <dd><code>{{ selectedNode.spanId }}</code></dd>
+-        </div>
+-      </dl>
++      <details class="s4-fold">
++        <summary class="s4-fold__summary">技术字段（关联方式、线程、原始时间、标识）</summary>
++        <dl class="s4-facts">
++          <div class="s4-facts__row">
++            <dt>关联方式</dt>
++            <dd>
++              <span
++                class="s3-conf"
++                :class="`s3-conf--${selectedNode.confidence === 'LOST' ? 'lost' : selectedNode.confidence === 'EXACT' ? 'exact' : selectedNode.confidence === 'MANUAL' ? 'manual' : 'neutral'}`"
++              >
++                {{ confidenceText(selectedNode.confidence) }}
++              </span>
++              <span class="s4-detail__muted">（未关联只在关联方式中显示，不伪装成执行状态）</span>
++            </dd>
++          </div>
++          <div class="s4-facts__row">
++            <dt>状态码</dt>
++            <dd><code>{{ selectedNode.status }}</code></dd>
++          </div>
++          <div class="s4-facts__row">
++            <dt>标记</dt>
++            <dd class="s4-facts__chips">
++              <span
++                v-for="flag in selectedNode.flags"
++                :key="flag"
++                class="s3-flag"
++                :title="flagDescription(flag)"
++              >{{ flag }}</span>
++              <span v-if="selectedNode.flags.length === 0" class="s4-detail__muted">无记录（[]）</span>
++            </dd>
++          </div>
++          <div class="s4-facts__row">
++            <dt>线程</dt>
++            <dd>{{ threadText(selectedNode) }}</dd>
++          </div>
++          <div class="s4-facts__row">
++            <dt>时间</dt>
++            <dd>
++              相对 {{ formatNs(Math.max(0, selectedNode.startNs - minStartNs)) }} · 耗时 {{ formatNs(selectedNode.durNs) }}
++              <span class="s4-detail__raw">（原始时间 {{ selectedNode.startNs }} · 原始耗时 {{ selectedNode.durNs }}）</span>
++            </dd>
++          </div>
++          <div class="s4-facts__row">
++            <dt>节点标识</dt>
++            <dd><code>{{ selectedNode.spanId }}</code></dd>
++          </div>
++        </dl>
++      </details>
++
++      <details v-if="selectedNode.flags.length > 0" class="s4-fold">
++        <summary class="s4-fold__summary">标记说明（{{ selectedNode.flags.length }}）</summary>
++        <ul class="s4-flag-list">
++          <li v-for="flag in selectedNode.flags" :key="`help-${flag}`">
++            <code class="s3-flag">{{ flag }}</code>
++            <span>{{ flagDescription(flag) }}</span>
++          </li>
++        </ul>
++      </details>
+ 
+-      <section id="s5-values" class="s5-values" aria-label="值（L1 参数/字段/返回；L2 行级局部变量）">
++      <details v-if="!showValues" class="s4-fold">
++        <summary class="s4-fold__summary">变量与参数（未采集）</summary>
++        <p class="s4-detail__muted">
++          该节点没有采集到请求体、方法参数或局部变量。当前只在前端请求节点采集 query/body，
++          以及 L1/L2 插桩节点采集参数和局部变量。
++        </p>
++      </details>
++
++      <section v-if="showValues" id="s5-values" class="s5-values" aria-label="采集到的值">
+         <header class="s5-values__head">
+-          <h4 class="s4-detail__section-title">
+-            {{ l2Node ? "Values · L2（行级局部变量 / 行号）" : "Values · L1（参数 / 字段写入 / 返回）" }}
+-          </h4>
++          <h4 class="s4-detail__section-title">{{ valueHeading }}</h4>
+           <span
+             v-if="l1Badge"
+             id="s5-l1-badge"
+             class="s5-l1-badge"
+-            title="该节点 flags 含 L1：L1 参数/字段写入/返回摘要（不是 L2）"
++            title="该节点含参数/字段写入/返回摘要（一级采集）"
+           >
+             L1
+           </span>
+@@ -380,7 +542,7 @@ function onClose(): void {
+             v-if="l2Node"
+             id="s6-l2-badge"
+             class="s6-l2-badge"
+-            title="该节点 flags 含 L2：LVT 行级局部变量（S6 演示方法 reconcileAmount / reconcileLoop）"
++            title="该节点含行级局部变量（二级采集）"
+           >
+             {{ L2_BADGE_TEXT }}
+           </span>
+@@ -388,23 +550,29 @@ function onClose(): void {
+             v-if="asyncNode"
+             id="s6-async-badge"
+             class="s6-async-badge"
+-            title="该节点 flags 含 ASYNC_INHERITED：上下文来自创建时继承的父帧且线程不同于父帧创建线程；不证明 @Async/CompletableFuture 或任务边界传播"
++            title="该节点在异步线程中继承了调用上下文"
+           >
+             {{ ASYNC_BADGE_TEXT }}
+           </span>
+         </header>
+-        <p v-if="l2Node" id="s6-l2-note" class="s6-l2-note">{{ S6_L2_NOTE }}</p>
+-        <p v-else id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
+-        <p v-if="asyncNode" id="s6-async-note" class="s6-async-note">{{ ASYNC_LIMIT_NOTE }}</p>
++        <details class="s4-fold">
++          <summary class="s4-fold__summary">值采集说明</summary>
++          <p v-if="l2Node" id="s6-l2-note" class="s6-l2-note">{{ S6_L2_NOTE }}</p>
++          <p v-else-if="requestValues.length > 0" id="s5-values-note" class="s5-values__note">
++            这些值来自前端请求的查询参数与请求体；本地演示不做敏感字段脱敏，超长值仍会截断。
++          </p>
++          <p v-else id="s5-values-note" class="s5-values__note">{{ L1_STATIC_NOTE }}</p>
++          <p v-if="asyncNode" id="s6-async-note" class="s6-async-note">{{ ASYNC_LIMIT_NOTE }}</p>
++          <p class="s4-detail__hint">
++            字段变化显示为“旧值 → 新值”（例如 100 → 0）；参数和返回值显示采集到的结果。
++            值行的调用序号与技术字段仍按原始采集记录展示，不做推断。
++          </p>
++        </details>
+         <p v-if="foldNoteText !== null" id="s6-fold-note" class="s6-fold-note" :title="FOLD_NOTE_TITLE">
+           {{ foldNoteText }}
+         </p>
+         <p v-if="foldNoteText !== null" class="s6-fold-hint">
+-          事件状态 TRUNCATED 表示列表被折叠（不是失败/异常）；保留项为首/尾/中段样本，from → to 原样不重算、单值未被截断。
+-        </p>
+-        <p class="s4-detail__hint">
+-          字段写入/局部变量行显示 old → new（例如 100 → 0，高亮）；参数/返回行显示 to。
+-          值行序号来自 values.invocation；S4 ×N 组序号来自同 nodeKey 的已采集 span 分组，两者不混用。
++          已折叠不是失败；保留首、尾和中段样本，单值未被截断。
+         </p>
+         <ul v-if="values.length > 0" class="s5-values__list">
+           <li
+@@ -424,8 +592,15 @@ function onClose(): void {
+               :class="{ 's5-value__value--diff': isValueChange(value) }"
+               title="值原样来自采集端（不重算脱敏/截断）"
+             >
+-              {{ valueLineText(value) }}
++              {{ valuePreview(valueLineText(value)) }}
+             </span>
++            <details
++              v-if="valueLineText(value).length > 120"
++              class="s5-value__full"
++            >
++              <summary>查看完整值</summary>
++              <pre>{{ valueLineText(value) }}</pre>
++            </details>
+             <span
+               v-if="value.redacted"
+               class="s5-value__lock"
+@@ -448,7 +623,10 @@ function onClose(): void {
+             >
+               已截断
+             </span>
+-            <span class="s5-value__footer">
++            <span
++              v-if="!value.name.startsWith('query.') && !value.name.startsWith('body.')"
++              class="s5-value__footer"
++            >
+               {{ lineFooterText(value) }} · {{ invocationText(value, valuesTotal) }}
+             </span>
+           </li>
+@@ -456,177 +634,179 @@ function onClose(): void {
+         <p v-else id="s5-values-empty" class="s4-detail__missing">{{ VALUES_EMPTY_TEXT }}</p>
+       </section>
+ 
+-      <div id="s4-detail-tabs" class="s4-tabs" role="tablist" aria-label="节点详情票签">
+-        <button
+-          type="button"
+-          role="tab"
+-          class="s4-tab"
+-          :class="{ 's4-tab--active': tab === 'sql' }"
+-          :aria-selected="tab === 'sql'"
+-          @click="tab = 'sql'"
++      <template v-if="hasSql || hasUi">
++        <div v-if="hasSql && hasUi" id="s4-detail-tabs" class="s4-tabs" role="tablist" aria-label="节点详情票签">
++          <button
++            type="button"
++            role="tab"
++            class="s4-tab"
++            aria-controls="s4-sideeffects"
++            :class="{ 's4-tab--active': effectiveTab === 'sql' }"
++            :aria-selected="effectiveTab === 'sql'"
++            @click="tab = 'sql'"
++          >
++            SQL/数据影响
++          </button>
++          <button
++            type="button"
++            role="tab"
++            class="s4-tab"
++            aria-controls="s4-ui-effects"
++            :class="{ 's4-tab--active': effectiveTab === 'ui' }"
++            :aria-selected="effectiveTab === 'ui'"
++            @click="tab = 'ui'"
++          >
++            UI 效果
++          </button>
++        </div>
++
++        <section
++          v-show="effectiveTab === 'sql'"
++          id="s4-sideeffects"
++          class="s4-ticket"
++          role="tabpanel"
++          aria-label="SQL/数据影响"
+         >
+-          SQL/数据影响
+-        </button>
+-        <button
+-          type="button"
+-          role="tab"
+-          class="s4-tab"
+-          :class="{ 's4-tab--active': tab === 'ui' }"
+-          :aria-selected="tab === 'ui'"
+-          @click="tab = 'ui'"
++          <h4 class="s4-detail__section-title">SQL/数据影响</h4>
++          <p class="s4-detail__hint">当前节点：{{ sqlText }}。缺失时如实显示“未采集”，不推断为 0。</p>
++          <table v-if="selectedNode.sideEffects.length > 0" class="s4-sql">
++            <thead>
++              <tr>
++                <th scope="col" title="sqlId">SQL 标识</th>
++                <th scope="col" title="rowsAffected">影响行数</th>
++                <th scope="col" title="transaction">事务状态</th>
++              </tr>
++            </thead>
++            <tbody>
++              <tr v-for="(effect, index) in selectedNode.sideEffects" :key="`${effect.sqlId ?? 'sql'}-${index}`">
++                <td>{{ effect.sqlId ?? MISSING }}</td>
++                <td>{{ effect.rowsAffected === null ? MISSING : effect.rowsAffected }}</td>
++                <td :title="transactionTitle(effect.transaction)">
++                  {{ transactionLabel(effect.transaction) }}
++                </td>
++              </tr>
++            </tbody>
++          </table>
++          <p v-if="hasUnknownTransaction" class="s4-detail__muted">
++            “事务状态未采集”表示这次只确认了影响行数，没有采集提交/回滚边界；不推断成功或失败。
++          </p>
++          <p v-else-if="selectedNode.sideEffects.length === 0" class="s4-detail__missing">
++            未采集（所选节点没有 sideEffects；不推断为 0 行）
++          </p>
++        </section>
++
++        <section
++          v-show="effectiveTab === 'ui'"
++          id="s4-ui-effects"
++          class="s4-ticket"
++          role="tabpanel"
++          aria-label="UI 效果"
+         >
+-          UI 效果
+-        </button>
+-      </div>
+-
+-      <section
+-        v-show="tab === 'sql'"
+-        id="s4-sideeffects"
+-        class="s4-ticket"
+-        role="tabpanel"
+-        aria-label="SQL/数据影响"
+-      >
+-        <p class="s4-detail__hint">
+-          SQL/数据影响票签 = 所选 span 自身 sideEffects；缺失/空一律“未采集”，绝不为 0。
+-        </p>
+-        <table class="s4-sql">
+-          <thead>
+-            <tr>
+-              <th scope="col">sqlId</th>
+-              <th scope="col">rowsAffected</th>
+-              <th scope="col">transaction</th>
+-            </tr>
+-          </thead>
+-          <tbody>
+-            <tr v-for="(effect, index) in selectedNode.sideEffects" :key="`${effect.sqlId ?? 'sql'}-${index}`">
+-              <td>{{ effect.sqlId ?? MISSING }}</td>
+-              <td>{{ effect.rowsAffected === null ? MISSING : effect.rowsAffected }}</td>
+-              <td>{{ effect.transaction ?? MISSING }}</td>
+-            </tr>
+-            <tr v-if="selectedNode.sideEffects.length === 0">
+-              <td colspan="3" class="s4-detail__missing">
+-                未采集（所选节点没有 sideEffects；不推断为 0 行）
+-              </td>
+-            </tr>
+-          </tbody>
+-        </table>
+-      </section>
+-
+-      <section
+-        v-show="tab === 'ui'"
+-        id="s4-ui-effects"
+-        class="s4-ticket"
+-        role="tabpanel"
+-        aria-label="UI 效果"
++          <h4 class="s4-detail__section-title">UI 效果</h4>
++          <p v-if="selectedEffect !== null" class="s4-detail__effect">
++            当前节点：<strong>{{ selectedEffect }}</strong>
++          </p>
++          <p v-else class="s4-detail__muted">
++            当前节点没有直接的页面效果记录。
++          </p>
++          <details v-if="renderNodes.length > 0" class="s4-fold">
++            <summary class="s4-fold__summary">本链路中的页面效果（{{ renderNodes.length }} 条）</summary>
++            <ul class="s4-render-list">
++              <li v-for="render in renderNodes" :key="render.spanId" class="s4-render-list__item">
++                <code>{{ compactNodeKey(render.kind, render.nodeKey) }}</code>
++                <span>· {{ uiEffectText(render) ?? MISSING }}</span>
++                <span>· 相对时间 {{ formatNs(Math.max(0, render.startNs - minStartNs)) }}</span>
++              </li>
++            </ul>
++          </details>
++        </section>
++      </template>
++
++      <details
++        v-if="selectedGroup.length >= 2"
++        id="s4-invocations"
++        class="s4-detail__section s4-fold"
++        aria-label="逐次调用"
+       >
+-        <p class="s4-detail__hint">
+-          UI 效果（ui_effect / render / callback）：SDK 显式 uiEffect(text) 记录的用户可见文案摘要。
+-        </p>
+-        <p v-if="selectedEffect !== null" class="s4-detail__effect">
+-          所选节点 ui_effect：<strong>{{ selectedEffect }}</strong>
+-        </p>
+-        <p v-else class="s4-detail__muted">
+-          所选节点不是 render/ui_effect 事件（该节点的 UI 效果未采集，不推断）。
+-        </p>
+-        <p class="s4-detail__hint">
+-          本 trace 的 render 事件（按 trace 列出，未推断与所选节点的因果）：
+-        </p>
+-        <ul v-if="renderNodes.length > 0" class="s4-render-list">
+-          <li v-for="render in renderNodes" :key="render.spanId" class="s4-render-list__item">
+-            <code>{{ render.nodeKey }}</code>
+-            <span>· {{ uiEffectText(render) ?? MISSING }}</span>
+-            <span>· relNs {{ formatNs(Math.max(0, render.startNs - minStartNs)) }}</span>
+-            <code>spanId {{ render.spanId }}</code>
+-          </li>
+-        </ul>
+-        <p v-else class="s4-detail__missing">
+-          未采集（本 trace 无 render / ui_effect 事件；UI 效果不会被推断）
+-        </p>
+-      </section>
+-
+-      <section id="s4-invocations" class="s4-detail__section" aria-label="逐次调用">
+-        <h4 class="s4-detail__section-title">逐次调用（per-invocation）· 同 nodeKey ×N</h4>
+-        <p class="s4-detail__hint">
+-          按 startNs 升序、同值 spanId 字典序；逐次状态独立展示，不合并、不伪造聚合 OK。
+-        </p>
+-        <template v-if="selectedGroup.length >= 2">
+-          <label class="s4-detail__select-label" for="s4-invocation-select">选择第几次调用</label>
+-          <select
+-            id="s4-invocation-select"
+-            class="s4-detail__select"
+-            :value="selectedNode.spanId"
+-            @change="onInvocationChange"
++        <summary class="s4-fold__summary">逐次调用（同一方法共 {{ selectedGroup.length }} 次，点击展开）</summary>
++        <label class="s4-detail__select-label" for="s4-invocation-select">选择第几次调用</label>
++        <select
++          id="s4-invocation-select"
++          class="s4-detail__select"
++          :value="selectedNode.spanId"
++          @change="onInvocationChange"
++        >
++          <option v-for="invocation in invocations" :key="invocation.node.spanId" :value="invocation.node.spanId">
++            第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次 · {{ statusChinese(invocation.node.status) }}<template v-if="invocation.diff"> · {{ VALUE_CHANGE_TEXT }}</template>
++          </option>
++        </select>
++        <ol class="s4-invocation-list">
++          <li
++            v-for="invocation in invocations"
++            :key="invocation.node.spanId"
++            :data-invocation-diff="invocation.diff ? 'true' : undefined"
+           >
+-            <option v-for="invocation in invocations" :key="invocation.node.spanId" :value="invocation.node.spanId">
+-              第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次 · {{ invocation.node.spanId }} · {{ statusMeta(invocation.node.status).label }}<template v-if="invocation.diff"> · {{ VALUE_CHANGE_TEXT }}</template>
+-            </option>
+-          </select>
+-          <ol class="s4-invocation-list">
+-            <li
+-              v-for="invocation in invocations"
+-              :key="invocation.node.spanId"
+-              :data-invocation-diff="invocation.diff ? 'true' : undefined"
++            <button
++              type="button"
++              class="s4-invocation"
++              :class="{
++                's4-invocation--active': invocation.node.spanId === selectedNode.spanId,
++                's4-invocation--diff': invocation.diff,
++              }"
++              @click="emit('select', invocation.node.spanId)"
+             >
+-              <button
+-                type="button"
+-                class="s4-invocation"
+-                :class="{
+-                  's4-invocation--active': invocation.node.spanId === selectedNode.spanId,
+-                  's4-invocation--diff': invocation.diff,
+-                }"
+-                @click="emit('select', invocation.node.spanId)"
+-              >
+-                <span class="s4-invocation__line">
+-                  <strong>第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次</strong>
+-                  <span class="s3-status" :class="`s3-status--${statusMeta(invocation.node.status).tone}`">
+-                    {{ statusMeta(invocation.node.status).label }}
+-                  </span>
+-                  <span v-if="invocation.diff" class="s4-invocation__diff">{{ VALUE_CHANGE_TEXT }}</span>
+-                  <code>{{ invocation.node.spanId }}</code>
+-                </span>
+-                <span class="s4-invocation__line">return：{{ returnText(invocation.node) }}</span>
+-                <span class="s4-invocation__line">
+-                  SQL rows：{{ rowsText(invocation.rows) }}
+-                  <template v-if="invocation.rows.source === 'child_sql'">
+-                    （子 sql：{{ invocation.rows.sqlSpanIds.join(', ') }}）
+-                  </template>
+-                  <template v-else-if="invocation.rows.source === 'self'">
+-                    （自身 sql sideEffects）
+-                  </template>
+-                  <template v-else>（无 sql 子节点，rows 未采集，绝不为 0）</template>
++              <span class="s4-invocation__line">
++                <strong>第 {{ invocation.index + 1 }}/{{ selectedGroup.length }} 次</strong>
++                <span class="s3-status" :class="`s3-status--${statusMeta(invocation.node.status).tone}`">
++                  {{ statusChinese(invocation.node.status) }}
+                 </span>
+-                <span class="s4-invocation__line">
+-                  relNs {{ formatNs(Math.max(0, invocation.node.startNs - minStartNs)) }}
+-                </span>
+-              </button>
+-            </li>
+-          </ol>
+-        </template>
+-        <p v-else class="s4-detail__muted">
+-          该 nodeKey 在所选 trace 内仅 1 次调用（N=1，不显示 ×N）。
+-        </p>
+-        <p class="s4-detail__note">{{ RUNTIME_X3_NOTE }}</p>
+-      </section>
++                <span v-if="invocation.diff" class="s4-invocation__diff">{{ VALUE_CHANGE_TEXT }}</span>
++              </span>
++              <span class="s4-invocation__line">返回：{{ returnText(invocation.node) }}</span>
++              <span class="s4-invocation__line">
++                SQL 影响行数：{{ rowsText(invocation.rows) }}
++                <template v-if="invocation.rows.source === 'child_sql'">（来自子 SQL 节点）</template>
++                <template v-else-if="invocation.rows.source === 'self'">（来自当前节点）</template>
++                <template v-else>（未采集，不推断为 0）</template>
++              </span>
++            </button>
++          </li>
++        </ol>
++      </details>
+     </template>
+ 
+     <p v-else class="s4-detail__empty">{{ emptyText }}</p>
+ 
+-    <section id="s4-gaps" class="s4-detail__section" aria-label="缺口清单">
+-      <h4 class="s4-detail__section-title">缺口清单（只读派生）</h4>
+-      <p class="s4-detail__hint">
+-        按 span 去重（优先级 F &gt; N &gt; R），每个 span 最多一条；不跨 span 合并。
+-      </p>
+-      <ul v-if="gaps.length > 0" class="s4-gap-list">
++    <details
++      v-if="gapCount > 0"
++      id="s4-gaps"
++      class="s4-detail__section s4-fold"
++      aria-label="缺口清单"
++    >
++      <summary class="s4-fold__summary">采集缺口（{{ gapCount }} 条，点击展开）</summary>
++      <ul class="s4-gap-list">
+         <li v-for="gap in gaps" :key="gap.spanId" class="s4-gap">
+-          <span class="s4-gap__rule" :title="gap.rule">{{ gap.ruleLabel }} · {{ gap.rule }}</span>
+-          <span class="s4-gap__kind">{{ gap.kind }}</span>
+-          <code class="s4-gap__key">{{ gap.nodeKey }}</code>
+-          <span class="s4-gap__text">{{ gap.text }}</span>
+-          <span class="s4-detail__muted">spanId {{ gap.spanId }} · reason {{ gap.internalReason }}</span>
++          <span class="s4-gap__rule" :title="`${gap.ruleLabel} · ${gap.rule}`">{{ gapRuleText(gap.rule) }}</span>
++          <span class="s4-gap__kind">{{ kindLabel(gap.kind) }}</span>
++          <code class="s4-gap__key">{{ compactNodeKey(gap.kind, gap.nodeKey) }}</code>
++          <span class="s4-gap__text" :title="gap.internalReason">{{ gap.text }}</span>
+         </li>
+       </ul>
+-      <p v-else class="s4-detail__muted">{{ GAP_EMPTY_TEXT }}</p>
+-      <p class="s4-detail__note">{{ RUNTIME_X3_NOTE }}；{{ FETCH_WITHOUT_BACKEND_TEXT }} 只有在 fetch 未被后端节点引用时出现。</p>
+-    </section>
++      <p class="s4-detail__note">
++        未采集表示没有收到这部分事实，不等于 0，也不代表失败。{{ FETCH_WITHOUT_BACKEND_TEXT }}
++        只表示前端请求没有找到对应后端节点。
++      </p>
++    </details>
++    <p v-else class="s4-detail__muted">{{ GAP_EMPTY_TEXT }}</p>
++
++    <details class="s4-help">
++      <summary class="s4-help__summary">阅读说明</summary>
++      <p class="s4-detail__note" :title="RUNTIME_X3_NOTE">
++        ×N 表示同一方法在本次链路中被采集到多次；数量来自已采集节点，不做推算。
++      </p>
++      <p class="s4-detail__note">
++        缺口按节点去重，优先级从高到低为前端请求、普通节点、页面渲染；每条缺口只报告一次。
++      </p>
++    </details>
+   </aside>
+ </template>
+diff --git a/workbench/src/stores/app.ts b/workbench/src/stores/app.ts
+index c8fa5bf..27fb201 100644
+--- a/workbench/src/stores/app.ts
++++ b/workbench/src/stores/app.ts
+@@ -8,7 +8,7 @@ import { defineStore } from "pinia";
+ export const useAppStore = defineStore("app", {
+   state: () => ({
+     appVersion: "0.1.0",
+-    mode: "S3 前端事实与只读回放",
++    mode: "只读追踪与回放",
+     selectedRequestId: null as string | null,
+     selectedNodeKey: null as string | null,
+   }),
+diff --git a/workbench/src/stores/s3.ts b/workbench/src/stores/s3.ts
+index 53b2b62..c1f1eac 100644
+--- a/workbench/src/stores/s3.ts
++++ b/workbench/src/stores/s3.ts
+@@ -44,7 +44,7 @@ export const useS3Store = defineStore("s3", {
+     mode: "live" as S3Mode,
+     sliderNs: 0,
+     playing: false,
+-    speed: 1,
++    speed: 0.01,
+     replay: null as ReplayResponse | null,
+     replayStatus: "idle" as S3LoadStatus,
+     replayError: null as S3Error | null,
+diff --git a/workbench/src/style.css b/workbench/src/style.css
+index 22bcf63..35192ce 100644
+--- a/workbench/src/style.css
++++ b/workbench/src/style.css
+@@ -1185,6 +1185,207 @@ code {
+   color: var(--accent);
+ }
+ 
++/* Top-down rectangular flow tree (pure CSS connectors, no graph library). */
++.s3-tree__canvas {
++  overflow-x: auto;
++  padding: 10px 4px 12px;
++}
++
++.s3-tree__root {
++  display: flex;
++  justify-content: center;
++  min-width: max-content;
++}
++
++.flow-tree__branch {
++  align-items: center;
++  display: flex;
++  flex-direction: column;
++  padding: 0 5px;
++}
++
++.flow-tree__node {
++  background: var(--surface-alt);
++  border: 1px solid var(--border);
++  border-left: 3px solid var(--border);
++  border-radius: 6px;
++  cursor: pointer;
++  max-width: 230px;
++  min-width: 168px;
++  padding: 7px 9px;
++  position: relative;
++}
++
++.flow-tree__node--ok {
++  border-left-color: rgba(63, 185, 80, 0.7);
++}
++
++.flow-tree__node--false {
++  background: rgba(210, 153, 34, 0.06);
++  border-left-color: #d29922;
++}
++
++.flow-tree__node--threw {
++  background: rgba(248, 81, 73, 0.08);
++  border-left-color: #f85149;
++}
++
++.flow-tree__node--notcollected {
++  border-left-color: #5b6775;
++  border-left-style: dashed;
++}
++
++.flow-tree__node--truncated {
++  background: repeating-linear-gradient(
++    45deg,
++    rgba(143, 156, 173, 0.07) 0 6px,
++    transparent 6px 12px
++  );
++  border-left-color: #8f9cad;
++}
++
++.flow-tree__node--redacted,
++.flow-tree__node--unknown {
++  border-left-color: #8f9cad;
++}
++
++.flow-tree__node--leaf {
++  border-style: dashed;
++}
++
++.flow-tree__node--selected {
++  border-color: var(--accent);
++  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.38);
++}
++
++.flow-tree__head {
++  align-items: center;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 5px;
++}
++
++.flow-tree__step {
++  align-items: center;
++  background: var(--accent);
++  border-radius: 50%;
++  color: #0b1016;
++  display: inline-flex;
++  flex: none;
++  font-family: var(--mono);
++  font-size: 10px;
++  font-weight: 700;
++  height: 17px;
++  justify-content: center;
++  width: 17px;
++}
++
++.flow-tree__leaf-tag {
++  border: 1px dashed #5b6775;
++  border-radius: 4px;
++  color: var(--text-dim);
++  font-size: 10px;
++  padding: 0 5px;
++}
++
++.flow-tree__kind {
++  color: var(--text-dim);
++  font-size: 10px;
++}
++
++.flow-tree__status {
++  border: 1px solid var(--border);
++  border-radius: 4px;
++  color: var(--text-dim);
++  font-size: 10px;
++  padding: 0 5px;
++  white-space: nowrap;
++}
++
++.flow-tree__key {
++  color: #c8d6e5;
++  display: block;
++  font-size: 11px;
++  margin-top: 3px;
++  overflow-wrap: anywhere;
++}
++
++.flow-tree__control,
++.flow-tree__meta {
++  color: var(--text-dim);
++  display: flex;
++  flex-wrap: wrap;
++  font-size: 10px;
++  gap: 4px 8px;
++  justify-content: space-between;
++  margin: 3px 0 0;
++}
++
++.flow-tree__control {
++  color: var(--accent);
++  justify-content: flex-start;
++}
++
++.flow-tree__selected {
++  color: var(--accent);
++  display: block;
++  font-size: 10px;
++  margin-top: 3px;
++}
++
++.flow-tree__children {
++  display: flex;
++  justify-content: center;
++  list-style: none;
++  margin: 0;
++  padding: 18px 0 0;
++  position: relative;
++}
++
++.flow-tree__children::before {
++  border-left: 1px solid var(--border);
++  content: "";
++  height: 18px;
++  left: 50%;
++  position: absolute;
++  top: 0;
++}
++
++.flow-tree__children > li {
++  align-items: center;
++  display: flex;
++  flex-direction: column;
++  padding: 18px 5px 0;
++  position: relative;
++}
++
++.flow-tree__children > li::before,
++.flow-tree__children > li::after {
++  border-top: 1px solid var(--border);
++  content: "";
++  height: 18px;
++  position: absolute;
++  right: 50%;
++  top: 0;
++  width: 50%;
++}
++
++.flow-tree__children > li::after {
++  border-left: 1px solid var(--border);
++  left: 50%;
++  right: auto;
++}
++
++.flow-tree__children > li:only-child::before,
++.flow-tree__children > li:only-child::after {
++  display: none;
++}
++
++.flow-tree__children > li:first-child::before,
++.flow-tree__children > li:last-child::after {
++  border-top: 0;
++}
++
+ /* Mixed fact tree: CSS connectors only (no graph library). */
+ .s3-tree__future {
+   background: rgba(143, 156, 173, 0.08);
+@@ -1577,29 +1778,66 @@ code {
+ }
+ 
+ .s3-tick {
+-  border-left: 1px solid #8f9cad;
++  background: transparent;
++  border: 0;
++  bottom: -4px;
++  cursor: pointer;
++  height: 20px;
++  padding: 0;
++  position: absolute;
++  transform: translateX(-7px);
++  width: 14px;
++  z-index: 2;
++}
++
++.s3-tick::before {
++  border-left: 2px solid #8f9cad;
+   bottom: 0;
+-  height: 12px;
++  content: "";
++  left: 6px;
+   position: absolute;
+-  width: 0;
++  top: 0;
+ }
+ 
+-.s3-tick--ui_event {
++.s3-tick--ui_event::before {
+   border-left-color: var(--accent);
+ }
+ 
+-.s3-tick--fetch {
++.s3-tick--fetch::before {
+   border-left-color: #56d364;
+ }
+ 
+-.s3-tick--sql {
++.s3-tick--controller::before,
++.s3-tick--service::before {
++  border-left-color: #79c0ff;
++}
++
++.s3-tick--mapper::before {
++  border-left-color: #a5d6ff;
++}
++
++.s3-tick--sql::before {
+   border-left-color: #e3b341;
+ }
+ 
+-.s3-tick--render {
++.s3-tick--js_method::before {
++  border-left-color: #d2a8ff;
++}
++
++.s3-tick--render::before {
+   border-left-color: #d2a8ff;
+ }
+ 
++.s3-tick:hover::before,
++.s3-tick:focus-visible::before {
++  border-left-width: 3px;
++}
++
++.s3-tick:focus-visible {
++  outline: 1px solid var(--accent);
++  outline-offset: 1px;
++}
++
+ .s3-cursor {
+   background: #f0f6fc;
+   bottom: -3px;
+@@ -1643,6 +1881,11 @@ code {
+   padding: 2px 4px;
+ }
+ 
++.s3-timeline__speed-hint {
++  color: var(--text-dim);
++  font-size: 10px;
++}
++
+ .s3-timeline__mode {
+   color: var(--text-dim);
+   font-size: 11px;
+@@ -1656,6 +1899,12 @@ code {
+   overflow-wrap: anywhere;
+ }
+ 
++.s3-timeline__hint {
++  color: var(--text-dim);
++  font-size: 11px;
++  margin: 6px 0 0;
++}
++
+ .s3-ticks {
+   display: flex;
+   flex-wrap: wrap;
+@@ -1665,12 +1914,41 @@ code {
+   padding: 0;
+ }
+ 
++.s3-ticks > li {
++  list-style: none;
++}
++
+ .s3-tick-row {
+   align-items: center;
++  background: transparent;
++  border: 0;
++  border-radius: 4px;
+   color: var(--text-dim);
++  cursor: pointer;
+   display: flex;
++  font-family: inherit;
+   font-size: 11px;
+   gap: 5px;
++  padding: 2px 4px;
++  text-align: left;
++}
++
++.s3-tick-row:hover {
++  background: var(--surface-alt);
++  color: var(--text);
++}
++
++.s3-tick-row--controller .s3-tick-row__dot,
++.s3-tick-row--service .s3-tick-row__dot {
++  background: #79c0ff;
++}
++
++.s3-tick-row--mapper .s3-tick-row__dot {
++  background: #a5d6ff;
++}
++
++.s3-tick-row--js_method .s3-tick-row__dot {
++  background: #d2a8ff;
+ }
+ 
+ .s3-tick-row__dot {
+@@ -2378,6 +2656,457 @@ code {
+   margin-left: auto;
+ }
+ 
++/* Summary-first request view: start card, compact tree and on-demand details. */
++.s3-start {
++  background: linear-gradient(135deg, rgba(74, 158, 255, 0.12), rgba(74, 158, 255, 0.03));
++  border: 1px solid rgba(74, 158, 255, 0.42);
++  border-left: 3px solid var(--accent);
++  border-radius: 8px;
++  display: grid;
++  gap: 12px;
++  grid-template-columns: auto minmax(0, 1fr);
++  margin-top: 14px;
++  padding: 12px 14px;
++}
++
++.s3-start__badge {
++  align-items: center;
++  align-self: start;
++  background: var(--accent);
++  border-radius: 999px;
++  color: #0b1016;
++  display: inline-flex;
++  font-size: 12px;
++  font-weight: 700;
++  height: 28px;
++  justify-content: center;
++  width: 52px;
++}
++
++.s3-start__eyebrow {
++  color: var(--text-dim);
++  font-size: 11px;
++  letter-spacing: 0.08em;
++  margin: 0;
++}
++
++.s3-start__title {
++  color: var(--text);
++  font-size: 19px;
++  margin: 3px 0 5px;
++  overflow-wrap: anywhere;
++}
++
++.s3-start__control-name {
++  border: 1px solid rgba(74, 158, 255, 0.5);
++  border-radius: 999px;
++  color: var(--accent);
++  font-size: 11px;
++  font-weight: 500;
++  margin-left: 10px;
++  padding: 2px 9px;
++  vertical-align: middle;
++}
++
++.s3-start__methods {
++  align-items: center;
++  color: var(--text-dim);
++  display: flex;
++  flex-wrap: wrap;
++  font-size: 11px;
++  gap: 5px;
++  margin: 0 0 5px;
++}
++
++.s3-start__method {
++  border-bottom: 1px dotted rgba(143, 156, 173, 0.65);
++  color: #c8d6e5;
++  cursor: help;
++  font-family: var(--mono);
++}
++
++.s3-start__method-arrow {
++  color: #5b6775;
++}
++
++.s3-start__source {
++  color: var(--text-dim);
++  font-size: 12px;
++  margin: 0;
++  overflow-wrap: anywhere;
++}
++
++.s3-start__step-key[title],
++.s3-node__key[title],
++#s5-source[title] {
++  cursor: help;
++}
++
++.s3-start__source code {
++  color: #c8d6e5;
++}
++
++.s3-start__dot {
++  color: #5b6775;
++  margin: 0 5px;
++}
++
++.s3-start__chain {
++  align-items: center;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  list-style: none;
++  margin: 10px 0 0;
++  padding: 0;
++}
++
++.s3-start__step {
++  align-items: center;
++  background: var(--surface);
++  border: 1px solid var(--border);
++  border-radius: 999px;
++  display: inline-flex;
++  gap: 6px;
++  padding: 4px 10px 4px 6px;
++}
++
++.s3-start__step:not(:first-child)::before {
++  color: #5b6775;
++  content: "→";
++  margin-right: 2px;
++}
++
++.s3-start__step--root {
++  background: rgba(74, 158, 255, 0.14);
++  border-color: rgba(74, 158, 255, 0.55);
++}
++
++.s3-start__step-no {
++  align-items: center;
++  background: var(--surface-alt);
++  border-radius: 50%;
++  color: var(--text-dim);
++  display: inline-flex;
++  font-family: var(--mono);
++  font-size: 10px;
++  height: 17px;
++  justify-content: center;
++  width: 17px;
++}
++
++.s3-start__step--root .s3-start__step-no {
++  background: var(--accent);
++  color: #0b1016;
++}
++
++.s3-start__step-kind {
++  color: var(--text-dim);
++  font-size: 10px;
++}
++
++.s3-start__step-key {
++  color: var(--text);
++  font-size: 11px;
++}
++
++.s3-start__loading {
++  color: var(--text-dim);
++  font-size: 12px;
++  margin: 8px 0 0;
++}
++
++.s3-subtitle__hint {
++  color: var(--text-dim);
++  font-size: 11px;
++  font-weight: 400;
++  margin-left: 8px;
++}
++
++.s3-req__error {
++  color: #ff9d94;
++}
++
++.s3-req__time {
++  color: var(--text-dim);
++  font-family: var(--mono);
++  font-size: 10px;
++}
++
++.s3-node__control {
++  color: var(--accent);
++  font-size: 10px;
++}
++
++.s4-hero__control {
++  background: rgba(74, 158, 255, 0.12);
++  border: 1px solid rgba(74, 158, 255, 0.4);
++  border-radius: 4px;
++  color: var(--accent);
++  font-size: 10px;
++  padding: 0 5px;
++}
++
++.s3-tree__viewbar {
++  align-items: center;
++  color: var(--text-dim);
++  display: flex;
++  flex-wrap: wrap;
++  font-size: 11px;
++  gap: 8px;
++  justify-content: space-between;
++  margin: 0 0 6px;
++}
++
++.s3-tree__branch-toggle {
++  background: var(--surface);
++  border: 1px solid var(--border);
++  border-radius: 4px;
++  color: var(--text-dim);
++  cursor: pointer;
++  font-family: inherit;
++  font-size: 11px;
++  padding: 2px 8px;
++}
++
++.s3-tree__branch-toggle:hover {
++  border-color: var(--accent);
++  color: var(--accent);
++}
++
++.s3-node--branch {
++  border-style: dashed;
++  opacity: 0.86;
++}
++
++.s3-node--flow-main {
++  margin-bottom: 24px;
++  position: relative;
++}
++
++.s3-node--flow-main::after {
++  bottom: -22px;
++  color: var(--accent);
++  content: "↓";
++  font-size: 15px;
++  left: 50%;
++  line-height: 1;
++  position: absolute;
++  transform: translateX(-50%);
++}
++
++.s3-node--flow-end {
++  margin-bottom: 3px;
++}
++
++.s3-node--flow-end::after {
++  content: none;
++}
++
++.s3-flow__step {
++  align-items: center;
++  background: var(--accent);
++  border-radius: 50%;
++  color: #0b1016;
++  display: inline-flex;
++  flex: none;
++  font-family: var(--mono);
++  font-size: 10px;
++  font-weight: 700;
++  height: 18px;
++  justify-content: center;
++  width: 18px;
++}
++
++.s3-flow__branch-tag {
++  border: 1px dashed #5b6775;
++  border-radius: 4px;
++  color: var(--text-dim);
++  font-size: 10px;
++  padding: 0 5px;
++}
++
++.s3-node__inline {
++  color: #c8d6e5;
++  font-size: 11px;
++  margin-left: 2px;
++  overflow-wrap: anywhere;
++}
++
++.s3-node__time {
++  color: var(--text-dim);
++  font-size: 10px;
++  margin-left: auto;
++  white-space: nowrap;
++}
++
++.s3-legend__summary,
++.s3-help__summary,
++.s4-fold__summary,
++.s4-help__summary,
++.s4-group-badge__summary {
++  color: var(--text-dim);
++  cursor: pointer;
++  font-size: 12px;
++  font-weight: 600;
++  list-style-position: outside;
++}
++
++.s3-legend__note {
++  color: var(--text-dim);
++  font-size: 11px;
++  margin: 8px 0;
++}
++
++.s3-tree__future p {
++  margin: 0;
++}
++
++.s3-tree__future summary {
++  color: var(--text-dim);
++  cursor: pointer;
++  font-size: 11px;
++  margin-top: 4px;
++}
++
++.s3-tree__future ul {
++  margin: 4px 0 0;
++  padding-left: 18px;
++}
++
++.s3-help {
++  border-top: 1px solid var(--border);
++  margin-top: 12px;
++  padding-top: 8px;
++}
++
++.s3-help__summary,
++.s4-help__summary {
++  color: var(--text-dim);
++  font-size: 12px;
++}
++
++.s3-help .s3-panel__footnote {
++  margin: 8px 0 0;
++}
++
++.s4-hero {
++  border-bottom: 1px solid var(--border);
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  padding-bottom: 8px;
++}
++
++.s4-hero__facts {
++  align-items: center;
++  display: flex;
++  flex-wrap: wrap;
++  font-size: 12px;
++  gap: 8px;
++  margin: 0;
++}
++
++.s4-hero__code {
++  border: 1px solid var(--border);
++  border-radius: 4px;
++  color: var(--text-dim);
++  font-family: var(--mono);
++  font-size: 10px;
++  padding: 0 5px;
++}
++
++.s4-hero__source {
++  color: var(--text-dim);
++  font-size: 11px;
++  margin: 0;
++  overflow-wrap: anywhere;
++}
++
++.s4-hero__source code {
++  color: #c8d6e5;
++}
++
++.s4-fold {
++  background: var(--surface);
++  border: 1px solid var(--border);
++  border-radius: 6px;
++  padding: 6px 8px;
++}
++
++.s4-fold[open] {
++  padding-bottom: 9px;
++}
++
++.s4-fold[open] > .s4-fold__summary {
++  margin-bottom: 7px;
++}
++
++.s4-group-badge {
++  display: block;
++}
++
++.s4-group-badge__row {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin-top: 6px;
++}
++
++.s4-help {
++  border-top: 1px solid var(--border);
++  margin-top: 4px;
++  padding-top: 7px;
++}
++
++.s4-flag-list {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  list-style: none;
++  margin: 7px 0 0;
++  padding: 0;
++}
++
++.s4-flag-list li {
++  align-items: baseline;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 7px;
++  font-size: 11px;
++}
++
++.s5-value__full {
++  flex-basis: 100%;
++  margin-left: 4px;
++}
++
++.s5-value__full summary {
++  color: var(--text-dim);
++  cursor: pointer;
++  font-size: 10px;
++}
++
++.s5-value__full pre {
++  background: var(--surface-alt);
++  border: 1px solid var(--border);
++  border-radius: 4px;
++  color: var(--text);
++  font-size: 10px;
++  margin: 4px 0 0;
++  max-height: 160px;
++  overflow: auto;
++  padding: 6px;
++  white-space: pre-wrap;
++  word-break: break-all;
++}
++
++.s4-sql td,
++.s4-hero__facts,
++.s4-invocation__line {
++  overflow-wrap: anywhere;
++}
++
+ /* Narrow viewports: single column, keep tables scrollable instead of clipping. */
+ @media (max-width: 900px) {
+   .app-shell {

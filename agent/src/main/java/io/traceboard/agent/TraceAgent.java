@@ -126,6 +126,8 @@ public final class TraceAgent {
                 .type(ElementMatchers.named(CONTROLLER_TYPE))
                 .transform(advice(ControllerAdvice.class,
                         ElementMatchers.named("cancel").and(ElementMatchers.takesArguments(long.class))))
+                .transform(advice(RemarkControllerAdvice.class,
+                        ElementMatchers.named("remark").and(ElementMatchers.takesArguments(2))))
                 .transform(advice(PreviewControllerAdvice.class,
                         ElementMatchers.named("previewDiscount").and(ElementMatchers.takesArguments(
                                 long.class, double.class, String.class, String.class))))

@@ -64,6 +64,51 @@
         { kind: "service", name: "L2DemoService#reconcileAmount", status: "OK", statusClass: "st-ok", confidence: "EXACT", thread: "http-nio-8080-exec-4 #42", source: { file: "L2DemoService.java", line: 23 }, ret: "double = 0.0", flags: ["L2", "ASYNC_INHERITED"], values: [{ name: "local", old: "100", now: "0", line: "23", note: "第 2 次调用 · invocation=2" }, { name: "local", old: "0", now: "100", line: "25", note: "第 3 次调用恢复" }], meta: "relNs 5.6 ms" },
         { kind: "render", name: "ui_effect:第2次调用 local=0", status: "OK", statusClass: "st-render", confidence: "EXACT", thread: "browser-main #0", source: "声明的 UI 效果", ret: "ui_effect = 第2次调用 local=0", flags: ["SDK_ACTIVE"], meta: "relNs 8.2 ms" }
       ]
+    },
+    {
+      id: "d",
+      name: "请求体",
+      meta: "3 事件 · 5 个 body 字段",
+      tag: "BODY",
+      tagClass: "tag-body",
+      source: "CASE D · JSON REQUEST BODY",
+      title: "请求体字段被原样截获",
+      sub: "POST /api/orders/1/remark 携带 JSON body，本地演示不脱敏。",
+      metrics: [["span", 3], ["body", 5], ["backend", 1], ["http", 200]],
+      callout: ["请求体可核对", "fetch 节点保留 body.reason/operator/priority/note/token 的字段与原值。"],
+      why: "只看到“请求成功”不够；请求节点要能回答：发了什么字段、每个字段的值是什么。",
+      defaultNode: 1,
+      nodes: [
+        { kind: "ui_event", name: "#btn-remark", status: "OK", statusClass: "st-ok", confidence: "EXACT", thread: "browser-main #0", source: "点击根 · capture 阶段", ret: "未采集（无返回摘要）", flags: ["SDK_ACTIVE", "S3_RUNTIME_SDK", "OBSERVE_MS=1500"], meta: "relNs 0 · dur 31.70 ms" },
+        { kind: "fetch", name: "POST /api/orders/1/remark", status: "OK", statusClass: "st-ok", confidence: "EXACT", thread: "browser-main #0", source: "同源请求 · JSON body", ret: "http = 200", flags: ["SDK_ACTIVE"], values: [
+          { name: "body.reason", old: "—", now: "改约配送时间", line: "—", note: "请求体字段" },
+          { name: "body.operator", old: "—", now: "demo-user", line: "—", note: "请求体字段" },
+          { name: "body.priority", old: "—", now: "2", line: "—", note: "请求体字段" },
+          { name: "body.note", old: "—", now: "请在本周内处理", line: "—", note: "请求体字段" },
+          { name: "body.token", old: "—", now: "demo-token-123", line: "—", note: "本地演示不脱敏" }
+        ], meta: "relNs 1.00 ms · dur 8.40 ms" },
+        { kind: "controller", name: "OrderController#remark", status: "OK", statusClass: "st-ok", confidence: "EXACT", thread: "http-nio-8080-exec-3 #38", source: { file: "OrderController.java", line: 79 }, ret: "ResponseEntity = 200", flags: ["S3_EXACT_LINK", "S2_ZERO_ROW_CHAIN", "DROP_COUNT=0"], meta: "relNs 5.33 ms · dur 713.40 µs" }
+      ]
+    },
+    {
+      id: "e",
+      name: "采集缺口",
+      meta: "4 事件 · 变量未采集",
+      tag: "未采集",
+      tagClass: "tag-gap",
+      source: "CASE E · COLLECTION GAP",
+      title: "方法没有调试信息",
+      sub: "只证明调用与返回值，不猜局部变量与行号。",
+      metrics: [["span", 4], ["backend", 2], ["values", "未采集"], ["reason", "LVT"]],
+      callout: ["未采集不是失败", "NoDebugService#compute 缺少 LocalVariableTable；状态为 NOT_COLLECTED_NO_DEBUG_INFO。"],
+      why: "工具必须能诚实展示“采不到什么、为什么采不到”。未采集不等于 0，也不等于业务失败。",
+      defaultNode: 3,
+      nodes: [
+        { kind: "ui_event", name: "#btn-no-debug", status: "OK", statusClass: "st-ok", confidence: "EXACT", thread: "browser-main #0", source: "点击根 · capture 阶段", ret: "未采集（无返回摘要）", flags: ["SDK_ACTIVE", "S3_RUNTIME_SDK", "OBSERVE_MS=1500"], meta: "relNs 0 · dur 9.20 ms" },
+        { kind: "fetch", name: "POST /api/orders/1/no-debug", status: "OK", statusClass: "st-ok", confidence: "EXACT", thread: "browser-main #0", source: "同源请求", ret: "http = 200", flags: ["SDK_ACTIVE"], meta: "relNs 0.50 ms · dur 8.70 ms" },
+        { kind: "controller", name: "OrderController#noDebug", status: "OK", statusClass: "st-ok", confidence: "EXACT", thread: "http-nio-8080-exec-3 #38", source: { file: "OrderController.java", line: 137 }, ret: "ResponseEntity = 200", flags: ["S3_EXACT_LINK", "S2_ZERO_ROW_CHAIN", "DROP_COUNT=0"], meta: "relNs 6.38 ms · dur 349.40 µs" },
+        { kind: "service", name: "NoDebugService#compute", status: "NOT_COLLECTED_NO_DEBUG_INFO", statusClass: "st-notcollected", confidence: "EXACT", thread: "http-nio-8080-exec-3 #38", source: "未采集（无调试信息）", ret: "double = 200", reason: "LocalVariableTable missing", valuesNote: "未采集变量名/行号；只证明调用与返回值。", flags: ["S2_ZERO_ROW_CHAIN", "NO_DEBUG_INFO"], meta: "relNs 6.55 ms · dur 30.90 µs" }
+      ]
     }
   ];
 
@@ -135,12 +180,16 @@
     rows.push(fact("source", sourceText(node.source)));
     rows.push(fact("return", node.ret));
     rows.push(fact("flags", (node.flags || []).join(" · ") || "无"));
+    if (node.reason) rows.push(fact("reason", node.reason, "zero"));
     if (node.sideEffects) rows.push(fact("sideEffects", node.sideEffects, "zero"));
     $("facts").innerHTML = rows.join("");
     const valuesWrap = $("values-wrap");
     if (node.values && node.values.length) {
       valuesWrap.hidden = false;
       $("values").innerHTML = node.values.map((value) => `<div class="value-row"><span>${esc(value.name)} <small>${esc(value.note || "")}</small></span><span>${esc(value.old)}</span><span>${esc(value.now)}</span></div>`).join("");
+    } else if (node.valuesNote) {
+      valuesWrap.hidden = false;
+      $("values").innerHTML = `<p class="value-empty">${esc(node.valuesNote)}</p>`;
     } else {
       valuesWrap.hidden = true;
       $("values").innerHTML = "";

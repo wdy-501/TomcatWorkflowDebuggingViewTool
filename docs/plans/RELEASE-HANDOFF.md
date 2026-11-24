@@ -1,7 +1,7 @@
 # TraceBoard Release Handoff
 
 > 日期：2026-11-24｜目标：本地 + GitHub 先行，Qoder Site 最后
-> 状态：**GitHub 已 public + MIT；Release v0.1.0 资产已核验；只剩 Qoder Site 静态展示（最后）。**
+> 状态：**GitHub 已 public + MIT；Release v0.1.0 资产已核验；Qoder Site 已发布为 public 工作台静态示例。**
 
 ## 1. 已验证
 
@@ -16,17 +16,17 @@
 | GitHub 仓库 | public + MIT | `https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool` |
 | Release v0.1.0 | 已核验 | GitHub API 返回非 draft、4 资产：portable zip/exe zip + 双 SHA256 |
 | 站点外链 | 已加 | 站点介绍含 GitHub 源码与 Windows 包链接；本地 200，静态检查通过 |
+| Qoder Site | PASS | public；https://traceboard-32843bp8pzz.qoder.zone；原版介绍 + 内嵌 5173 工作台，7 案例 |
 
 Release：`https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases/tag/v0.1.0`
 发布版 EXE/portable 由 Actions 使用 Temurin 构建；本机 Oracle app-image 仅测试，未上传。
 
 ## 2. 唯一剩余
 
-**Qoder Site 静态展示（最后）**
-1. 用户切换 Qoder 账号到有 Sites 能力的账号，完全重启 Qoder；确认 Sites 面板可用。
-2. 用新 action/新 slug/干净目录创建站点（不复用旧账号 project/site/action）。
-3. 站点只展示内置程序 A/B/L2 预置快照 + GitHub/Release 链接；不上传、不运行 Java。
-4. `prepare_site` → `publish_site` → 验证 `published:true` 后才交付公网 URL。
+**Qoder Site 静态展示（已发布）**
+- 地址：https://traceboard-32843bp8pzz.qoder.zone
+- 访问：public，`published:true`。
+- 内容：原版介绍风格首页 + 内嵌工作台 `/app/`（与 5173 相同），7 个案例、请求体/缺口、树形链路、关键帧/慢放；无 collector/Java。
 
 当前账号不重试 Sites；私有 Pages 失败工作流已删除，不重加。
 
@@ -36,6 +36,7 @@ Release：`https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases/t
 - 私有/公开仓库链接现为 public，可放站点介绍。
 - 本机验证与发布验证分开记录；未上传 Oracle runtime，未伪造 published。
 - 仓库 `v0.1.0` tag 早于 LICENSE 提交；源码 HEAD 有 MIT。若要求 release tag 自带 LICENSE，可在新 tag 重新跑 workflow。
+- 最终 UI/请求体/缺口代码和站点改动仍在工作树，未自动提交/推送；发布前需按需提交。
 
 ## 4. 复跑命令
 

@@ -211,6 +211,32 @@ test("fetch inside a click: traceparent + X-TraceBoard-Click, response event; in
   assert.equal(ingestHeaders.get("X-TraceBoard-Click"), null);
 });
 
+test("fetch request body: query/body fields captured verbatim (local, no redaction)", async () => {
+  businessImpl = async () => ({ status: 200 });
+  click(el({ id: "btn-body" }));
+  const long = "x".repeat(2100);
+  await globalThis.fetch("/api/orders/1/remark?token=query-token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: "改约", operator: "demo-user", token: "raw-token", long })
+  });
+  await sleep(80);
+
+  const root = latestRoot("#btn-body");
+  assert.ok(root);
+  const fetchEvent = eventsForTrace(root.traceId).find((e) => e.kind === "fetch");
+  assert.ok(fetchEvent);
+  const values = Object.fromEntries(fetchEvent.values.map((v) => [v.name, v]));
+  assert.equal(values["query.token"].to, "query-token");
+  assert.equal(values["query.token"].redacted, false);
+  assert.equal(values["body.reason"].to, "改约");
+  assert.equal(values["body.operator"].to, "demo-user");
+  assert.equal(values["body.token"].to, "raw-token");
+  assert.equal(values["body.token"].redacted, false);
+  assert.equal(values["body.long"].truncated, true);
+  assert.equal(values["body.long"].to.length, 2048);
+});
+
 test("cross-origin fetch: event kept, headers not added", async () => {
   businessImpl = async () => ({ status: 204 });
   click(el({ id: "btn-cross" }));

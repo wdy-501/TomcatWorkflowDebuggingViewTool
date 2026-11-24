@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -57,6 +58,25 @@ public class OrderController {
         body.put("data", Boolean.valueOf(cancelled));
         HttpStatus status = cancelled ? HttpStatus.OK : HttpStatus.NOT_FOUND;
         return ResponseEntity.status(status).body(body);
+    }
+
+    /**
+     * Request-body demo: accepts a JSON object and confirms it. The frontend SDK records the
+     * request body fields on the fetch span; this endpoint never writes the database and does
+     * not echo the sensitive {@code token} field.
+     */
+    @PostMapping("/{id}/remark")
+    public ResponseEntity<Map<String, Object>> remark(@PathVariable long id,
+                                                      @RequestBody Map<String, Object> request) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("id", Long.valueOf(id));
+        data.put("reason", request.get("reason"));
+        data.put("operator", request.get("operator"));
+        data.put("priority", request.get("priority"));
+        data.put("accepted", Boolean.TRUE);
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("data", data);
+        return ResponseEntity.ok(body);
     }
 
     /**

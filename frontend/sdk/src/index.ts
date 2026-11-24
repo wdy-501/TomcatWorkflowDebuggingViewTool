@@ -69,6 +69,16 @@ interface EventReturn {
   value?: unknown;
 }
 
+/** Request query/body value captured on the fetch span (schema values[] item). */
+interface EventValue {
+  name: string;
+  kind: "param";
+  line: null;
+  to: unknown;
+  truncated: boolean;
+  redacted: boolean;
+}
+
 /** Manifest-derived source fact: relative POSIX file + 1-based original line. */
 interface SourceRef {
   file: string;
@@ -91,6 +101,7 @@ interface SpanEvent {
   durNs: number;
   status: FrontendStatus;
   return: EventReturn | null;
+  values?: EventValue[];
   confidence: "EXACT";
   flags: string[];
 }
@@ -122,6 +133,7 @@ interface RequestPlan {
   startPerfMs: number;
   nodeKey: string;
   requestInit: any;
+  values: EventValue[];
 }
 
 const EVENT_SCHEMA = "traceboard.event.v1";
@@ -131,6 +143,8 @@ const MAX_BATCH_LINES = 100;
 const MAX_BATCH_BYTES = 4 * 1024 * 1024;
 const MAX_KEEPALIVE_BYTES = 60 * 1024;
 const MANIFEST_URL = "/traceboard-manifest.json";
+const MAX_REQUEST_VALUE_CHARS = 2048;
+const MAX_REQUEST_VALUES = 50;
 
 /** Build-plugin manifest: function name -> {file, line}. Loaded once per page (fail-open). */
 let manifestSources: Map<string, SourceRef> | null = null;
@@ -280,6 +294,88 @@ function safeUrl(text: string, baseHref: string): URL | null {
   } catch {
     return null;
   }
+}
+
+function valueText(raw: unknown): string {
+  if (typeof raw === "string") {
+    return raw;
+  }
+  if (typeof raw === "number" || typeof raw === "boolean") {
+    return String(raw);
+  }
+  if (raw === null || raw === undefined) {
+    return "null";
+  }
+  try {
+    const json = JSON.stringify(raw);
+    return json === undefined ? String(raw) : json;
+  } catch {
+    return String(raw);
+  }
+}
+
+function requestValue(name: string, raw: unknown): EventValue {
+  const original = valueText(raw);
+  const truncated = original.length > MAX_REQUEST_VALUE_CHARS;
+  return {
+    name: truncate(name, 128),
+    kind: "param",
+    line: null,
+    to: truncated ? original.slice(0, MAX_REQUEST_VALUE_CHARS) : original,
+    truncated,
+    redacted: false
+  };
+}
+
+function collectRequestValues(parsed: URL, body: unknown): EventValue[] {
+  const values: EventValue[] = [];
+  const push = (name: string, raw: unknown): void => {
+    if (values.length >= MAX_REQUEST_VALUES) {
+      return;
+    }
+    values.push(requestValue(name, raw));
+  };
+  try {
+    parsed.searchParams.forEach((value, key) => push(`query.${key}`, value));
+  } catch {
+    // no query values
+  }
+  if (body === null || body === undefined) {
+    return values;
+  }
+  if (typeof body === "string") {
+    try {
+      const json = JSON.parse(body);
+      if (json !== null && typeof json === "object" && !Array.isArray(json)) {
+        for (const [key, value] of Object.entries(json)) {
+          push(`body.${key}`, value);
+        }
+        return values;
+      }
+      push("body", json);
+      return values;
+    } catch {
+      push("body", body);
+      return values;
+    }
+  }
+  const anyBody = body as any;
+  if (typeof anyBody.forEach === "function" && typeof anyBody.entries === "function") {
+    try {
+      anyBody.forEach((value: unknown, key: unknown) => push(`body.${String(key)}`, value));
+      return values;
+    } catch {
+      // fall through to the generic representation
+    }
+  }
+  if (typeof body === "object" && !Array.isArray(body)) {
+    for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+      push(`body.${key}`, value);
+    }
+    return values;
+  }
+  push("body", body);
+  return values;
 }
 
 function pathOf(urlText: string, baseHref: string): string {
@@ -715,7 +811,8 @@ class TraceBoardRuntime {
     endPerfMs: number,
     status: FrontendStatus,
     returnValue: EventReturn | null,
-    source: SourceRef | null = null
+    source: SourceRef | null = null,
+    values: EventValue[] | null = null
   ): void {
     if (op.rootEmitted) {
       this.drops += 1;
@@ -746,6 +843,9 @@ class TraceBoardRuntime {
     };
     if (source) {
       event.source = source;
+    }
+    if (values !== null && values.length > 0) {
+      event.values = values;
     }
     this.enqueue(event);
   }
@@ -964,13 +1064,15 @@ class TraceBoardRuntime {
     }
     op.pending += 1;
     this.pendingCount += 1;
+    const body = init && typeof init === "object" ? (init as any).body : null;
     return {
       op,
       spanId,
       parentSpanId,
       startPerfMs,
       nodeKey: `${method} ${parsed.pathname}`,
-      requestInit
+      requestInit,
+      values: collectRequestValues(parsed, body)
     };
   }
 
@@ -987,7 +1089,9 @@ class TraceBoardRuntime {
       plan.startPerfMs,
       perfNow(),
       ok ? "OK" : "THREW",
-      ok ? { type: "http", value: statusCode } : null
+      ok ? { type: "http", value: statusCode } : null,
+      null,
+      plan.values
     );
     this.afterChild(op);
   }
@@ -1021,7 +1125,7 @@ class TraceBoardRuntime {
       XHR.prototype.send = function (this: any, body?: any): any {
         let plan: (Omit<RequestPlan, "requestInit"> & { xhr: any }) | null = null;
         try {
-          plan = runtime.prepareXhr(this, states.get(this));
+          plan = runtime.prepareXhr(this, states.get(this), body);
         } catch {
           plan = null;
         }
@@ -1059,7 +1163,8 @@ class TraceBoardRuntime {
 
   private prepareXhr(
     xhr: any,
-    state: { method: string; url: string } | undefined
+    state: { method: string; url: string } | undefined,
+    body?: unknown
   ): (Omit<RequestPlan, "requestInit"> & { xhr: any }) | null {
     if (!state) {
       return null;
@@ -1091,7 +1196,8 @@ class TraceBoardRuntime {
       parentSpanId,
       startPerfMs,
       nodeKey: `${state.method} ${parsed.pathname}`,
-      xhr
+      xhr,
+      values: collectRequestValues(parsed, body)
     };
   }
 

@@ -58,6 +58,8 @@ public final class SpanContext {
     /** S5: preview-discount controller/service span keys (L1 values live on the service only). */
     static final String PREVIEW_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#previewDiscount";
     static final String PREVIEW_SERVICE_NODE_KEY = SERVICE_CLASS + "#previewDiscount";
+    /** Request-body demo controller span (no child service/mapper/sql spans). */
+    static final String REMARK_CONTROLLER_NODE_KEY = CONTROLLER_CLASS + "#remark";
     static final String MAPPER_CLASS = "com.example.shop.mapper.OrderMapper";
     static final String MAPPER_METHOD = "cancelById";
     static final String MAPPER_NODE_KEY = MAPPER_CLASS + "#" + MAPPER_METHOD;
@@ -234,6 +236,11 @@ public final class SpanContext {
      */
     public static void enterPreviewController(long enterNs) {
         enterController(enterNs, PREVIEW_CONTROLLER_NODE_KEY);
+    }
+
+    /** Request-body demo controller span; header join / LOST rules are unchanged. */
+    public static void enterRemarkController(long enterNs) {
+        enterController(enterNs, REMARK_CONTROLLER_NODE_KEY);
     }
 
     private static void enterController(long enterNs, String nodeKey) {
