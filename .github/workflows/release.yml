@@ -1,0 +1,95 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v0.1.0"
+        required: true
+        default: "v0.1.0"
+      title:
+        description: "Release title"
+        required: true
+        default: "TraceBoard 0.1.0 (local portable)"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Temurin 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build SDK
+        shell: pwsh
+        run: |
+          cd frontend/sdk
+          npm ci
+          npm run build
+
+      - name: Build workbench
+        shell: pwsh
+        run: |
+          cd workbench
+          npm ci
+          npm run build
+
+      - name: Build agent/collector/launcher (JDK21)
+        shell: pwsh
+        run: mvn -B -q -DskipTests package
+
+      - name: Setup Temurin 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: maven
+
+      - name: Build demo backend (JDK8)
+        shell: pwsh
+        run: |
+          cd demo/buggy-shop-boot-vue/backend
+          mvn -B -q -DskipTests package
+
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -OutDir dist/release
+          Get-ChildItem dist/release | Select-Object Name,Length
+
+      - name: Smoke test packaged static UI
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist/release/*.zip | Select-Object -First 1
+          if (-not $zip) { throw "portable zip missing" }
+          $check = Join-Path $env:RUNNER_TEMP "tb-check"
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $check
+          if (-not (Test-Path (Join-Path $check "workbench/index.html"))) { throw "workbench missing" }
+          if (-not (Test-Path (Join-Path $check "app/collector.jar"))) { throw "collector missing" }
+          if (-not (Test-Path (Join-Path $check "app/demo.jar"))) { throw "demo missing" }
+          Write-Host "portable package content OK"
+
+      - name: Create private Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ inputs.version }}"
+          $zip = (Get-ChildItem dist/release/*.zip | Select-Object -First 1).FullName
+          $sha = "$zip.sha256"
+          if (-not (Test-Path $sha)) { throw "sha256 missing" }
+          gh release create $version $zip $sha --title "${{ inputs.title }}" --notes-file docs/plans/RELEASE-NOTES-v0.1.0.md --target $env:GITHUB_SHA
