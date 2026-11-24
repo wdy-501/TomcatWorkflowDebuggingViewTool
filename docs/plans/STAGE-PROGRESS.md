@@ -1,6 +1,6 @@
 # TraceBoard 阶段进度看板（S0–S10）
 
-> 更新时间：2026-11-24｜最新已验收：S8（`s8-baseline`）｜下一阶段：S9
+> 更新时间：2026-11-24｜最新已验收：S8（`s8-baseline`）｜S9/S10：不做（用户确认仅内置展示）｜下一交付：GitHub Release + 最后 Qoder Site 静态展示
 > 最近门禁：S0–S6 **75 PASS** + S7 **35 PASS** + S8 **18 PASS**；三栈本地矩阵已落
 > 权威计划：[SOLO-PLAN.md](SOLO-PLAN.md)、[00-master-plan.md](00-master-plan.md)
 > 用途：目标暂停/恢复/换账号后，以本文件 + git tag/阶段备份为准，不依赖聊天上下文。
@@ -19,7 +19,7 @@
 | **S6** | L2 与异步：行级局部变量、字段写入、异步上下文、×3、预算/循环折叠 | ✅ 已验收 | tag `s6-baseline`；`docs/plans/stages/S6/`；archive `stage-S6-2026-11-24/`；75/75；行级 100→0/×3、ASYNC/no-debug/loop fold、perf 1.037 |
 | **S7** | 第二栈：选择 React18/Webpack5 前端（Tomcat 留 S8 候选） | ✅ 已验收 | tag `s7-baseline`；`docs/plans/stages/S7/`；archive `stage-S7-2026-11-24/`；75+35 PASS；A 7 span/B 3 span；基础级 |
 | **S8** | 第三栈/矩阵：Tomcat 8.5 + SSM WAR + 本地三栈矩阵 | ✅ 已验收 | tag `s8-baseline`；`docs/plans/stages/S8/`；archive `stage-S8-2026-11-24/`；18 PASS；A 4-span EXACT/0 行；B 零 fetch |
-| **S9** | 云端 Boot：上传/沙箱/DB/预览/保留/启动诊断 | ⛔ 阻塞（无容器/云运行时） | `docs/plans/stages/S9/BLOCKED.md`；需 Docker/WSL 或云凭证；不伪造云端 |
+| **S9** | 云端 Boot 上传/沙箱/DB/预览/保留/诊断 | ⏸ **不做**（用户确认无上传，仅内置展示） | 不实现；无用户 JAR/WAR、无云端执行 |
 | **S10** | 云端 WAR/发布：安全审查、发布/回滚/用户测试 | ⬜ 未开始 | 任务 #34；云端（后置） |
 
 ## 2. 多 agent 流水线执行记录
@@ -71,7 +71,7 @@
 1. ✅ 第三栈：Tomcat 8.5.60 + SSM WAR（Spring MVC/MyBatis/H2），同 FQCN 复用 agent 4 点插桩；agent/SDK/collector 零改动。
 2. ✅ 后端 A：cancel 200、4 span 全 EXACT、controller.parent=header span、SQL 0 行、订单 CREATED；preview 注入 SDK 后 A 7 事件/B 3 事件零 fetch。
 3. ✅ 门禁：S8 18/18；S0–S6 75/75；S7 35/35（E4 迁移允许 S8）。已知限制：JUL manager 开关、无截图、仅本机 8.5/JDK8。
-4. ✅ 矩阵 `S8/matrix.md` 三栈+云端未做；备份/tag `s8-baseline`；下一阶段 S9 云端（后置），不开始。
+4. ✅ 矩阵 `S8/matrix.md` 三栈+云端未做；备份/tag `s8-baseline`；S9/S10 按用户确认**不做**（仅内置展示）。
 
 ## 4.4 交付/发布状态（非阶段验收）
 
@@ -90,7 +90,7 @@
 1. 读本文件 + `SOLO-PLAN.md` 当前阶段行；不要依赖聊天记忆。
 2. 查 `git log --oneline --decorate -10` 与 `git tag` 确认最后验收点。
 3. 查 `docs/plans/stages/Sx/` 的 `progress.md`、`acceptance.md`、`test-report.md`。
-4. 未验收阶段（当前 S9）先完成剩余动作，不跨阶段；验收后才开始 Sx+1。
+4. 当前交付（GitHub Release / Qoder Site 静态展示）先完成剩余动作；S9/S10 不做。
 5. 每个阶段结束：更新本看板 + 新备份 + tag。
 
 ## 6. 关键入口

@@ -1,4 +1,7 @@
-# TraceBoard 新目标提示词 v2（修正版，2026-11-24）
+# TraceBoard 新目标提示词 v2.1（修正版，2026-11-24）
+
+> **范围修正（用户确认）：不需要用户上传，S9/S10 云端执行不做；只做本地内置程序 + 私有 GitHub 源码/Release + 最后 Qoder Site 静态展示内置程序。**
+> 本文件下方“S9 阻塞/不做云端”的旧措辞已按此范围修正；不要再规划上传/沙箱/云端运行。
 
 > 取代 v1（备份：`docs/plans/archive/goal-plan-v3-2026-11-24/`）。
 > 修正：**现在不做任何 Qoder Sites 部署**；先完成本地全流程 + GitHub 个人项目发布（源码与 Release），计划书完成后再提示用户切换账号部署站点。站点只展示内置程序，项目介绍放真实 GitHub 链接。
@@ -11,7 +14,7 @@
 先读权威文件：README.md、docs/plans/00-master-plan.md、docs/plans/SOLO-PLAN.md、docs/plans/STAGE-PROGRESS.md、docs/plans/SITE-DEPLOY.md、site/traceboard/ACCEPTANCE.md、docs/plans/stages/S9/BLOCKED.md、docs/plans/GOAL-PROMPT-NEXT.md；再查 git tag/log 和实际运行结果，不依赖聊天记忆。
 
 【启动动作】
-1. 查 TaskList；复用任务 #50「阶段进度 S0✅ S1✅ S2✅ S3✅ S4✅ S5✅ S6✅ S7✅ S8✅ S9⛔ S10⬜ ｜ 本地✅ GitHub⏳ 公网⏸（最后）」，保持 in_progress 并更新描述。若不存在，按这个 subject 重建；阶段栏必须始终可见。
+1. 查 TaskList；复用任务 #50「阶段进度 S0✅ S1✅ S2✅ S3✅ S4✅ S5✅ S6✅ S7✅ S8✅ ｜ S9–S10 不做（仅内置展示） ｜ 本地✅ GitHub源码✅ Release⏳ 公网⏸（最后）」，保持 in_progress 并更新描述。若不存在，按这个 subject 重建；阶段栏必须始终可见。
 2. 每个关键门禁/阶段后立即更新任务栏；不能只在聊天里报进度。
 3. 不重做 S0–S8；测试迁移需写清证据，不改变已验收行为。
 
@@ -21,7 +24,7 @@
 - Qoder Sites 只能做静态展示/控制面/轻量 Functions，不能执行 JAR/WAR，也不是强隔离沙箱。
 - 当前账号没有可用 Sites 能力；旧账号站点不可迁移。**现在不做任何站点部署**，不调用 prepare_site/publish_site，不伪造公网 URL。
 - GitHub 源码/Release、Windows EXE 尚未完成；GitHub 链接必须等真实可访问仓库 URL，禁止占位死链。
-- S9 云端 Boot 阻塞：无 Docker/WSL/云凭证；不得伪造。S10 未开始。
+- S9/S10 **不做**：用户确认不需要用户上传，不实现云端执行/沙箱；Qoder Sites 仅做内置程序展示。
 
 【执行顺序（必须按此顺序）】
 1. 本地全流程验收：保持现有本地站点、demo/collector/agent/门禁可复跑；确认 A/B/L2、回放、三栈矩阵、本地启动文档和截图。不得引入线上依赖。
@@ -45,7 +48,7 @@
 
 【边界/完成审计】
 只本机回环；无真实 secret/客户数据；不换 npm/Maven 镜像、不引 CDN/在线字体；公开仓库前查 git 历史无 secret；不改已验收行为。
-只有本地全流程、GitHub 源码/Release、计划书/备份都完成，且用户切换账号后站点发布有真实 published:true，才可完成站点交付；S9/S10 未做不得标记完成。先陈述已完成、未完成、下一步。
+只有本地全流程、GitHub 源码/Release、计划书/备份都完成，且用户切换账号后站点发布有真实 published:true，才可完成站点交付；S9/S10 明确不做，不作为完成条件。先陈述已完成、未完成、下一步。
 
 现在先做：确认 #50 → 复核本地验收 → 准备 GitHub/Release 交付；站点部署保持暂停，等最后用户切换账号后再做。
 ```
@@ -53,13 +56,13 @@
 ## 二、当前阶段栏（#50 已同步）
 
 ```text
-阶段进度 S0✅ S1✅ S2✅ S3✅ S4✅ S5✅ S6✅ S7✅ S8✅ S9⛔ S10⬜ ｜ 本地✅ GitHub⏳ 公网⏸（最后）
+阶段进度 S0✅ S1✅ S2✅ S3✅ S4✅ S5✅ S6✅ S7✅ S8✅ ｜ S9–S10 不做（仅内置展示） ｜ 本地✅ GitHub源码✅ Release⏳ 公网⏸（最后）
 ```
 
 ## 三、关键修正点
 
 1. **不再把站点发布当第一优先**；先本地 + GitHub，站点最后。
-2. **站点只做内置程序展示**；不上传、不运行 Java、不做 S9。
+2. **站点只做内置程序展示**；不上传、不运行 Java；S9/S10 不做。
 3. **GitHub 链接只在真实仓库可访问后加**；private 仓库不能放到公开站点致死链。
 4. **EXE 需先补 launcher ui + Temurin/jpackage**；没有完成前不宣称已有可运行 EXE。
 5. **旧账号站点不迁移**；用户切换账号后新建站点；当前账号不重试。

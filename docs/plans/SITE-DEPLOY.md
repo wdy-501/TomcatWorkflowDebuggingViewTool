@@ -66,12 +66,12 @@ scripts/package-windows.ps1
 
 - `prepare_site` 多次 `sites_unavailable`；`get_publish_status` 无 action/草稿；旧站点属于其他账号，账号隔离不可迁移。
 - 本地构建/设计工作台/网络均正常，问题在账号/Sites 能力。
-- **即使发布，Qoder Sites 也不能执行 Java**；S9 云端沙箱是独立后置能力。
+- **即使发布，Qoder Sites 也不能执行 Java**；S9/S10 云端执行已按用户确认**不做**。
 
 ## 5. 当前资产/未完成
 
 - 本地站与验收、S0–S8 tags/门禁、Pages 工作流（未提交）已完成。
-- 未完成：GitHub 远端/README/LICENSE/CI/Release、Windows EXE、Qoder 公网站点、S9/S10。
+- 未完成：GitHub Release、Qoder 公网站点；S9/S10 明确不做。
 - 工作树有站点方案/验收/工作流的未提交变更；按用户指示再提交，不自动推送。
 
 ## 6. 验收清单（比赛）
@@ -81,4 +81,4 @@ scripts/package-windows.ps1
 - [ ] Release 含源码 zip + Windows 包 + SHA256，干净 Windows 跑通
 - [ ] 站点介绍在真实 GitHub URL 可用后再加入，不外链死链
 - [ ] 最后账号切换后 Qoder Site 仅内置展示并 `published:true`（未做）
-- [ ] 明确边界：Sites 不执行 Java；S9/S10 未完成
+- [ ] 明确边界：Sites 不执行 Java；S9/S10 按用户确认不做
