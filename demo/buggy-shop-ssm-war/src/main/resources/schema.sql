@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+  id BIGINT PRIMARY KEY,
+  order_no VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  amount DOUBLE NOT NULL
+);

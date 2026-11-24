@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TraceBoard S8 · Tomcat 8.5 / SSM 案例 A/B</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
+    main { max-width: 760px; }
+    section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; margin: 16px 0; }
+    h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 0; }
+    .muted { color: #6b7280; font-size: 13px; }
+    input { padding: 7px 9px; width: 140px; }
+    button { padding: 8px 16px; margin-left: 8px; cursor: pointer; }
+    .ok { color: #047857; font-weight: 600; } .err { color: #b91c1c; font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>BuggyShop · S8 Tomcat 8.5 / SSM 案例 A / 案例 B</h1>
+  <p class="muted">WAR 部署在 Tomcat 8.5；未注入 SDK 时只验证后端，经由 launcher preview 注入 SDK 后验证 click/fetch/EXACT。</p>
+
+  <section>
+    <h2>案例 A · 取消订单（有请求，0 行）</h2>
+    <p class="muted">POST /traceboard-ssm/api/orders/1/cancel 返回 200，但 UPDATE 只匹配 PAID，种子订单是 CREATED，所以 0 行且状态不变。</p>
+    <p>订单 1 状态：<strong id="order-status">加载中…</strong></p>
+    <button id="btn-cancel" type="button">取消订单</button>
+    <p id="success-hint" class="ok" hidden>操作成功</p>
+    <p id="cancel-error" class="err" hidden></p>
+  </section>
+
+  <section>
+    <h2>案例 B · 纯前端校验（零请求）</h2>
+    <p class="muted">金额空/非数字/≤0 显示错误；有效显示通过；两个分支都不发 fetch/XHR。</p>
+    <label for="amount-b">金额</label>
+    <input id="amount-b" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 100">
+    <button id="btn-save-b" type="button" data-tb-fn="validateForm">保存</button>
+    <p id="b-error" class="err" hidden>金额必须大于 0</p>
+    <p id="b-pass" class="ok" hidden>校验通过（本案例不提交）</p>
+  </section>
+</main>
+<script>
+  var API = "/api/orders";
+  var sdk = window.TraceBoardSDK;
+
+  function effect(text) {
+    try {
+      if (window.TraceBoardSDK && typeof window.TraceBoardSDK.uiEffect === "function") {
+        window.TraceBoardSDK.uiEffect(text);
+      }
+    } catch (ignored) { /* fail-open */ }
+  }
+
+  async function loadOrderStatus() {
+    var status = document.getElementById("order-status");
+    try {
+      var response = await fetch(API);
+      var payload = await response.json();
+      var orders = payload && Array.isArray(payload.data) ? payload.data : [];
+      var one = orders.find(function (order) { return order && order.id === 1; });
+      status.textContent = one && one.status ? String(one.status) : "加载失败";
+    } catch (ignored) {
+      status.textContent = "加载失败";
+    }
+  }
+
+  document.getElementById("btn-cancel").addEventListener("click", async function () {
+    var hint = document.getElementById("success-hint");
+    var error = document.getElementById("cancel-error");
+    hint.hidden = true;
+    error.hidden = true;
+    try {
+      var response = await fetch(API + "/1/cancel", { method: "POST" });
+      if (!response.ok) {
+        error.textContent = "取消失败：HTTP " + response.status;
+        error.hidden = false;
+        return;
+      }
+      hint.hidden = false;
+      effect("操作成功");
+    } catch (cause) {
+      error.textContent = "取消失败：" + (cause && cause.message ? cause.message : String(cause));
+      error.hidden = false;
+    }
+  });
+
+  function rawValidateForm(value, onResult) {
+    var raw = String(value === undefined || value === null ? "" : value).trim();
+    var numeric = Number(raw);
+    if (raw.length === 0 || !Number.isFinite(numeric) || numeric <= 0) {
+      onResult(false, "金额必须大于 0");
+      effect("金额必须大于 0");
+      return false;
+    }
+    onResult(true, "校验通过（本案例不提交）");
+    effect("校验通过（本案例不提交）");
+    return true;
+  }
+
+  var wrappedValidateForm = null;
+
+  document.getElementById("btn-save-b").addEventListener("click", function () {
+    var error = document.getElementById("b-error");
+    var pass = document.getElementById("b-pass");
+    var onResult = function (ok, message) {
+      error.hidden = ok;
+      pass.hidden = !ok;
+      if (ok) { pass.textContent = message; } else { error.textContent = message; }
+    };
+    if (!wrappedValidateForm && window.TraceBoardSDK
+        && typeof window.TraceBoardSDK.wrapFn === "function") {
+      wrappedValidateForm = window.TraceBoardSDK.wrapFn("validateForm", rawValidateForm);
+    }
+    (wrappedValidateForm || rawValidateForm)(document.getElementById("amount-b").value, onResult);
+  });
+
+  loadOrderStatus();
+</script>
+</body>
+</html>
