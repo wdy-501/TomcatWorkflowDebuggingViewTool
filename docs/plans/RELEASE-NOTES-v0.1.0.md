@@ -17,6 +17,12 @@
 
 启动 collector 8601、demo 8080、workbench 5173；日志在 `work/logs/`。
 
+## 资产说明
+
+- `TraceBoard-0.1.0-win-x64-portable.zip`：需要本机 JDK8 + JDK21，运行 `Run-TraceBoard.cmd`。
+- `TraceBoard-0.1.0-win-x64-exe.zip`：自包含 Windows app-image，运行时使用包内 Temurin JRE8/21；解压后运行 `TraceBoard.exe`。
+- 两个 zip 各有 `.sha256`。
+
 ## 已验证
 
 - 包内 UI `/` 200；UI 的 `/api` 反代到 collector；demo `/api/orders` 返回 CREATED。
