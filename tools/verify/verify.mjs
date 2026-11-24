@@ -6577,7 +6577,7 @@ function checkS3Scope() {
   });
   const topLevel = readdirSync(abs(".")).filter((entry) => !entry.startsWith(".")).sort();
   checks.push({
-    ok: deepEqual(topLevel, ["README.md", "agent", "demo", "docs", "fixtures", "frontend", "pom.xml", "schema", "server", "tools", "work", "workbench"]),
+    ok: deepEqual(topLevel, ["README.md", "agent", "demo", "docs", "fixtures", "frontend", "pom.xml", "schema", "server", "site", "tools", "work", "workbench"]),
     label: "no stray top-level directories (no launcher/ideas/evidence leftovers)",
     detail: topLevel.join(","),
   });

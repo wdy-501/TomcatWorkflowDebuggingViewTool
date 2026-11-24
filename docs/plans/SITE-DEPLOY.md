@@ -52,7 +52,7 @@ scripts/package-windows.ps1
 
 ### 2.4 Pages 兜底
 
-`.github/workflows/pages.yml` 已就绪（静态 `site/traceboard/` → Pages），未提交/未推送；可在 GitHub 仓库启用，作为 Qoder Sites 之外的静态展示兜底；不得描述为 Java 运行环境。
+**已移除**：GitHub 仓库是 private，Pages 工作流 build 失败、deploy 跳过；不再触发。若以后改为 public 且账号支持 Pages，再单独加静态工作流；当前没有公网 URL，也不把私有仓库链接放到公开站点。
 
 ## 3. 最后一步：Qoder Site（等用户切换账号）
 

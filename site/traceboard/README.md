@@ -32,14 +32,7 @@
 - `dist/`：准备发布的静态产物（`webDirectory=dist`）
 - `traceboard-site.tar.gz`：可直接上传任意静态托管的便携包
 
-## GitHub Pages 备用发布
+## GitHub Pages
 
-`.github/workflows/pages.yml` 会把 `site/traceboard/` 的 `index.html` + `assets/` 发布到 GitHub Pages，
-无需 Node/Java，也不执行 collector。适合 Qoder Sites 账号未开通时的公网展示兜底。
-
-使用条件：仓库为公开（或账号支持私有 Pages）；推送后：
-1. 仓库 Settings → Pages → Build and deployment → Source 选 **GitHub Actions**。
-2. 运行 `pages` workflow。
-3. 地址：`https://<user>.github.io/<repo>/`。
-
-仍然只展示**预置快照**；Live Java 走本机/单租户 ECS；GitHub Release 单独放在 Releases，不提交二进制进 git。
+**已移除**：当前 GitHub 仓库是 private，Pages 工作流在私有仓库/账号能力下失败（deploy 跳过），不应继续触发。
+如果以后改为 public 并确认 Pages 可用，再单独加入静态工作流；当前没有公网 URL，也不把私有仓库链接放到公开站点。
