@@ -114,7 +114,12 @@ async function http(method, url, options = {}) {
 
 function start(label, exe, args, cwd, log) {
   const fd = openSync(log, "a");
-  const child = spawn(exe, args, { cwd, windowsHide: true, stdio: ["ignore", fd, fd] });
+  const child = spawn(exe, args, {
+    cwd,
+    windowsHide: true,
+    shell: process.platform === "win32" && /\.cmd$/i.test(exe),
+    stdio: ["ignore", fd, fd],
+  });
   const state = { label, child, fd, exited: false };
   child.on("exit", () => {
     state.exited = true;
