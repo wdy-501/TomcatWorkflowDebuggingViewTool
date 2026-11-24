@@ -250,12 +250,12 @@ async function e2eChecks(tmp) {
     const sql = spans.find((event) => event.kind === "sql");
     ok("S7-C8 SQL rowsAffected=0 and order still CREATED", sql?.sideEffects?.some((effect) => effect.rowsAffected === 0) && /"status":"CREATED"/.test((await http("GET", "http://127.0.0.1:5175/api/orders"))?.text ?? ""), "");
     ok("S7-C9 manifest probe 404 on dev server", (await http("GET", "http://127.0.0.1:5175/traceboard-manifest.json"))?.status === 404, "");
-    const fixture = readdirSync(path.join(REPO, "fixtures/s3-frontend-facts"))
-      .filter((name) => /case-b|frontend-only/i.test(name))
+    const fixtureDir = readdirSync(path.join(REPO, "fixtures/s3-frontend-facts"))
       .map((name) => path.join(REPO, "fixtures/s3-frontend-facts", name))
-      .find((file) => statSync(file).isFile());
+      .find((file) => /case-b|frontend-only/i.test(path.basename(file)) && statSync(file).isDirectory());
+    const fixture = fixtureDir ? path.join(fixtureDir, "events.ndjson") : null;
     let ingestStatus = null;
-    if (fixture) {
+    if (fixture && existsSync(fixture)) {
       const line = read(fixture).split(/\r?\n/).find(Boolean);
       if (line && JSON.parse(line).sessionId) {
         ingestStatus = (await http("POST", "http://127.0.0.1:5175/ingest/v1/events", {
