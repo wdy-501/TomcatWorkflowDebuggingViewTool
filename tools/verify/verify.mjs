@@ -5507,7 +5507,7 @@ function checkS3Cleanup() {
   const demoCode = demoCodeFiles.map((file) => stripComments(file.text)).join("\n");
   const fetchTargets = [];
   for (const file of demoCodeFiles) {
-    for (const match of stripComments(file.text).matchAll(/fetch\(\s*["'`]([^"'`]+)/g)) {
+    for (const match of stripComments(file.text).matchAll(/demoFetch\(\s*["'`]([^"'`]+)/g)) {
       fetchTargets.push({ rel: file.rel, target: match[1] });
     }
   }
@@ -5517,8 +5517,8 @@ function checkS3Cleanup() {
   checks.push({
     ok: fetchTargets.length > 0 && nonApiFetches.length === 0 && !directCollector && absoluteUrls === 0 &&
       demoCode.includes("initTraceBoard(") && demoCode.includes('"s_s3demo"') &&
-      demoCode.includes('ingestUrl: "/ingest"') && demoCode.includes('wrapFn("validateForm"'),
-    label: "demo frontend S3: SDK init (s_s3demo,/ingest), only /api business fetches, no direct :8601/absolute URL",
+      demoCode.includes("ingestUrl: demoIngestUrl()") && demoCode.includes('wrapFn("validateForm"'),
+    label: "demo frontend S3: SDK init (s_s3demo, document-relative ingest), only /api business fetches, no direct :8601/absolute URL",
     detail: `fetches=${[...new Set(fetchTargets.map((item) => item.target))].join(",")} directCollector=${directCollector} absoluteUrls=${absoluteUrls}`,
   });
   const demoPush = /new\s+EventSource|new\s+WebSocket|sendBeacon/.test(demoCode);
@@ -5694,9 +5694,9 @@ function checkS3Builds(validate) {
   const demoAppText = readFileSync(abs(`${S3_DEMO_FRONTEND_REL}/src/App.vue`), "utf8");
   const demoTraceboardText = readFileSync(abs(`${S3_DEMO_FRONTEND_REL}/src/traceboard.ts`), "utf8");
   checks.push({
-    ok: demoTraceboardText.includes("initTraceBoard(") && demoTraceboardText.includes('ingestUrl: "/ingest"') &&
+    ok: demoTraceboardText.includes("initTraceBoard(") && demoTraceboardText.includes("ingestUrl: demoIngestUrl()") &&
       demoTraceboardText.includes('sessionId: "s_s3demo"') && demoTraceboardText.includes('appName: "OrderEdit.vue"') &&
-      demoAppText.includes('fetch("/api/orders/1/cancel", { method: "POST" })') &&
+      demoAppText.includes('demoFetch("/api/orders/1/cancel", { method: "POST" })') &&
       demoAppText.includes('traceboard.uiEffect("操作成功")') && demoAppText.includes("showSuccess.value = true") &&
       demoAppText.includes("await loadOrders()") && demoAppText.includes('traceboard.wrapFn("validateForm"') &&
       demoAppText.includes("金额必须大于 0") && demoAppText.includes("校验通过（本案例不提交）") &&
@@ -11189,11 +11189,11 @@ async function checkS6B() {
   const reconcileBody = stripComments(reconcileBodyRaw);
   checks.push({
     ok: appSource.includes('id="btn-reconcile"') &&
-      appSource.includes('fetch("/api/orders/1/reconcile", { method: "POST" })') &&
+      appSource.includes('demoFetch("/api/orders/1/reconcile", { method: "POST" })') &&
       appSource.includes('id="btn-reconcile-async"') &&
-      appSource.includes('fetch("/api/orders/1/reconcile-async", { method: "POST" })') &&
+      appSource.includes('demoFetch("/api/orders/1/reconcile-async", { method: "POST" })') &&
       appSource.includes('id="btn-reconcile-loop"') &&
-      appSource.includes('fetch("/api/orders/1/reconcile-loop?times=100", { method: "POST" })') &&
+      appSource.includes('demoFetch("/api/orders/1/reconcile-loop?times=100", { method: "POST" })') &&
       reconcileBody.length > 0 && !reconcileBody.includes("loadOrders") &&
       !/wrapFn\("reconcile/.test(appSource) && appSource.includes(S6_BANNER),
     label: "demo frontend static: #btn-reconcile/#btn-reconcile-async/#btn-reconcile-loop -> plain POST handlers (no wrapFn), never loadOrders, canonical S6b banner present",

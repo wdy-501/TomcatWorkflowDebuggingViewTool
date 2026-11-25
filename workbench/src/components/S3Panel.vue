@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   CollectorHttpError,
   CollectorUnreachableError,
@@ -23,8 +23,17 @@ import {
   repoSourcePath,
 } from "../s4/labels";
 import { S6_BANNER } from "../s6/canonical";
+import { isStaticDemoMode, staticDemoCaseTraceId } from "../demo/static-demo";
+import {
+  beginDemoCase,
+  demoBridge,
+  setDemoResult,
+} from "../demo/demo-bridge";
+
+const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true });
 
 const s3 = useS3Store();
+const staticDemoMode = isStaticDemoMode();
 
 /** S4: selected graph node (detail drawer); selection is display-only. */
 const selectedSpanId = ref<string | null>(null);
@@ -42,6 +51,9 @@ const MAX_PLAY_FRAME_MS = 500;
 const DEFAULT_OBSERVE_MS = 1500;
 const MISSING = "未采集";
 const THREW_STATUS = "THREW";
+/** Demo case lookup: up to 12 silent refreshes, 400 ms apart (no polling). */
+const DEMO_CASE_RETRY_COUNT = 12;
+const DEMO_CASE_RETRY_INTERVAL_MS = 400;
 
 const sessionDraft = ref(s3.sessionId);
 const nowNs = ref(Date.now() * 1_000_000);
@@ -147,7 +159,12 @@ async function loadGraphFor(traceId: string): Promise<void> {
   }
 }
 
-async function refresh(): Promise<void> {
+/**
+ * @param silent demo-case lookup: never auto-select the first request when
+ * nothing is selected; an existing selection is kept and its graph reloaded.
+ * Manual refresh and polling keep the original "select first" behaviour.
+ */
+async function refresh(silent = false): Promise<void> {
   if (s3.refreshing) {
     return;
   }
@@ -159,13 +176,15 @@ async function refresh(): Promise<void> {
     const previous = s3.selectedTraceId;
     const kept =
       previous !== null && filtered.some((item) => item.traceId === previous);
-    const next = kept ? previous : (filtered[0]?.traceId ?? null);
+    const next = (kept || silent) ? previous : (filtered[0]?.traceId ?? null);
     if (next !== previous) {
       selectedSpanId.value = null;
     }
     if (next === null) {
-      s3.selectTrace(null);
-      s3.clearGraph();
+      if (!silent) {
+        s3.selectTrace(null);
+        s3.clearGraph();
+      }
     } else {
       s3.selectTrace(next);
       await loadGraphFor(next);
@@ -217,6 +236,149 @@ function selectTab(tab: S3Tab): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Demo bridge: locate the trace captured for the clicked demo control
+// ---------------------------------------------------------------------------
+
+/** Guards against overlapping lookups; only the latest case may publish. */
+let demoCaseSeq = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+/** Highest startedAtNs already known for a nodeKey (baseline before the click). */
+function demoBaselineNs(caseKey: string): number {
+  let baseline = 0;
+  for (const request of s3.requests) {
+    if (request.nodeKey === caseKey && request.startedAtNs > baseline) {
+      baseline = request.startedAtNs;
+    }
+  }
+  return baseline;
+}
+
+/** Newest known request for the nodeKey that started after the baseline. */
+function newestDemoRequest(
+  caseKey: string,
+  baselineNs: number
+): RequestSummary | null {
+  let newest: RequestSummary | null = null;
+  for (const request of s3.requests) {
+    if (request.nodeKey !== caseKey || request.startedAtNs <= baselineNs) {
+      continue;
+    }
+    if (newest === null || request.startedAtNs > newest.startedAtNs) {
+      newest = request;
+    }
+  }
+  return newest;
+}
+
+function showDemoTrace(traceId: string): void {
+  // Always show the "all" tab so the selected synthetic click/request is listed.
+  s3.setTab("all");
+  showBranches.value = true;
+  selectRequest(traceId);
+}
+
+/**
+ * Resolve a demo action to its trace.
+ * - Static demo: traceId comes from demo-data `cases`, never invented.
+ * - Live: bounded lookup (12 × 400 ms) of a silent refresh for a newer request
+ *   with nodeKey === caseKey; on timeout report it instead of faking a trace.
+ */
+async function selectDemoCase(caseKey: string, atMs?: number): Promise<void> {
+  const seq = ++demoCaseSeq;
+  beginDemoCase(caseKey);
+
+  if (staticDemoMode) {
+    const traceId = staticDemoCaseTraceId(caseKey);
+    if (traceId === null) {
+      setDemoResult({
+        caseKey,
+        status: "error",
+        static: true,
+        message: "预置数据中没有该案例的链路（demo-data 的 cases 缺少该按钮）",
+      });
+      return;
+    }
+    showDemoTrace(traceId);
+    setDemoResult({ caseKey, traceId, status: "resolved", static: true });
+    return;
+  }
+
+  // The bridge timestamp prevents a stale same-button trace from winning when
+  // the initial request list is empty or a session switch is still in flight.
+  const actionNs =
+    typeof atMs === "number" && Number.isFinite(atMs)
+      ? Math.round(atMs * 1_000_000)
+      : 0;
+  const baselineNs = Math.max(
+    demoBaselineNs(caseKey),
+    actionNs > 0 ? actionNs - 2_000_000_000 : 0
+  );
+  for (let attempt = 0; attempt < DEMO_CASE_RETRY_COUNT; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(DEMO_CASE_RETRY_INTERVAL_MS);
+    }
+    if (seq !== demoCaseSeq) {
+      return;
+    }
+    await refresh(true);
+    if (seq !== demoCaseSeq) {
+      return;
+    }
+    const found = newestDemoRequest(caseKey, baselineNs);
+    if (found !== null) {
+      showDemoTrace(found.traceId);
+      setDemoResult({
+        caseKey,
+        traceId: found.traceId,
+        status: "resolved",
+        static: false,
+      });
+      return;
+    }
+  }
+  if (seq === demoCaseSeq) {
+    setDemoResult({ caseKey, status: "timeout", static: false });
+  }
+}
+
+const stopDemoWatch = watch(
+  () => demoBridge.lastAction,
+  (action) => {
+    if (action !== null) {
+      void selectDemoCase(action.caseKey, action.atMs);
+    }
+  }
+);
+
+const stopActiveWatch = watch(
+  () => props.active,
+  (active) => {
+    if (staticDemoMode) {
+      return;
+    }
+    if (!active) {
+      stopPolling();
+      return;
+    }
+    void refresh();
+    if (s3.mode === "live") {
+      startPolling();
+    }
+  }
+);
+
+onBeforeUnmount(() => {
+  stopDemoWatch();
+  stopActiveWatch();
+});
+
 function pageVisible(): boolean {
   return document.visibilityState === "visible";
 }
@@ -256,7 +418,9 @@ function stopReplayTimer(): void {
 onMounted(async () => {
   void loadSessions();
   await refresh();
-  startPolling();
+  if (!staticDemoMode && props.active) {
+    startPolling();
+  }
   clockTimer = window.setInterval(() => {
     nowNs.value = Date.now() * 1_000_000;
   }, CLOCK_INTERVAL_MS);
@@ -875,7 +1039,9 @@ function enterLive(): void {
   s3.setMode("live");
   s3.setSlider(maxRel.value);
   void refresh();
-  startPolling();
+  if (!staticDemoMode && props.active) {
+    startPolling();
+  }
 }
 
 function onSliderInput(event: Event): void {
@@ -1209,12 +1375,13 @@ function rootLabel(request: RequestSummary): string {
         type="button"
         class="s3-controls__button"
         :disabled="s3.refreshing"
-        @click="refresh"
+        @click="refresh()"
       >
         {{ s3.refreshing ? "刷新中…" : "刷新" }}
       </button>
       <span class="s3-controls__hint">
-        默认会话 s_s3demo · 输入后回车切换 · 每 5 秒刷新（非实时）
+        默认会话 s_s3demo · 输入后回车切换 ·
+        {{ staticDemoMode ? "静态快照 · 不自动请求" : "每 5 秒刷新（非实时）" }}
       </span>
     </div>
     <p class="s3-controls__status">

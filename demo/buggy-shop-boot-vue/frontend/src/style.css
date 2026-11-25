@@ -136,6 +136,17 @@ code {
   padding: 6px 14px;
 }
 
+/* Public static demo (`?static=1`): honest, compact banner for canned responses. */
+.static-banner {
+  background: #fff7e6;
+  border: 1px solid #f0c36d;
+  border-radius: 6px;
+  color: #7a5a00;
+  font-size: 12px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+}
+
 /* S3 case B (pure front-end validation) */
 .hint {
   color: var(--muted);

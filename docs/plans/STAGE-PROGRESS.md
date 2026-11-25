@@ -100,6 +100,16 @@
 - 已切换到有 Sites 能力的账号并发布：`https://traceboard-32843bp8pzz.qoder.zone`，`published:true`，访问策略 public。站点为原版介绍风格首页 + 内嵌 5173 工作台 `/app/`（7 案例、请求体、缺口、树形链路、关键帧/慢放），public。
 - 源码/站点改动仍在工作树，未自动提交/推送；发布前按需提交。
 
+## 4.7 5173 内置交互示例（2026-11-25）
+
+- 5173 成为唯一入口：顶部「交互示例 / 追踪台」，默认交互示例；Demo 构建到 `workbench/public/demo`，由 `/demo/` 提供。
+- 本地代理：`/demo/api` → 8080，`/demo/ingest` → 8601；10 个按钮均生成真实 trace，工作台自动定位。
+- 公网：`/app/demo/index.html?static=1`，浏览器内预置响应 + `demo-data.js` 的 10 个 cases；不产生 `/api`/`/ingest` 外发请求，不伪造动态 trace。
+- 构建：`node scripts/build-site.mjs`（demo → workbench dist-site → app + 版本化 demo-data）；Pages workflow 已接入。
+- 打包：`workbench/dist-packaged` + `.env.packaged`；`package-windows.ps1`/`package-exe.ps1` 删除并断言无 `workbench/demo`。
+- 验收：本地 10/10 自动定位；公网 10/10 预置链路；打包版无示例页签；静态页 0 次接口请求。
+- 5174 不再是产品运行必需端口（仅旧测试/可选 dev server）。
+
 ## 5. 恢复方法（目标暂停后）
 
 1. 读本文件 + `SOLO-PLAN.md` 当前阶段行；不要依赖聊天记忆。

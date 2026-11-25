@@ -4,11 +4,22 @@
  * local collector. The regular dev workbench never defines the global, so this
  * module is a no-op there.
  */
+/**
+ * One pre-recorded demo case: the button selector (nodeKey) of the click and
+ * the trace captured for it. Public data ships this map; local dev does not.
+ */
+export interface StaticDemoCase {
+  traceId: string;
+  label?: string;
+  action?: string;
+}
+
 interface StaticDemoData {
   sessions: unknown;
   requests: unknown;
   graphs: Record<string, unknown>;
   replays?: Record<string, unknown>;
+  cases?: Record<string, StaticDemoCase>;
 }
 
 declare global {
@@ -27,6 +38,21 @@ function jsonResponse(payload: unknown, status = 200): Response {
 function sessionIdOf(path: string): string | null {
   const match = /^\/api\/v1\/sessions\/([^/]+)/.exec(path);
   return match === null ? null : decodeURIComponent(match[1]);
+}
+
+export function isStaticDemoMode(): boolean {
+  return window.__TRACEBOARD_STATIC_DEMO__ !== undefined;
+}
+
+/**
+ * Trace id pre-recorded for a demo case, or null when the case is missing.
+ * Missing means "not captured", never a placeholder id.
+ */
+export function staticDemoCaseTraceId(caseKey: string): string | null {
+  const entry = window.__TRACEBOARD_STATIC_DEMO__?.cases?.[caseKey];
+  return typeof entry?.traceId === "string" && entry.traceId.length > 0
+    ? entry.traceId
+    : null;
 }
 
 export function installStaticDemo(): void {

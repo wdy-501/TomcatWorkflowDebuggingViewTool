@@ -6,6 +6,87 @@
 - 仍**没有** S9–S10：云端上传/沙箱/DB/发布；Tomcat 仅本机 8.5/JDK8 基础，未做 9/10.1、未做云端 WAR。
 - 案例 A/B/L1/S6/S7 行为不变；S8 复用现有 agent 同 FQCN，不新增采集字段。
 
+## 从这里开始
+
+### A. 先看内置示例
+
+**在线看最新版（推荐先看）**：<https://wdy-501.github.io/TomcatWorkflowDebuggingViewTool/>
+
+公网没有后端，按钮返回预置响应并跳到对应预置链路；真实请求需本地运行。
+
+**本地跑最新 5173 集成**：
+
+1. 在 GitHub 页面点 `Code → Download ZIP` 下载源码，或 `git clone`；
+2. 按下面的「构建」与「本地启动」启动 collector、demo 后端和 workbench；
+3. 打开 **http://localhost:5173**，默认进入「交互示例」；切到「追踪台」查看树、详情、变量和回放。
+
+**想要现成 Windows 包**：到 [Releases](https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases/latest) 下载最新包。当前 `v0.1.0` 是历史打包版，可能不包含本次 5173 集成；需要最新集成包时，请从源码构建或等下一次 Release。Release 包内的 collector/agent/workbench 仍可用于“调试自己的项目”的后端采集。
+
+### B. 调试你自己的项目
+
+> **先说明边界**：这是 v0.1 本地演示版，不是“给任意 Java 方法自动插桩”的通用调试器。collector、workbench、SDK 和采集协议可以复用；**agent 目前只插桩 demo 的固定类/方法**（`com.example.shop...`）。
+
+| 你想看的事实 | 现在能否直接复用 | 你需要做什么 |
+|---|---|---|
+| 自己前端的点击、fetch/XHR、请求体字段 | 可以 | 引入 SDK，把 `/ingest` 代理到 8601 |
+| 自己后端的 Controller / Service / Mapper / SQL | 需要改 agent | 修改 agent 目标类和 advice，重新构建 |
+| 自己方法的行级局部变量 | 不可以 | 当前只有 demo 的 L2 探针 |
+| 回放、详情、树形链路、缺口展示 | 可以 | 启动 workbench，输入同一个 session |
+
+最小接入顺序：
+
+```text
+collector(8601) → 你的后端 + agent → 你的前端 + SDK → workbench(5173)
+```
+
+1. **启动 collector**（JDK 21）
+   ```bash
+   java -jar app/collector.jar
+   ```
+2. **给你的后端挂 agent**（当前验证 JDK 8；`-javaagent`、`-D` 必须在 `-jar` 前）
+   ```bash
+   java -javaagent:app/agent.jar \
+     -Dtraceboard.ingestUrl=http://127.0.0.1:8601/ingest/v1/events \
+     -Dtraceboard.sessionId=s_myapp \
+     -jar your-app.jar
+   ```
+   session ID 必须匹配 `s_[A-Za-z0-9_-]+`，并且前后端要一致。
+3. **给前端加 SDK**（IIFE 示例）
+   ```html
+   <script>
+     window.__TRACEBOARD_CONFIG__ = {
+       sessionId: "s_myapp",
+       ingestUrl: "/ingest",
+       appName: "my-app",
+       observeMs: 1500
+     };
+   </script>
+   <script src="/traceboard-sdk.iife.js"></script>
+   ```
+   SDK IIFE 在源码包 `frontend/sdk/dist/traceboard-sdk.iife.js`（先执行 `npm ci && npm run build`）。
+   把 dev server 的 `/ingest` 反向代理到 `http://127.0.0.1:8601`；不要用 CORS 直连 collector，`changeOrigin:false` 才能保留关联头。
+4. **启动并打开工作台**（Release 包内，JDK 21）：
+   ```bash
+   java -jar app/launcher.jar ui \
+     --dir workbench --port 5173 \
+     --collector http://127.0.0.1:8601
+   ```
+   打开 `http://localhost:5173` →「追踪台」→ 输入 `s_myapp` → 查看点击、请求、后端方法和缺口。
+5. **验证**：
+   ```bash
+   curl http://127.0.0.1:8601/actuator/health
+   curl http://127.0.0.1:8601/api/v1/sessions/s_myapp/agent
+   ```
+
+**要看到自己的后端 Controller/Service/SQL**，需要 fork 后修改 agent 的插桩点：
+
+- `agent/src/main/java/io/traceboard/agent/TraceAgent.java`：目标类名、方法匹配；
+- `SpanContext.java`：nodeKey、Mapper/SQL 过滤条件；
+- `MapperAdvice` / `SqlAdvice`：你的 MyBatis 方法或 SQL 匹配；
+- 重新执行 `JAVA_HOME=<JDK21> mvn -B -q -DskipTests package -pl agent -am`，重启应用。
+
+完整步骤、前端 Vite/Webpack 代理示例、诊断表和限制见：[调试自己的项目指南](docs/guides/use-your-project.md)。
+
 ## 已真实可用（S0–S6，均可复跑）
 
 - **Java agent（JDK8 目标，major 52）**：Byte Buddy 插桩 demo 的 `OrderController#cancel`、`OrderService#cancel`、MyBatis `OrderMapper#cancelById`、`PreparedStatementHandler#update`，形成 controller→service→mapper→sql 4-span 链；SQL `rowsAffected=0`、transaction `UNKNOWN`；异步有界发送、fail-open。
@@ -88,13 +169,14 @@ JAVA_HOME="C:/Program Files/Java/jdk-21" mvn -B -q -DskipTests package
   -Dtraceboard.sessionId=s_s4demo \
   -jar "demo/buggy-shop-boot-vue/backend/target/demo-shop-backend-0.1.0-SNAPSHOT.jar"
 
-# 3) demo 前端（5174）与 workbench（5173）
-(cd "demo/buggy-shop-boot-vue/frontend" && npm run dev)
+# 3) 首次运行先安装 demo 前端依赖（predev 构建 /demo/ 需要）
+(cd "demo/buggy-shop-boot-vue/frontend" && npm ci)
+# 4) workbench（5173；predev 会把 demo 构建到 /demo/）
 (cd "workbench" && npm run dev)
 ```
 
-浏览器打开 `http://localhost:5174`：案例 A 取消成功但订单仍 `CREATED`；案例 B 金额≤0 显示错误且零请求。
-工作台 `http://localhost:5173` 输入会话（如 `s_s4demo`/`s_s4detail`），查看请求、节点、详情、×N、缺口、时间轴。
+浏览器打开 `http://localhost:5173`：默认进入「交互示例」页签，示例按钮经 `/demo/api` → 8080、`/demo/ingest` → 8601；动作完成后自动定位链路。
+切到「追踪台」可查看请求、节点、详情、×N、缺口、时间轴。5174 不再需要启动。
 
 ## 本地接入（S4 launcher）
 
@@ -174,7 +256,7 @@ S7 React18/Webpack5：独立 35 项（A 构建/产物、B 静态契约、C 代�
 ## 地址与限制
 
 - collector/launcher preview 只绑 `127.0.0.1`；浏览器入口用 `localhost`（Vite 可能绑 `[::1]`）。
-- 端口：collector 8601、demo 8080、workbench 5173、Vue demo 前端 5174、React demo 5175、Tomcat SSM 8081、preview 8602、Vite preview 4173/4174、静态测试 18080。
+- 端口：collector 8601、demo 8080、workbench 5173（内含交互示例 `/demo/`）、React demo 5175、Tomcat SSM 8081、preview 8602、Vite preview 4173/4174、静态测试 18080。Vue demo 5174 仅旧测试/可选，不再是运行必需端口。
 - 代理仅在 dev 生效；静态 dist 无代理。H2/collector 无持久化，重启清空。
 - S5 demo 前后端需同一会话：demo 前端 SDK 使用 `s_s3demo`，后端 agent 也必须用 `-Dtraceboard.sessionId=s_s3demo` 才能 EXACT 关联。
 - git 分支 `master`；无 secret/真实客户数据；不暴露到非回环网络。

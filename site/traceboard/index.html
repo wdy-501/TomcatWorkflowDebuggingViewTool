@@ -42,27 +42,27 @@
         <div><strong>75</strong><span>S0–S6 门禁</span></div>
         <div><strong>35</strong><span>S7 React 门禁</span></div>
         <div><strong>18</strong><span>S8 Tomcat 门禁</span></div>
-        <div><strong>7</strong><span>内置案例</span></div>
+        <div><strong>10</strong><span>内置案例</span></div>
       </div>
     </section>
 
     <section class="interactive" id="demo" aria-labelledby="demo-title">
       <div class="section-head">
         <div><p class="eyebrow">INTERACTIVE WORKBENCH</p><h2 id="demo-title">直接体验工作台。</h2></div>
-        <p>下面内嵌的是与本地 5173 相同的 TraceBoard 工作台静态版。切换 7 个内置案例、点击树节点、查看变量/请求体/flags，并拖动时间轴慢放。</p>
+        <p>下面内嵌的是与本地 5173 相同的 TraceBoard 工作台静态版，默认进入“交互示例”页签，内置 10 个可点击动作。公网版按钮返回浏览器内预置响应，追踪台展示对应的预置链路；真实请求需要在本地启动后端与采集器。</p>
       </div>
       <div class="interactive-shell">
         <div class="interactive-bar">
-          <span>静态预置快照 · 7 个案例 · 无 Java / 无上传</span>
-          <a href="./app/" target="_blank" rel="noopener">全屏打开工作台 ↗</a>
+          <span>静态预置快照 · 10 个动作 · 预置响应 · 无 Java / 无上传</span>
+          <a href="./app/?v=20261125c" target="_blank" rel="noopener">全屏打开工作台 ↗</a>
         </div>
         <iframe
-          src="./app/"
+          src="./app/?v=20261125c"
           title="TraceBoard 工作台交互示例"
           loading="eager"
         ></iframe>
       </div>
-      <p class="interactive-note">若内嵌区域滚动不便，请使用“全屏打开工作台”。页面数据来自预置事件快照，不是实时 collector。</p>
+      <p class="interactive-note">若内嵌区域滚动不便，请使用“全屏打开工作台”。公网版使用浏览器内预置响应与对应的预置快照，不是实时 collector；真实请求需要本地后端。</p>
     </section>
 
     <section class="matrix" id="matrix" aria-labelledby="matrix-title">

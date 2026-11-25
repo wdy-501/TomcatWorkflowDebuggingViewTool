@@ -1,9 +1,14 @@
 target/
 node_modules/
 dist/
+!site/traceboard/dist/
+!site/traceboard/dist/**
 logs/
 work/
 data/
 *.log
 .env
 .traceboard/
+workbench/public/demo/
+workbench/dist-site/
+workbench/dist-packaged/

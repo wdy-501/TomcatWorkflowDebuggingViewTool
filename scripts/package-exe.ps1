@@ -20,7 +20,7 @@ foreach ($file in @(
   "server\collector\target\traceboard-collector-0.1.0-SNAPSHOT.jar",
   "server\launcher\target\traceboard-launcher-0.1.0-SNAPSHOT.jar",
   "demo\buggy-shop-boot-vue\backend\target\demo-shop-backend-0.1.0-SNAPSHOT.jar",
-  "workbench\dist\index.html"
+  "workbench\dist-packaged\index.html"
 )) {
   if (-not (Test-Path -LiteralPath (Join-Path $Repo $file))) { throw "Build artifact missing: $file" }
 }
@@ -49,7 +49,10 @@ Copy-Item -LiteralPath (Join-Path $Repo "agent\target\traceboard-agent-0.1.0-SNA
 Copy-Item -LiteralPath (Join-Path $Repo "server\collector\target\traceboard-collector-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $App "app\collector.jar")
 Copy-Item -LiteralPath (Join-Path $Repo "server\launcher\target\traceboard-launcher-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $App "app\launcher.jar")
 Copy-Item -LiteralPath (Join-Path $Repo "demo\buggy-shop-boot-vue\backend\target\demo-shop-backend-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $App "app\demo.jar")
-Copy-Item -Path (Join-Path $Repo "workbench\dist\*") -Destination (Join-Path $App "workbench") -Recurse -Force
+Copy-Item -Path (Join-Path $Repo "workbench\dist-packaged\*") -Destination (Join-Path $App "workbench") -Recurse -Force
+$demoDir = Join-Path $App "workbench\demo"
+if (Test-Path -LiteralPath $demoDir) { Remove-Item -LiteralPath $demoDir -Recurse -Force }
+if (Test-Path -LiteralPath $demoDir) { throw "Packaging error: workbench demo assets must not be included" }
 
 if (-not [string]::IsNullOrWhiteSpace($BundleJre8)) {
   if (-not (Test-Path -LiteralPath (Join-Path $BundleJre8 "bin\java.exe"))) { throw "BundleJre8 is not a JRE/JDK: $BundleJre8" }

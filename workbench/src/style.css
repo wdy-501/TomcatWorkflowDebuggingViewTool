@@ -86,6 +86,125 @@ code {
   font-size: 12px;
 }
 
+/* Top-level view tabs: 交互示例 / 追踪台 */
+.app-tabs {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 4px;
+}
+
+.app-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 18px;
+}
+
+.app-tab:hover {
+  color: var(--text);
+}
+
+.app-tab--active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* Interactive demo tab (BuggyShop iframe + status strip) */
+.demo-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px 16px;
+}
+
+.demo-panel__header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.demo-panel__title {
+  font-size: 17px;
+  margin: 0;
+}
+
+.demo-panel__note {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin: 6px 0 0;
+  max-width: 960px;
+}
+
+.demo-panel__link {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 4px 10px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.demo-panel__link:hover {
+  border-color: var(--accent);
+}
+
+.demo-panel__notice {
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.45);
+  border-radius: 6px;
+  color: #e3b341;
+  font-size: 12px;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+}
+
+.demo-panel__status {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.demo-panel__status--pending {
+  color: var(--accent);
+}
+
+.demo-panel__status--ok {
+  color: var(--ok);
+}
+
+.demo-panel__status--error {
+  color: #e3b341;
+}
+
+.demo-panel__open-board {
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.demo-panel__frame {
+  background: #fff;
+  border: 0;
+  border-radius: 6px;
+  display: block;
+  height: calc(100vh - 120px);
+  min-height: 900px;
+  width: 100%;
+}
+
 /* Secondary (collapsed) panels */
 .secondary-panel {
   background: var(--surface);

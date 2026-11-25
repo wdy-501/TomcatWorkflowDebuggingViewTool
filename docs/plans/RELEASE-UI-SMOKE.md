@@ -7,7 +7,7 @@
 
 - 新增 `server/launcher/src/main/java/io/traceboard/launcher/UiCommand.java`
 - `Args` 支持 `--dir`；`Launcher` 增加 `ui` 子命令
-- 用法：`java -jar traceboard-launcher-...jar ui --dir workbench/dist [--port 5173]`
+- 用法（打包版，无交互示例）：`java -jar traceboard-launcher-...jar ui --dir workbench/dist-packaged [--port 5173]`
 - 仅绑 `127.0.0.1`；GET/HEAD；无目录列表；缺失的静态资源 404；无扩展名路由回退 index.html；路径越界 404；其他方法 405。
 
 ## 验证

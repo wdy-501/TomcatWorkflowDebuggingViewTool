@@ -45,12 +45,12 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build workbench
+      - name: Build workbench (packaged, no demo)
         shell: pwsh
         run: |
           cd workbench
           npm ci
-          npm run build
+          npm run build:packaged
 
       - name: Build agent/collector/launcher (JDK21)
         shell: pwsh
@@ -105,6 +105,7 @@ jobs:
           $check = Join-Path $env:RUNNER_TEMP "tb-check"
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $check
           if (-not (Test-Path (Join-Path $check "workbench/index.html"))) { throw "workbench missing" }
+          if (Test-Path (Join-Path $check "workbench/demo")) { throw "packaged workbench must not include demo assets" }
           if (-not (Test-Path (Join-Path $check "app/collector.jar"))) { throw "collector missing" }
           if (-not (Test-Path (Join-Path $check "app/demo.jar"))) { throw "demo missing" }
           Write-Host "portable package content OK"

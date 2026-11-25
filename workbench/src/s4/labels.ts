@@ -8,9 +8,9 @@ const CONTROL_NAMES: Record<string, string> = {
   "#btn-no-debug": "无调试信息",
   "#btn-unknown-cancel": "未知订单取消",
   "#btn-unjoined": "未接入后端请求",
-  "#btn-reconcile": "逐次对账",
-  "#btn-reconcile-async": "异步对账",
-  "#btn-reconcile-loop": "循环折叠",
+  "#btn-reconcile": "重算金额",
+  "#btn-reconcile-async": "异步重算",
+  "#btn-reconcile-loop": "循环重算",
   "#app": "应用根节点",
 };
 

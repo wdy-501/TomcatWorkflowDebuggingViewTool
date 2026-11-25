@@ -14,21 +14,29 @@ foreach ($file in @(
   "server\collector\target\traceboard-collector-0.1.0-SNAPSHOT.jar",
   "server\launcher\target\traceboard-launcher-0.1.0-SNAPSHOT.jar",
   "demo\buggy-shop-boot-vue\backend\target\demo-shop-backend-0.1.0-SNAPSHOT.jar",
-  "workbench\dist\index.html"
+  "workbench\dist-packaged\index.html"
 )) {
   if (-not (Test-Path -LiteralPath (Join-Path $Repo $file))) { throw "Build artifact missing: $file" }
 }
 
 if (Test-Path -LiteralPath $Stage) { Remove-Item -LiteralPath $Stage -Recurse -Force }
-New-Item -ItemType Directory -Force -Path (Join-Path $Stage "app"), (Join-Path $Stage "workbench"), (Join-Path $Stage "site") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Stage "app"), (Join-Path $Stage "workbench") | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $Repo "agent\target\traceboard-agent-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\agent.jar")
 Copy-Item -LiteralPath (Join-Path $Repo "server\collector\target\traceboard-collector-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\collector.jar")
 Copy-Item -LiteralPath (Join-Path $Repo "server\launcher\target\traceboard-launcher-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\launcher.jar")
 Copy-Item -LiteralPath (Join-Path $Repo "demo\buggy-shop-boot-vue\backend\target\demo-shop-backend-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\demo.jar")
-Copy-Item -Path (Join-Path $Repo "workbench\dist\*") -Destination (Join-Path $Stage "workbench") -Recurse -Force
-if (Test-Path -LiteralPath (Join-Path $Repo "site\traceboard\dist")) {
-  Copy-Item -Path (Join-Path $Repo "site\traceboard\dist\*") -Destination (Join-Path $Stage "site") -Recurse -Force
+Copy-Item -Path (Join-Path $Repo "workbench\dist-packaged\*") -Destination (Join-Path $Stage "workbench") -Recurse -Force
+
+# The interactive demo is intentionally excluded from the Windows package.
+$demoDir = Join-Path $Stage "workbench\demo"
+if (Test-Path -LiteralPath $demoDir) { Remove-Item -LiteralPath $demoDir -Recurse -Force }
+if (Test-Path -LiteralPath $demoDir) {
+  throw "Packaging error: workbench demo assets must not be included ($demoDir)"
+}
+$bundledJs = Get-ChildItem -Path (Join-Path $Repo "workbench\dist-packaged\assets\*.js") -ErrorAction SilentlyContinue
+if ($bundledJs -and (Select-String -Path $bundledJs.FullName -Pattern "app-tab-demo" -Quiet)) {
+  throw "Packaging error: packaged workbench still contains the interactive demo tab"
 }
 Copy-Item -LiteralPath (Join-Path $Repo "scripts\run-traceboard.ps1") -Destination $Stage
 Copy-Item -LiteralPath (Join-Path $Repo "scripts\stop-traceboard.ps1") -Destination $Stage

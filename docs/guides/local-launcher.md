@@ -1,5 +1,7 @@
 # 本地接入指南（S4）：启动器 / 预览注入 / 诊断 / 节点详情
 
+> 2026-11-25 起：交互示例已并入 5173（`/demo/`），产品启动不再需要 Vue demo 5174。下文的 5174 仅用于旧测试/可选维护；当前主路径是 5173 + 8080 + 8601。
+
 > 适用：TraceBoard S4（本地 MVP）｜权威契约：`docs/contracts/api.v1.md` §2.4/§8.2/§10、`docs/contracts/transport.v1.md` §6.5/§6.6、`docs/plans/stages/S4/s4-plan.md`
 > 口径：以 **`docs/plans/stages/S4/dispatch-amendment-01.md`（S4-AMD-01，binding）** 为准；该文件日期栏 2026-11-26 为笔误，按 2026-11-23 生效处理。
 > 目标读者：第一次接触本仓库的开发者（T11：4 类接入在 80% 情况下一次成功）。

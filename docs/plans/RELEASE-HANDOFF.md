@@ -21,14 +21,16 @@
 Release：`https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/releases/tag/v0.1.0`
 发布版 EXE/portable 由 Actions 使用 Temurin 构建；本机 Oracle app-image 仅测试，未上传。
 
-## 2. 唯一剩余
+## 2. 公网状态
 
-**Qoder Site 静态展示（已发布）**
+**GitHub Pages（公开主入口，无每日额度）**
+- 地址：https://wdy-501.github.io/TomcatWorkflowDebuggingViewTool/
+- 构建：`.github/workflows/pages.yml` → `node scripts/build-site.mjs`。
+- 内容：原版介绍风格首页 + 内嵌工作台 `/app/`（与 5173 相同），默认交互示例；10 个案例、请求体/缺口、树形链路、关键帧/慢放；公网按钮返回预置响应并跳到对应预置链路。
+
+**Qoder Site（备用）**
 - 地址：https://traceboard-32843bp8pzz.qoder.zone
-- 访问：public，`published:true`。
-- 内容：原版介绍风格首页 + 内嵌工作台 `/app/`（与 5173 相同），7 个案例、请求体/缺口、树形链路、关键帧/慢放；无 collector/Java。
-
-当前账号不重试 Sites；私有 Pages 失败工作流已删除，不重加。
+- 当前 `access_mode=private`，公网 401；每日额度很小，不作为公开主入口。
 
 ## 3. 边界
 

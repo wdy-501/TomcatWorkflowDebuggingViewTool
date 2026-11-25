@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { demoFetch } from "./api-base";
+import { postDemoAction } from "./bridge";
+import { isStaticSim } from "./static-sim";
 import { traceboard } from "./traceboard";
 
 interface Order {
@@ -12,6 +15,9 @@ interface Order {
 interface OrdersEnvelope {
   data?: Order[];
 }
+
+// Public static demo (`?static=1`): canned responses via static-sim.ts, no collector.
+const staticDemo = isStaticSim();
 
 const orders = ref<Order[]>([]);
 const ordersError = ref<string | null>(null);
@@ -73,7 +79,7 @@ const reconcileLoopPending = ref(false);
 
 async function loadOrders(): Promise<void> {
   try {
-    const response = await fetch("/api/orders");
+    const response = await demoFetch("/api/orders");
     const text = await response.text();
     if (!response.ok) {
       ordersError.value = `HTTP ${response.status} ${response.statusText}`;
@@ -90,8 +96,12 @@ async function loadOrders(): Promise<void> {
 async function cancelOrder(): Promise<void> {
   pending.value = true;
   showSuccess.value = false;
+  let ok = false;
+  let httpStatus = 0;
   try {
-    const response = await fetch("/api/orders/1/cancel", { method: "POST" });
+    const response = await demoFetch("/api/orders/1/cancel", { method: "POST" });
+    ok = response.ok;
+    httpStatus = response.status;
     rawJson.value = await response.text();
     if (!response.ok) {
       cancelError.value = `HTTP ${response.status} ${response.statusText}`;
@@ -109,6 +119,7 @@ async function cancelOrder(): Promise<void> {
     cancelError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     pending.value = false;
+    postDemoAction({ caseKey: "#btn-cancel", action: "cancel-order", ok, httpStatus });
   }
 }
 
@@ -133,7 +144,10 @@ const validateForm = traceboard.wrapFn("validateForm", rawValidateForm);
 
 function saveB(): void {
   // No fetch/XHR here: this case never submits to the backend.
+  // The bridge still reports the completed action (httpStatus 0 = no request); the
+  // pass/fail branch stays visible in the UI (b-error / b-pass), not in the message.
   validateForm();
+  postDemoAction({ caseKey: "#btn-save-b", action: "validate-order-b", ok: true, httpStatus: 0 });
 }
 
 // Case L1: fixed-URL discount preview. `previewDiscount` is a plain declaration (manifest R1 hit);
@@ -143,12 +157,16 @@ function saveB(): void {
 async function previewDiscount(): Promise<void> {
   discountPending.value = true;
   discountError.value = null;
+  let ok = false;
+  let httpStatus = 0;
   try {
     const note = "x".repeat(3000);
     const url =
       `/api/orders/1/preview-discount?requestedAmount=100&demoSecret=s3cr3t` +
       `&note=${encodeURIComponent(note)}`;
-    const response = await fetch(url, { method: "POST" });
+    const response = await demoFetch(url, { method: "POST" });
+    ok = response.ok;
+    httpStatus = response.status;
     const text = await response.text();
     discountRaw.value = text;
     discountStatus.value = `HTTP ${response.status}`;
@@ -161,6 +179,7 @@ async function previewDiscount(): Promise<void> {
     discountError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     discountPending.value = false;
+    postDemoAction({ caseKey: "#btn-discount", action: "preview-discount", ok, httpStatus });
   }
 }
 
@@ -171,8 +190,10 @@ const previewDiscountWrapped = traceboard.wrapFn("previewDiscount", previewDisco
 async function submitRemark(): Promise<void> {
   remarkPending.value = true;
   remarkError.value = null;
+  let ok = false;
+  let httpStatus = 0;
   try {
-    const response = await fetch("/api/orders/1/remark", {
+    const response = await demoFetch("/api/orders/1/remark", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -183,6 +204,8 @@ async function submitRemark(): Promise<void> {
         token: remarkToken.value,
       }),
     });
+    ok = response.ok;
+    httpStatus = response.status;
     const text = await response.text();
     remarkRaw.value = text;
     remarkStatus.value = `HTTP ${response.status}`;
@@ -194,6 +217,7 @@ async function submitRemark(): Promise<void> {
     remarkError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     remarkPending.value = false;
+    postDemoAction({ caseKey: "#btn-remark", action: "submit-remark", ok, httpStatus });
   }
 }
 
@@ -201,16 +225,27 @@ async function submitRemark(): Promise<void> {
 // - no-debug: the service has no LocalVariableTable, so variables are NOT_COLLECTED.
 // - unknown order: only controller+service run; mapper/sql spans never appear.
 // - unjoined: a frontend fetch to the uninstrumented list endpoint has no backend span.
+const GAP_ACTIONS = {
+  noDebug: { caseKey: "#btn-no-debug", action: "no-debug" },
+  unknown: { caseKey: "#btn-unknown-cancel", action: "unknown-cancel" },
+  unjoined: { caseKey: "#btn-unjoined", action: "unjoined-list" }
+} as const;
+
 async function runGap(kind: "noDebug" | "unknown" | "unjoined"): Promise<void> {
+  const bridgeAction = GAP_ACTIONS[kind];
   gapPending.value = kind;
   gapError.value = null;
+  let ok = false;
+  let httpStatus = 0;
   try {
     const response =
       kind === "noDebug"
-        ? await fetch("/api/orders/1/no-debug", { method: "POST" })
+        ? await demoFetch("/api/orders/1/no-debug", { method: "POST" })
         : kind === "unknown"
-          ? await fetch("/api/orders/999/cancel", { method: "POST" })
-          : await fetch("/api/orders?probe=1");
+          ? await demoFetch("/api/orders/999/cancel", { method: "POST" })
+          : await demoFetch("/api/orders?probe=1");
+    ok = response.ok;
+    httpStatus = response.status;
     const text = await response.text();
     gapRaw.value = text;
     gapStatus.value = `HTTP ${response.status}`;
@@ -218,6 +253,7 @@ async function runGap(kind: "noDebug" | "unknown" | "unjoined"): Promise<void> {
     gapError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     gapPending.value = null;
+    postDemoAction({ ...bridgeAction, ok, httpStatus });
   }
 }
 
@@ -227,8 +263,12 @@ async function runGap(kind: "noDebug" | "unknown" | "unjoined"): Promise<void> {
 async function reconcile(): Promise<void> {
   reconcilePending.value = true;
   reconcileError.value = null;
+  let ok = false;
+  let httpStatus = 0;
   try {
-    const response = await fetch("/api/orders/1/reconcile", { method: "POST" });
+    const response = await demoFetch("/api/orders/1/reconcile", { method: "POST" });
+    ok = response.ok;
+    httpStatus = response.status;
     const text = await response.text();
     reconcileRaw.value = text;
     reconcileStatus.value = `HTTP ${response.status}`;
@@ -241,6 +281,7 @@ async function reconcile(): Promise<void> {
     reconcileError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     reconcilePending.value = false;
+    postDemoAction({ caseKey: "#btn-reconcile", action: "reconcile", ok, httpStatus });
   }
 }
 
@@ -249,8 +290,12 @@ async function reconcile(): Promise<void> {
 async function reconcileAsync(): Promise<void> {
   reconcileAsyncPending.value = true;
   reconcileAsyncError.value = null;
+  let ok = false;
+  let httpStatus = 0;
   try {
-    const response = await fetch("/api/orders/1/reconcile-async", { method: "POST" });
+    const response = await demoFetch("/api/orders/1/reconcile-async", { method: "POST" });
+    ok = response.ok;
+    httpStatus = response.status;
     const text = await response.text();
     reconcileAsyncRaw.value = text;
     reconcileAsyncStatus.value = `HTTP ${response.status}`;
@@ -263,6 +308,7 @@ async function reconcileAsync(): Promise<void> {
     reconcileAsyncError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     reconcileAsyncPending.value = false;
+    postDemoAction({ caseKey: "#btn-reconcile-async", action: "reconcile-async", ok, httpStatus });
   }
 }
 
@@ -271,8 +317,12 @@ async function reconcileAsync(): Promise<void> {
 async function reconcileLoop(): Promise<void> {
   reconcileLoopPending.value = true;
   reconcileLoopError.value = null;
+  let ok = false;
+  let httpStatus = 0;
   try {
-    const response = await fetch("/api/orders/1/reconcile-loop?times=100", { method: "POST" });
+    const response = await demoFetch("/api/orders/1/reconcile-loop?times=100", { method: "POST" });
+    ok = response.ok;
+    httpStatus = response.status;
     const text = await response.text();
     reconcileLoopRaw.value = text;
     reconcileLoopStatus.value = `HTTP ${response.status}`;
@@ -285,6 +335,7 @@ async function reconcileLoop(): Promise<void> {
     reconcileLoopError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     reconcileLoopPending.value = false;
+    postDemoAction({ caseKey: "#btn-reconcile-loop", action: "reconcile-loop", ok, httpStatus });
   }
 }
 
@@ -293,6 +344,9 @@ onMounted(loadOrders);
 
 <template>
   <div class="page">
+    <p v-if="staticDemo" id="static-sim-banner" class="static-banner">
+      公网静态演示：按钮返回预置响应，追踪台展示对应预置链路；真实采集需本地运行。
+    </p>
     <header class="header">
       <h1>BuggyShop · S5 案例 A / 案例 B / L1 · S6 L2</h1>
       <p class="subtitle">
