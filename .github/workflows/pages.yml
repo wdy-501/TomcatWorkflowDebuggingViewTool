@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -62,6 +63,9 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: site/traceboard/dist
+
+      - name: Wait for artifact metadata
+        run: sleep 10
 
       - name: Deploy
         id: deployment
