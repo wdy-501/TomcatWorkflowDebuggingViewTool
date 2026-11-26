@@ -138,7 +138,6 @@ test("IIFE load: window.__TRACEBOARD_CONFIG__ auto-inits exactly once with valid
   assert.equal(typeof sdk.uiEffect, "function");
   assert.equal(typeof sdk.elementIdentity, "function");
   assert.equal(sdk.version, pkg.version, "global version must match package.json");
-  assert.equal(sdk.version, "0.1.0");
 
   assert.equal(clicks.length, 1, "auto-init must install exactly one click listener");
   assert.equal(sandbox.__TRACEBOARD_SDK_ACTIVE__, true, "auto-init must set the active guard");

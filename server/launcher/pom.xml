@@ -7,7 +7,7 @@
   <parent>
     <groupId>io.traceboard</groupId>
     <artifactId>traceboard</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <relativePath>../../pom.xml</relativePath>
   </parent>
 
@@ -15,9 +15,9 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Launcher</name>
-  <description>S4 local launcher: idea/jar/stop/preview/diagnose. JDK-only (HttpServer/HttpClient/ProcessBuilder), no Spring, no third-party dependencies.</description>
+  <description>TraceBoard 1.0.0 local launcher: run/ui/stop/idea/jar/preview/diagnose. JDK-only, no Spring, no third-party dependencies.</description>
 
-  <!-- No <dependencies>: S4 launcher must stay JDK-only. -->
+  <!-- No <dependencies>: the launcher must stay JDK-only. -->
   <build>
     <plugins>
       <plugin>

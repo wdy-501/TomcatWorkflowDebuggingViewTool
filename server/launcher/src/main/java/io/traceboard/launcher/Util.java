@@ -194,7 +194,7 @@ final class Util {
         }
     }
 
-    /** Minimal JSON scanning; S4 responses are small, stable and machine-generated. */
+    /** Minimal JSON scanning; launcher responses are small, stable and machine-generated. */
     static final class Json {
 
         private Json() {

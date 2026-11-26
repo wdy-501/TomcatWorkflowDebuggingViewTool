@@ -1,20 +1,21 @@
 package io.traceboard.launcher;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@code stop --pid-file}: idempotent stop that refuses to kill a recycled PID.
- * Refuses ({@code PID_MISMATCH}, exit 3) when the live process command line is empty, does not
- * contain the recorded jar (or jar file name), lacks the launcher markers, or the process start
- * time deviates more than 5s from the recorded {@code startedAtMs}.
+ * {@code stop --session <s_xxx>} / {@code stop --pid-file <path>}: idempotent stop that refuses
+ * to kill a recycled PID.
+ *
+ * <p>Refuses ({@code PID_MISMATCH}, exit 3) when the live process command line is empty, does not
+ * contain the recorded jar (or jar file name/hint), lacks the launcher markers for the app, or the
+ * process start time deviates more than 5s from the recorded {@code startedAtMs}. A reused
+ * collector/UI is recorded but never stopped.</p>
  */
 final class StopCommand {
 
@@ -22,82 +23,240 @@ final class StopCommand {
 
     int run(String[] argv) throws LauncherException {
         Args args = Args.parse(argv);
-        Path pidFile = Util.abs(args.require("--pid-file"));
+        boolean hasPidFile = args.has("--pid-file");
+        boolean hasSession = args.has("--session");
+        if (hasPidFile && hasSession) {
+            throw LauncherException.usage("stop 的 --session 与 --pid-file 二选一（--help 查看用法）。");
+        }
+        if (hasSession) {
+            return stopSession(SessionId.require(args.require("--session")));
+        }
+        if (!hasPidFile) {
+            throw LauncherException.usage("stop 需要 --session <s_xxx> 或 --pid-file <path>（--help 查看用法）。");
+        }
+        return stopPidFile(Util.abs(args.require("--pid-file")));
+    }
 
+    // -------------------------------------------------------------------------
+    // --pid-file (original behaviour)
+    // -------------------------------------------------------------------------
+
+    private int stopPidFile(Path pidFile) throws LauncherException {
         if (!Files.isRegularFile(pidFile)) {
             System.out.println("NOT_RUNNING pid_file=\"" + Util.fwd(pidFile) + "\"（未找到 PID 文件；无需停止）");
             return Launcher.EXIT_OK;
         }
         PidFile pid = PidFile.read(pidFile);
+        stopApp(pidFile, pid);
+        return Launcher.EXIT_OK;
+    }
+
+    private boolean stopApp(Path pidFile, PidFile pid) throws LauncherException {
         Optional<ProcessHandle> handleOpt = ProcessHandle.of(pid.pid);
         if (handleOpt.isEmpty() || !handleOpt.get().isAlive()) {
             PidFile.delete(pidFile);
             System.out.println("NOT_RUNNING pid=" + pid.pid + "（进程已不存在；已清理 PID 文件）");
+            return false;
+        }
+        assertMatches("app", handleOpt.get(), pid.startedAtMs, pid.java, pid.jar, "", true);
+        ChildProcesses.stop(handleOpt.get());
+        if (handleOpt.get().isAlive()) {
+            throw LauncherException.failed("STOP_FAILED", "无法停止进程 pid=" + pid.pid
+                    + "（destroy → 5s → taskkill/forcible 后仍存活）；请手工检查: tasklist /FI \"PID eq "
+                    + pid.pid + "\"。");
+        }
+        PidFile.delete(pidFile);
+        System.out.println("STOPPED pid=" + pid.pid);
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // --session (app + services started by run)
+    // -------------------------------------------------------------------------
+
+    private int stopSession(String session) throws LauncherException {
+        Path work = Util.abs("work");
+        Path pidFile = work.resolve(session + ".pid");
+        Path servicesFile = work.resolve(session + ".services.json");
+        boolean hasPidFile = Files.isRegularFile(pidFile);
+        boolean hasServices = Files.isRegularFile(servicesFile);
+        if (!hasPidFile && !hasServices) {
+            System.out.println("NOT_RUNNING session=\"" + session + "\"（未找到 work/" + session
+                    + ".pid 或 services.json；无需停止）");
             return Launcher.EXIT_OK;
         }
-        ProcessHandle handle = handleOpt.get();
+
+        // Parse services before stopping the app: the run process deletes the record on exit.
+        String servicesJson = readServices(servicesFile);
+        ServiceRecord appFromServices = parseService(servicesJson, "app", "app");
+        ServiceRecord collector = parseService(servicesJson, "collector", "collector");
+        ServiceRecord ui = parseService(servicesJson, "ui", "ui");
+        String uiKind = uiKind(servicesJson);
+
+        boolean stoppedAny = false;
+        if (hasPidFile) {
+            PidFile pid = PidFile.read(pidFile);
+            stoppedAny |= stopApp(pidFile, pid);
+        } else if (appFromServices != null) {
+            stoppedAny |= stopRecord(appFromServices, true);
+        } else {
+            System.out.println("NOT_RUNNING app（记录中没有应用进程）");
+        }
+
+        if (collector != null) {
+            stoppedAny |= stopRecord(collector, false);
+        } else if (servicesJson != null) {
+            System.out.println("SKIP collector=reused（非本次 run 启动，不停止）");
+        }
+
+        if (ui != null) {
+            if ("in-process".equals(uiKind)) {
+                // The UI lives in the run/launcher process; after the app stops it should exit on
+                // its own. Give it a grace period, then validate and stop the launcher if needed.
+                Optional<ProcessHandle> handle = ProcessHandle.of(ui.pid);
+                if (handle.isPresent() && handle.get().isAlive()
+                        && handle.get().pid() != ProcessHandle.current().pid()) {
+                    if (ChildProcesses.waitGone(handle.get(), 5)) {
+                        System.out.println("STOPPED ui=" + ui.pid + "（随 launcher 退出）");
+                        stoppedAny = true;
+                    } else {
+                        stoppedAny |= stopRecord(ui, false);
+                    }
+                }
+            } else {
+                stoppedAny |= stopRecord(ui, false);
+            }
+        } else if (servicesJson != null) {
+            System.out.println("SKIP ui=" + (uiKind.isEmpty() ? "reused/none" : uiKind)
+                    + "（非本次 run 启动，不停止）");
+        }
+
+        PidFile.delete(pidFile);
+        try {
+            Files.deleteIfExists(servicesFile);
+        } catch (IOException ignored) {
+            // best effort
+        }
+        System.out.println((stoppedAny ? "STOPPED" : "NOT_RUNNING") + " session=" + session);
+        return Launcher.EXIT_OK;
+    }
+
+    private static String readServices(Path file) throws LauncherException {
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            return Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw LauncherException.failed("SERVICES_UNREADABLE", "无法读取服务记录 \"" + Util.fwd(file)
+                    + "\"（" + e.getClass().getSimpleName() + "）；不停止任何进程。");
+        }
+    }
+
+    private static String uiKind(String servicesJson) {
+        if (servicesJson == null) {
+            return "";
+        }
+        String ui = Util.Json.object(servicesJson, "ui");
+        if (ui == null) {
+            return "";
+        }
+        String kind = Util.Json.str(ui, "kind");
+        return kind == null ? "" : kind;
+    }
+
+    private static ServiceRecord parseService(String servicesJson, String key, String name) {
+        if (servicesJson == null) {
+            return null;
+        }
+        String object = Util.Json.object(servicesJson, key);
+        if (object == null) {
+            return null;
+        }
+        Long pid = Util.Json.num(object, "pid");
+        if (pid == null || pid <= 0) {
+            return null;
+        }
+        Long started = Util.Json.num(object, "startedAtMs");
+        String java = Util.Json.str(object, "java");
+        String jar = Util.Json.str(object, "jar");
+        String hint = Util.Json.str(object, "commandLineHint");
+        return new ServiceRecord(name, pid, started == null ? 0L : started,
+                java == null ? "" : java, jar == null ? "" : jar, hint == null ? "" : hint);
+    }
+
+    private record ServiceRecord(String name, long pid, long startedAtMs, String java, String jar,
+                                 String hint) {
+    }
+
+    private boolean stopRecord(ServiceRecord record, boolean requireMarkers) throws LauncherException {
+        Optional<ProcessHandle> handleOpt = ProcessHandle.of(record.pid());
+        if (handleOpt.isEmpty() || !handleOpt.get().isAlive()) {
+            System.out.println("NOT_RUNNING " + record.name() + "=" + record.pid() + "（进程已不存在）");
+            return false;
+        }
+        assertMatches(record.name(), handleOpt.get(), record.startedAtMs(), record.java(), record.jar(),
+                record.hint(), requireMarkers);
+        ChildProcesses.stop(handleOpt.get());
+        if (handleOpt.get().isAlive()) {
+            throw LauncherException.failed("STOP_FAILED", "无法停止 " + record.name() + " pid=" + record.pid()
+                    + "（destroy → 5s → taskkill/forcible 后仍存活）；请手工检查: tasklist /FI \"PID eq "
+                    + record.pid() + "\"。");
+        }
+        System.out.println("STOPPED " + record.name() + "=" + record.pid());
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // PID / start-time validation (shared)
+    // -------------------------------------------------------------------------
+
+    private static void assertMatches(String label, ProcessHandle handle, long startedAtMs, String javaExe,
+                                      String jar, String hint, boolean requireMarkers) throws LauncherException {
         ProcessHandle.Info info = handle.info();
 
         boolean timeMatch = true;
-        if (pid.startedAtMs > 0) {
+        if (startedAtMs > 0) {
             Optional<Instant> actualStart = info.startInstant();
             if (actualStart.isPresent()
-                    && Math.abs(actualStart.get().toEpochMilli() - pid.startedAtMs) > START_TOLERANCE_MS) {
+                    && Math.abs(actualStart.get().toEpochMilli() - startedAtMs) > START_TOLERANCE_MS) {
                 timeMatch = false;
             }
         }
 
         String observed = readCommandLine(handle);
-        boolean commandOnly = false;
         if (observed == null) {
             // ProcessHandle.commandLine() is often unavailable on Windows for processes started by
             // another JVM; fall back to command path + start time so a recycled PID is still refused.
             Optional<String> command = info.command();
-            boolean javaMatch = command.isPresent()
-                    && Util.normalize(command.get()).equalsIgnoreCase(Util.normalize(pid.java));
+            boolean javaMatch = javaExe.isEmpty() || (command.isPresent()
+                    && Util.normalize(command.get()).equalsIgnoreCase(Util.normalize(javaExe)));
             if (!javaMatch || !timeMatch) {
-                throw mismatch(pid, "(commandLine 不可读；command=" + command.orElse("?")
+                throw mismatch(label, handle.pid(), "(commandLine 不可读；command=" + command.orElse("?")
                         + (timeMatch ? "" : " | startInstant 偏差>5s") + ")");
             }
-            commandOnly = true;
-            observed = command.get();
-        } else {
-            String normalized = Util.normalize(observed).toLowerCase(Locale.ROOT);
-            String jarRecorded = Util.normalize(pid.jar).toLowerCase(Locale.ROOT);
-            String jarName = jarRecorded.isEmpty() ? "" : jarRecorded.substring(jarRecorded.lastIndexOf('/') + 1);
-            boolean jarMatch = !jarRecorded.isEmpty()
-                    && (normalized.contains(jarRecorded) || (!jarName.isEmpty() && normalized.contains(jarName)));
-            boolean launcherMarker = observed.contains("-Dtraceboard.") || observed.contains("-javaagent:");
-            if (!jarMatch || !launcherMarker || !timeMatch) {
-                throw mismatch(pid, Util.oneLine(observed, 200) + (timeMatch ? "" : " | startInstant 偏差>5s"));
-            }
-        }
-        if (commandOnly) {
-            System.out.println("WARN commandLine 不可读，已用 command+startInstant 校验 pid=" + pid.pid + "（Windows 限制）。");
+            System.out.println("WARN commandLine 不可读，已用 command+startInstant 校验 " + label
+                    + " pid=" + handle.pid() + "（Windows 限制）。");
+            return;
         }
 
-        handle.destroy();
-        if (!waitGone(handle, 5)) {
-            if (Util.isWindows()) {
-                taskkill(pid.pid);
-            }
-            if (!waitGone(handle, 5)) {
-                handle.destroyForcibly();
-            }
-            waitGone(handle, 3);
+        String normalized = Util.normalize(observed).toLowerCase(java.util.Locale.ROOT);
+        String recorded = Util.normalize(jar.isEmpty() ? hint : jar).toLowerCase(java.util.Locale.ROOT);
+        String basename = recorded.isEmpty() ? "" : recorded.substring(recorded.lastIndexOf('/') + 1);
+        boolean jarMatch = !recorded.isEmpty()
+                && (normalized.contains(recorded) || (!basename.isEmpty() && normalized.contains(basename)));
+        boolean launcherMarker = !requireMarkers
+                || observed.contains("-Dtraceboard.") || observed.contains("-javaagent:");
+        if (!jarMatch || !launcherMarker || !timeMatch) {
+            throw mismatch(label, handle.pid(), Util.oneLine(observed, 200)
+                    + (timeMatch ? "" : " | startInstant 偏差>5s"));
         }
-        if (handle.isAlive()) {
-            throw LauncherException.failed("STOP_FAILED", "无法停止进程 pid=" + pid.pid + "（destroy → 5s → taskkill/forcible 后仍存活）；"
-                    + "请手工检查: tasklist /FI \"PID eq " + pid.pid + "\"。");
-        }
-        PidFile.delete(pidFile);
-        System.out.println("STOPPED pid=" + pid.pid);
-        return Launcher.EXIT_OK;
     }
 
-    private static LauncherException mismatch(PidFile pid, String evidence) {
-        return LauncherException.failed("PID_MISMATCH", "PID " + pid.pid + " 与记录的 jar/启动时间不匹配，拒绝停止（避免误杀）: "
-                + evidence + "；确认 PID 文件是否过期，或用任务管理器/stop 前重新启动 launcher 记录。");
+    private static LauncherException mismatch(String label, long pid, String evidence) {
+        return LauncherException.failed("PID_MISMATCH", label + " PID " + pid
+                + " 与记录的 jar/启动时间不匹配，拒绝停止（避免误杀）: " + evidence
+                + "；确认 PID 文件是否过期，或用任务管理器/stop 前重新启动 launcher 记录。");
     }
 
     /** Reads the live command line: ProcessHandle first, PowerShell CIM fallback on Windows. */
@@ -122,7 +281,7 @@ final class StopCommand {
                 query.destroyForcibly();
                 return null;
             }
-            String text = new String(output, java.nio.charset.Charset.defaultCharset()).trim();
+            String text = new String(output, Charset.defaultCharset()).trim();
             for (String line : text.split("\\R")) {
                 if (!line.isBlank() && !line.startsWith("At line:") && !line.startsWith("+")) {
                     return line;
@@ -134,36 +293,6 @@ final class StopCommand {
                 Thread.currentThread().interrupt();
             }
             return null;
-        }
-    }
-
-    private static boolean waitGone(ProcessHandle handle, int seconds) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
-        while (System.nanoTime() < deadline) {
-            if (!handle.isAlive()) {
-                return true;
-            }
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return !handle.isAlive();
-            }
-        }
-        return !handle.isAlive();
-    }
-
-    /** Kills the whole process tree on Windows (taskkill /PID n /T /F), best effort. */
-    private static void taskkill(long pid) {
-        List<String> cmd = new ArrayList<>(List.of("taskkill", "/PID", Long.toString(pid), "/T", "/F"));
-        try {
-            Process taskkill = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            taskkill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
-            taskkill.waitFor(5, TimeUnit.SECONDS);
-        } catch (IOException | InterruptedException ignored) {
-            if (ignored instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
         }
     }
 }

@@ -19,7 +19,7 @@ import java.net.URL;
 final class AgentHello {
 
     static final String SCHEMA = "traceboard.agent.v1";
-    static final String DEFAULT_VERSION = "0.1.0-SNAPSHOT";
+    static final String DEFAULT_VERSION = "1.0.0";
 
     private static final String EVENTS_SUFFIX = "/v1/events";
     private static final String HELLO_SUFFIX = "/v1/agent-hello";
@@ -54,6 +54,37 @@ final class AgentHello {
             }
             final byte[] payload = payload(config.sessionId(), version(), pid,
                     System.currentTimeMillis());
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    send(helloUrl, payload);
+                }
+            }, "traceboard-agent-hello");
+            thread.setDaemon(true);
+            thread.start();
+        } catch (Throwable ignored) {
+            // fail-open: the handshake must never affect the host application
+        }
+    }
+
+    /**
+     * Additive overload for the generic mode: identical daemon handshake semantics as
+     * {@link #start(AgentConfig)}, but the ingest URL and session id come from the generic
+     * configuration (they may be passed through agentArgs, not only through -D).
+     */
+    static void start(final String ingestUrl, final String sessionId) {
+        try {
+            final String helloUrl = helloUrl(ingestUrl);
+            if (helloUrl == null) {
+                TraceAgent.log("hello_skipped reason=ingest_url");
+                return;
+            }
+            final long pid = currentPid();
+            if (pid < 1L) {
+                TraceAgent.log("hello_skipped reason=pid");
+                return;
+            }
+            final byte[] payload = payload(sessionId, version(), pid, System.currentTimeMillis());
             Thread thread = new Thread(new Runnable() {
                 @Override
                 public void run() {

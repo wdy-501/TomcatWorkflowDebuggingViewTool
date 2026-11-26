@@ -1,17 +1,13 @@
 {
   "name": "traceboard-workbench",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
-  "description": "TraceBoard workbench shell (S0: AppShell + fixture facts only)",
+  "description": "TraceBoard 1.0.0 workbench (generic Java tracing UI)",
   "scripts": {
-    "sync:fixtures": "node scripts/sync-fixtures.mjs",
-    "demo:sync": "node scripts/sync-demo.mjs",
-    "predev": "npm run sync:fixtures && npm run demo:sync",
     "dev": "vite",
-    "prebuild": "npm run sync:fixtures",
     "build": "vue-tsc --noEmit && vite build",
-    "build:site": "vue-tsc --noEmit && vite build --base ./ --outDir dist-site --emptyOutDir",
+    "build:site": "vue-tsc --noEmit && vite build --mode site --base ./ --outDir dist-site --emptyOutDir",
     "build:packaged": "vue-tsc --noEmit && vite build --mode packaged --outDir dist-packaged --emptyOutDir",
     "preview": "vite preview"
   },

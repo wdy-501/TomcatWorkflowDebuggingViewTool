@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Meta endpoint, shape frozen by docs/contracts/api.v1.md §3.2 and §9.5.
+ * Meta endpoint; human-readable field reference is docs/important-notes.md.
  *
  * <p>capabilities is an honesty switch: S3 implements ingest plus the read-only replay window,
  * so {@code ingestEvents=true} and {@code replay=true} while {@code realtime} stays false
@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MetaController {
 
     static final String SERVICE = "traceboard-collector";
-    static final String VERSION = "0.1.0-SNAPSHOT";
+    static final String VERSION = "1.0.0";
     static final String API_VERSION = "v1";
     static final String SCHEMA_ID = "urn:traceboard:schema:event:v1";
     static final String SCHEMA_VERSION = "traceboard.event.v1";

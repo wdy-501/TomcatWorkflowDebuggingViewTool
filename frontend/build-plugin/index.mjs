@@ -1,7 +1,7 @@
 /**
- * @traceboard/vite-plugin — S5 shallow front-end build plugin.
+ * @traceboard/vite-plugin — TraceBoard 1.0.0 front-end build plugin.
  *
- * What it does (F1/F2 shallow, only this):
+ * What it does (shallow function/file/line manifest, only this):
  * - scans `src/**\/*.{vue,ts}` (optionally custom roots) for named function declarations and
  *   `const x = ...wrapFn("x", ...)` assignments;
  * - produces `{"functions":[{"name","file","line"}]}` with POSIX relative `file` and 1-based
@@ -11,10 +11,10 @@
  *   `window.__TRACEBOARD_MANIFEST__ = <json>` via `transformIndexHtml` (`head-prepend`).
  *
  * What it does NOT do:
- * - no `.map` decoding / stack un-mangling / uploads; no local variables or line-level values (S6);
+ * - no `.map` decoding / stack un-mangling / uploads; no local variables or line-level values;
  * - no third-party dependencies (only `node:fs/promises` and `node:path`);
  * - never breaks the host build: scan failures are warned and the build continues;
- * - preview injection (S4, port 8602) never gets this manifest (only external config.js/sdk.js).
+* - preview injection (port 8602) never gets this manifest (only external config.js/sdk.js).
  *
  * Scan rules (shallow regex, no AST):
  *   R1 ^[\t ]*(?:export[\t ]+)?(?:async[\t ]+)?function[\t ]+([A-Za-z_$][\w$]*)[\t ]*\(

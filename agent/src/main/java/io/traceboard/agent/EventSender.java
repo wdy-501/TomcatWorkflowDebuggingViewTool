@@ -23,7 +23,7 @@ final class EventSender {
     private static final int MAX_RESPONSE_BYTES = 8192;
     private static final long SHUTDOWN_DRAIN_MS = 1000L;
 
-    private final BlockingQueue<byte[]> queue = new ArrayBlockingQueue<byte[]>(CAPACITY);
+    private final BlockingQueue<byte[]> queue;
     private final String url;
     private final Thread worker;
     private final AtomicLong dropped = new AtomicLong();
@@ -31,7 +31,12 @@ final class EventSender {
     private volatile boolean closed;
 
     EventSender(String url) {
+        this(url, CAPACITY);
+    }
+
+    EventSender(String url, int capacity) {
         this.url = url;
+        this.queue = new ArrayBlockingQueue<byte[]>(Math.max(1, capacity));
         this.worker = new Thread(new Runnable() {
             @Override
             public void run() {

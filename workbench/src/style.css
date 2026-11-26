@@ -86,11 +86,20 @@ code {
   font-size: 12px;
 }
 
-/* Top-level view tabs: 交互示例 / 追踪台 */
+/* Top-level view tabs: 交互示例/我的应用 / 追踪台 */
 .app-tabs {
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 4px;
+}
+
+.app-tabs__hint {
+  align-self: center;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  margin-left: auto;
+  overflow-wrap: anywhere;
 }
 
 .app-tab {
@@ -1453,18 +1462,19 @@ code {
 }
 
 .flow-tree__children {
+  --flow-tree-line: rgba(121, 177, 255, 0.9);
   display: flex;
   justify-content: center;
   list-style: none;
   margin: 0;
-  padding: 18px 0 0;
+  padding: 12px 0 0;
   position: relative;
 }
 
 .flow-tree__children::before {
-  border-left: 1px solid var(--border);
+  border-left: 2px solid var(--flow-tree-line);
   content: "";
-  height: 18px;
+  height: 12px;
   left: 50%;
   position: absolute;
   top: 0;
@@ -1474,15 +1484,15 @@ code {
   align-items: center;
   display: flex;
   flex-direction: column;
-  padding: 18px 5px 0;
+  padding: 12px 5px 0;
   position: relative;
 }
 
 .flow-tree__children > li::before,
 .flow-tree__children > li::after {
-  border-top: 1px solid var(--border);
+  border-top: 2px solid var(--flow-tree-line);
   content: "";
-  height: 18px;
+  height: 12px;
   position: absolute;
   right: 50%;
   top: 0;
@@ -1490,9 +1500,14 @@ code {
 }
 
 .flow-tree__children > li::after {
-  border-left: 1px solid var(--border);
+  border-left: 2px solid var(--flow-tree-line);
   left: 50%;
   right: auto;
+}
+
+/* Single child: the vertical trunk meets the child directly (no blank strip). */
+.flow-tree__children > li:only-child {
+  padding-top: 0;
 }
 
 .flow-tree__children > li:only-child::before,
@@ -2986,6 +3001,28 @@ code {
   font-family: inherit;
   font-size: 11px;
   padding: 2px 8px;
+}
+
+.s3-tree__viewbar-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.s3-tree__generic-filter {
+  align-items: center;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  user-select: none;
+}
+
+.s3-tree__generic-filter input {
+  accent-color: var(--accent);
+  margin: 0;
 }
 
 .s3-tree__branch-toggle:hover {

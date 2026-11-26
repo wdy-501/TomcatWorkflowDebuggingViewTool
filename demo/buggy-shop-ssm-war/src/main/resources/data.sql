@@ -1,1 +1,0 @@
-INSERT INTO orders (id, order_no, status, amount) VALUES (1, 'SO-SSM-0001', 'CREATED', 100.0);

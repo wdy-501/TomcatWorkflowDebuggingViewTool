@@ -53,7 +53,7 @@ final class DiagnoseCommand {
         if (!resp.ok()) {
             fail++;
             row("FAIL", "collector_health", "GET " + url + " -> connect failed(" + resp.error()
-                    + ") INGEST_UNREACHABLE; 建议: 先启动 collector（\"$JAVA21/bin/java\" -jar server/collector/target/traceboard-collector-0.1.0-SNAPSHOT.jar）。");
+                    + ") INGEST_UNREACHABLE; 建议: 先启动 collector（\"$JAVA21/bin/java\" -jar server/collector/target/traceboard-collector-1.0.0.jar）。");
             return;
         }
         String body = resp.bodyText();
@@ -106,7 +106,7 @@ final class DiagnoseCommand {
             row("FAIL", "app_health", "GET " + appUrl + " -> "
                     + (resp.ok() ? resp.status() + " Content-Type=" + (contentType == null ? "(missing)" : contentType)
                     : "connect failed(" + resp.error() + ")")
-                    + "; 建议: --app-url 必须是真实 2xx 端点（demo 用 http://localhost:8080/api/orders；/ 的 404 不代表应用没起）。");
+                    + "; 建议: --app-url 必须是真实 2xx 端点（/ 返回 404 不代表应用没启动）。");
         }
     }
 

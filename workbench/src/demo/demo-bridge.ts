@@ -1,8 +1,8 @@
 /**
  * Same-origin bridge between the BuggyShop demo iframe and the workbench.
  *
- * The demo posts one message after every completed action (contract frozen in
- * docs/plans/stages/demo-5173/00-contract.md):
+ * The demo posts one message after every completed action; the public demo page is
+ * documented in docs/important-notes.md:
  *
  *   {
  *     source: "traceboard-demo",

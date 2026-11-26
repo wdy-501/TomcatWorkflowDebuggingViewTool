@@ -7,7 +7,7 @@
   <parent>
     <groupId>io.traceboard</groupId>
     <artifactId>traceboard</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -15,13 +15,13 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Agent</name>
-  <description>S6b -javaagent: Byte Buddy instrumentation (controller/service/mapper/sql/field) plus dedicated ASM transformers for L2DemoService#reconcileAmount/#reconcileLoop line-level probes and the no-debug NoDebugService#compute enter/exit, fail-open NDJSON sender</description>
+  <description>TraceBoard 1.0.0 Java agent: generic Spring MVC/MyBatis instrumentation, bounded argument/return/DTO field capture, fail-open NDJSON sender</description>
 
   <properties>
-    <!-- S1 decision: agent bytecode must stay Java 8 (class file major version 52). -->
+    <!-- Agent bytecode must stay Java 8 (class file major version 52). -->
     <maven.compiler.release>8</maven.compiler.release>
     <byte-buddy.version>1.14.19</byte-buddy.version>
-    <!-- S6a: ASM 9.7 (Java 8 compatible, class file major 49) for the dedicated L2 transformer. -->
+    <!-- ASM 9.7 (Java 8 compatible, class file major 49) for the dedicated L2 transformer. -->
     <asm.version>9.7</asm.version>
   </properties>
 
@@ -32,8 +32,7 @@
       <artifactId>byte-buddy</artifactId>
       <version>${byte-buddy.version}</version>
     </dependency>
-    <!-- S6a L2 only: asm (ClassReader) + asm-tree (ClassNode) + asm-commons (AdviceAdapter-free
-         but kept for the documented trio); all three are shaded and relocated. -->
+    <!-- L2 transformer: asm (ClassReader) + asm-tree (ClassNode) + asm-commons; shaded and relocated. -->
     <dependency>
       <groupId>org.ow2.asm</groupId>
       <artifactId>asm</artifactId>

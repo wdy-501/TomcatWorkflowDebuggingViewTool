@@ -1,16 +1,16 @@
 /**
- * @traceboard/sdk — TraceBoard S3/S5 runtime SDK.
+ * @traceboard/sdk — TraceBoard 1.0.0 runtime SDK.
  *
  * What it does (only these facts):
  * - document capture-phase clicks -> `ui_event` root per click (new traceId/clickId/spanId);
  * - wraps `window.fetch` and `XMLHttpRequest` -> `fetch` spans (same click window only);
  * - `wrapFn(name, fn)` -> `js_method` spans (OK / RETURNED_FALSE / THREW);
  * - `uiEffect(text)` -> `render` spans (`return.type = "ui_effect"`; the SDK never reads/writes the DOM);
- * - S5: reads `window.__TRACEBOARD_MANIFEST__` (build-plugin manifest) and attaches
+ * - reads `window.__TRACEBOARD_MANIFEST__` (build-plugin manifest) and attaches
  *   `source={file,line}` + flag `SOURCE_MAPPED` to matching `js_method` spans and to click roots
  *   whose target has `data-tb-fn="<name>"`.
  *
- * Hard boundaries (S5; see docs/contracts/event-model.v1.md §12):
+ * Hard boundaries (v1.0.0; see docs/important-notes.md):
  * - no `.map` decoding; file/line only via build manifest (SOURCE_MAPPED); no local variables, no `values[]`;
  * - no request/response bodies, form values, query strings/hashes, cookies, arbitrary return values;
  * - only same-origin, non-ingest requests get `traceparent` + `X-TraceBoard-Click`;
@@ -20,15 +20,15 @@
  *
  * Manifest loading: synchronous inline read at init; when absent, the ESM build may fetch
  * `/traceboard-manifest.json` exactly once (relative path, fail-open, no retry, no cache, no event).
- * The IIFE/preview build never fetches the manifest (preview injection pages have no manifest).
+ * The IIFE/preview build never fetches the manifest.
  *
- * Intentionally NOT implemented (S6): async context propagation (await/.then/timer continuations
- * fall back to the click root), background request lanes outside a click window, `callback` events,
+ * Not implemented in v1.0.0: async context propagation (await/.then/timer continuations fall back
+ * to the click root), background request lanes outside a click window, `callback` events,
  * `INFERRED`/`MANUAL` confidence, DOM diffing/screenshots, local variables / line-level values.
  */
 
 /** SDK version; keep in sync with package.json (asserted by the IIFE tests). */
-export const version = "0.1.0";
+export const version = "1.0.0";
 
 export interface InitOptions {
   /** Ingest base path; the SDK posts NDJSON to `${ingestUrl}/v1/events`. Default `/ingest`. */

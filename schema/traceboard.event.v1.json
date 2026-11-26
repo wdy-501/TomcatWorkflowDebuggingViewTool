@@ -131,7 +131,7 @@
         "TRUNCATED",
         "UNKNOWN"
       ],
-      "description": "Event status projection (8 values). REDACTED is a value-level marker and LOST is a confidence value; see docs/contracts/status-semantics.md."
+      "description": "Event status projection (8 values). REDACTED is a value-level marker and LOST is a confidence value; see docs/important-notes.md."
     },
     "reason": {
       "type": "string",

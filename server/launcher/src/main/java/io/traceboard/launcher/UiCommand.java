@@ -40,6 +40,9 @@ final class UiCommand {
         }
         int port = args.port("--port", 5173);
         String collector = args.has("--collector") ? Urls.collectorOrigin(args.get("--collector")) : null;
+        String appUrl = args.has("--app-url")
+                ? Urls.loopbackHttpUrl(args.get("--app-url"), "--app-url").toString()
+                : null;
         Path base;
         try {
             base = root.toRealPath();
@@ -68,11 +71,14 @@ final class UiCommand {
             thread.setDaemon(true);
             return thread;
         }));
-        server.createContext("/", exchange -> serve(base, collector, exchange));
+        server.createContext("/", exchange -> serve(base, collector, appUrl, exchange));
         server.start();
         System.out.println("UI dir=\"" + Util.fwd(base) + "\"");
         if (collector != null) {
             System.out.println("UI collector=" + collector + " (GET/HEAD /api/* proxied)");
+        }
+        if (appUrl != null) {
+            System.out.println("UI app=" + appUrl + " (注入 __TRACEBOARD_RUNTIME_APP__)");
         }
         System.out.println("UI_READY url=http://127.0.0.1:" + port);
         System.out.println("提示: 浏览器访问 http://127.0.0.1:" + port + "；仅绑 127.0.0.1，无上传、无外部网络；Ctrl+C 停止。");
@@ -92,7 +98,7 @@ final class UiCommand {
         return Launcher.EXIT_OK;
     }
 
-    private static void serve(Path root, String collector, HttpExchange exchange) {
+    private static void serve(Path root, String collector, String appUrl, HttpExchange exchange) {
         try {
             String method = exchange.getRequestMethod();
             if (!"GET".equals(method) && !"HEAD".equals(method)) {
@@ -125,6 +131,9 @@ final class UiCommand {
                 }
             }
             byte[] body = Files.readAllBytes(target);
+            if (appUrl != null && "index.html".equals(target.getFileName().toString())) {
+                body = injectRuntimeApp(body, appUrl);
+            }
             Headers headers = exchange.getResponseHeaders();
             headers.set("Content-Type", contentType(target));
             headers.set("Cache-Control", "no-store");
@@ -144,6 +153,27 @@ final class UiCommand {
         } finally {
             exchange.close();
         }
+    }
+
+    private static byte[] injectRuntimeApp(byte[] body, String appUrl) {
+        try {
+            String html = new String(body, StandardCharsets.UTF_8);
+            String script = "<script>window.__TRACEBOARD_RUNTIME_APP__="
+                    + jsonString(appUrl) + ";</script>";
+            int headEnd = html.indexOf("</head>");
+            if (headEnd >= 0) {
+                html = html.substring(0, headEnd) + script + html.substring(headEnd);
+            } else {
+                html = script + html;
+            }
+            return html.getBytes(StandardCharsets.UTF_8);
+        } catch (Throwable ignored) {
+            return body;
+        }
+    }
+
+    private static String jsonString(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     private static void proxy(String collector, HttpExchange exchange, boolean head) throws Exception {

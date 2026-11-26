@@ -1,17 +1,6 @@
-name: Deploy static demo to GitHub Pages
+name: Deploy static showcase to GitHub Pages
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - "workbench/**"
-      - "demo/buggy-shop-boot-vue/frontend/**"
-      - "frontend/sdk/**"
-      - "frontend/build-plugin/**"
-      - "fixtures/**"
-      - "scripts/build-site.mjs"
-      - "site/traceboard/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -34,32 +23,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: |
-            demo/buggy-shop-boot-vue/frontend/package-lock.json
-            workbench/package-lock.json
-
-      - name: Install demo frontend dependencies
-        working-directory: demo/buggy-shop-boot-vue/frontend
-        run: npm ci
-
-      - name: Install workbench dependencies
-        working-directory: workbench
-        run: npm ci
-
-      - name: Build static site
-        run: node scripts/build-site.mjs
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
 
-      - name: Upload static site
+      - name: Upload prebuilt static site
         uses: actions/upload-pages-artifact@v4
         with:
           path: site/traceboard/dist

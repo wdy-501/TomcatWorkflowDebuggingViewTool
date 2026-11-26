@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * {@code jar}: spawn the demo application with the javaagent on the requested JDK, stream logs to
+ * {@code jar}: spawn the target application with the javaagent on the requested JDK, stream logs to
  * {@code work/logs}, wait for readiness (health 2xx or TCP accept, 30s), write the PID file, then
  * either follow the process (default) or detach.
  */
@@ -27,7 +27,7 @@ final class JarCommand {
         String session = Args.session(args);
         String collector = Urls.collectorOrigin(args.get("--collector"));
         Path jar = requireFile(args.require("--jar"), "JAR_NOT_FOUND",
-                "demo jar 不存在；先构建 demo 后端: JAVA_HOME=\"$JAVA8\" mvn -B -q -DskipTests package -f \"demo/buggy-shop-boot-vue/backend/pom.xml\"。");
+                "目标 JAR 不存在；请检查 --jar 路径。");
         Path agent = requireFile(args.require("--agent"), "AGENT_NOT_FOUND",
                 "agent jar 不存在；先构建: JAVA_HOME=\"$JAVA21\" mvn -B -q -DskipTests package -pl \"agent\" -am。");
         Path javaExe = resolveJava(args.get("--java"));
@@ -100,14 +100,14 @@ final class JarCommand {
                 System.err.println("APP_EXITED: 应用在就绪前退出（pid=" + pid + "）；日志尾 20 行:");
                 Util.printTail(System.err, lastLines(errLog, outLog));
                 System.err.println("建议: 先看 \"work/logs/*.err.log\"；常见原因 = jar 损坏/端口占用/JDK 版本不对"
-                        + "（demo 需要 JDK8: --java \"$JAVA8/bin/java\"）/H2 初始化失败。");
+                        + "（检查应用 JDK 与 Spring Boot 版本是否匹配）。");
             } else {
                 System.err.println("HEALTH_TIMEOUT: " + (ready == ReadyResult.HEALTH_TIMEOUT
                         ? "健康检查在 " + READY_TIMEOUT.toSeconds() + "s 内未通过: \"" + healthUrl + "\""
                         : "TCP 连接 127.0.0.1:" + port + " 在 " + READY_TIMEOUT.toSeconds() + "s 内未就绪"));
                 System.err.println("进程仍在运行（pid=" + pid + "，PID_FILE=\"" + Util.fwd(pidFile) + "\"）；日志尾 20 行:");
                 Util.printTail(System.err, lastLines(errLog, outLog));
-                System.err.println("建议: demo 用 --health \"http://127.0.0.1:8080/api/orders\" 或省略 --health（按 TCP）；"
+                System.err.println("建议: 指定应用真实的 --health URL，或省略 --health（按 TCP 就绪）；"
                         + "启动完成后可 stop --pid-file \"" + Util.fwd(pidFile) + "\"；不静默改端口。");
             }
             return Launcher.EXIT_FAILED;
@@ -238,7 +238,7 @@ final class JarCommand {
             Path exe = executable(path);
             if (exe == null) {
                 throw LauncherException.failed("JAVA_NOT_FOUND", "--java 指向的 java 不存在: \"" + Util.fwd(path)
-                        + "\"；demo/agent 必须用 JDK8 显式指定，例如 --java \"C:/Program Files/Java/jdk1.8.0_221/bin/java\"。");
+                        + "\"；请显式指定应用 JDK，例如 --java \"C:/Program Files/Java/jdk-21/bin/java\"。");
             }
             return exe;
         }
@@ -262,7 +262,7 @@ final class JarCommand {
             }
         }
         throw LauncherException.failed("JAVA_NOT_FOUND", "找不到 java 可执行文件（$JAVA_HOME/bin/java 与 PATH 都没有）；"
-                + "显式给 --java，例如 --java \"C:/Program Files/Java/jdk1.8.0_221/bin/java\"（demo/agent 需要 JDK8）。");
+                + "显式给 --java，例如 --java \"C:/Program Files/Java/jdk-21/bin/java\"。");
     }
 
     /** Windows accepts `--java .../bin/java` (no .exe); resolve it to the real executable. */

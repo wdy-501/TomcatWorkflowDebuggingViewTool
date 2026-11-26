@@ -1,7 +1,7 @@
 {
   "name": "@traceboard/sdk",
-  "version": "0.1.0",
-  "description": "TraceBoard runtime SDK (click/fetch/XHR/wrapFn/uiEffect facts; S5 manifest source mapping; no build-time locals/L2, no CDN)",
+  "version": "1.0.0",
+  "description": "TraceBoard runtime SDK 1.0.0 (click/fetch/XHR/wrapFn/uiEffect facts; manifest source mapping; no build-time locals/L2, no CDN)",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

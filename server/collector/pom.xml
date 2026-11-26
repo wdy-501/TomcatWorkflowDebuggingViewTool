@@ -7,7 +7,7 @@
   <parent>
     <groupId>io.traceboard</groupId>
     <artifactId>traceboard</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <relativePath>../../pom.xml</relativePath>
   </parent>
 
@@ -15,7 +15,7 @@
   <packaging>jar</packaging>
 
   <name>TraceBoard Collector</name>
-  <description>S3 collector: NDJSON ingest, in-memory append-only store, read-only session query, read-time requests/graph derivation (S3 frontend facts, derived confidence) and read-only replay window</description>
+  <description>TraceBoard 1.0.0 collector: NDJSON ingest, in-memory append-only store, read-only session/requests/graph queries and read-only replay window</description>
 
   <dependencies>
     <dependency>

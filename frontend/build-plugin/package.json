@@ -1,9 +1,9 @@
 {
   "name": "@traceboard/vite-plugin",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
-  "description": "TraceBoard S5 shallow Vite plugin: function/file/line manifest for front-end source mapping (no .map decoding, no dependencies)",
+  "description": "TraceBoard 1.0.0 shallow Vite plugin: function/file/line manifest for front-end source mapping (no .map decoding, no dependencies)",
   "main": "./index.mjs",
   "types": "./index.d.mts",
   "exports": {

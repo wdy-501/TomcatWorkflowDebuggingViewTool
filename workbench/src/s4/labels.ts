@@ -33,6 +33,31 @@ export function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? (kind.length > 0 ? kind : "未采集");
 }
 
+/** Generic (non-demo) instrumentation marker: any `GENERIC`/`GENERIC_*` flag. */
+export function isGenericNode(node: Pick<GraphNode, "flags">): boolean {
+  return node.flags.some(
+    (flag) => flag === "GENERIC" || flag.startsWith("GENERIC_")
+  );
+}
+
+/** `GENERIC_AUTO` service spans are the auto-scanned public methods (noise candidates). */
+export function isGenericAutoService(
+  node: Pick<GraphNode, "kind" | "flags">
+): boolean {
+  return node.kind === "service" && node.flags.includes("GENERIC_AUTO");
+}
+
+/**
+ * Node label for the start banner / main chain. Generic service spans are labelled as
+ * business methods instead of the demo's fixed `Service` vocabulary.
+ */
+export function nodeKindLabel(node: Pick<GraphNode, "kind" | "flags">): string {
+  if (node.kind === "service" && isGenericNode(node)) {
+    return "业务方法（通用插桩）";
+  }
+  return kindLabel(node.kind);
+}
+
 /** Drop package prefixes from Java node keys; the full key stays in the tooltip/detail. */
 export function compactNodeKey(kind: string, key: string): string {
   if (kind !== "controller" && kind !== "service" && kind !== "mapper") {
@@ -63,13 +88,19 @@ export function controlNameFor(nodeKey: string | null): string | null {
   return nodeKey;
 }
 
-/** Repository-relative source path used in hover tooltips. */
+/**
+ * Repository-relative source path used in hover tooltips. Generic-agent nodes never
+ * borrow the built-in demo source root; they show the event's own source or nothing.
+ */
 export function repoSourcePath(node: GraphNode): string | null {
   const source = node.source;
   if (source === null || source.file === null) {
     return null;
   }
   const line = source.line === null ? "" : `:${source.line}`;
+  if (isGenericNode(node)) {
+    return `${source.file}${line}`;
+  }
   if (source.file.startsWith("src/")) {
     return `${FRONTEND_SOURCE_ROOT}${source.file}${line}`;
   }
@@ -112,6 +143,33 @@ export function flagDescription(flag: string): string {
   }
   if (flag === "ASYNC_INHERITED") {
     return "异步线程在创建时继承了调用上下文";
+  }
+  if (flag === "GENERIC") {
+    return "通用插桩标记：来自用户项目的动态方法，不是内置 demo 的固定类";
+  }
+  if (flag === "GENERIC_AUTO") {
+    return "应用主包自动扫包采集的 public 业务方法（可能有 getter/工具方法噪声）";
+  }
+  if (flag === "GENERIC_INCLUDED") {
+    return "由 --include-method 显式指定采集的方法";
+  }
+  if (flag === "GENERIC_ROOT") {
+    return "没有上层调用时，由显式 include-method 建立的根节点";
+  }
+  if (flag === "TRACEPARENT_ONLY") {
+    return "只有 traceparent、没有 X-TraceBoard-Click：后端请求无法与页面点击精确关联";
+  }
+  if (flag === "RETURN_TRUNCATED") {
+    return "返回值超出采集预算，已截断（只保留摘要）";
+  }
+  if (flag.startsWith("ARGS_CAPPED=")) {
+    return "参数列表因采集预算被截断的数量";
+  }
+  if (flag.startsWith("EXCEPTION=")) {
+    return "方法抛出异常（只记录异常类型，不采集 message）";
+  }
+  if (flag === "SQL_SELECT" || flag === "SQL_INSERT" || flag === "SQL_UPDATE" || flag === "SQL_DELETE") {
+    return "SQL 语句类型标记（不采集 SQL 文本）";
   }
   if (flag === "NO_DEBUG_INFO") {
     return "方法没有调试信息，无法给出变量名或行号";

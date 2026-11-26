@@ -18,6 +18,57 @@ export interface S3Error {
 /** Default runtime-SDK session for the S3 board (dispatch §3). */
 export const S3_DEFAULT_SESSION_ID = "s_s3demo";
 
+const S3_SESSION_PATTERN = /^s_[A-Za-z0-9_-]+$/;
+
+export interface S3SessionResolution {
+  /** Initial session to query; falls back to {@link S3_DEFAULT_SESSION_ID}. */
+  sessionId: string;
+  /** URL asked for `?session=auto`: adopt the newest session from /api/v1/sessions. */
+  auto: boolean;
+  /** A valid explicit `?session=s_xxx` was present in the URL. */
+  fromUrl: boolean;
+}
+
+export function isValidS3SessionId(value: string): boolean {
+  return S3_SESSION_PATTERN.test(value.trim());
+}
+
+/**
+ * Resolves the session from the URL. `TraceBoard run` opens
+ * `http://127.0.0.1:5173/?session=s_run_...#board`; without a (valid) parameter the
+ * demo default `s_s3demo` is kept. `?session=auto` selects the newest session once
+ * the session list is available.
+ */
+export function resolveS3Session(search?: string): S3SessionResolution {
+  const query = search ?? (typeof window === "undefined" ? "" : window.location.search);
+  const raw = new URLSearchParams(query).get("session");
+  if (raw === null) {
+    // Static showcase is tied to the exported s_s3demo snapshot. A local/packaged
+    // workbench has a live collector, so no suffix should mean "newest session".
+    const staticShowcase =
+      typeof window !== "undefined" &&
+      window.__TRACEBOARD_STATIC_DEMO__ !== undefined;
+    return {
+      sessionId: S3_DEFAULT_SESSION_ID,
+      auto: !staticShowcase,
+      fromUrl: false,
+    };
+  }
+  const value = raw.trim();
+  if (value.length === 0) {
+    return { sessionId: S3_DEFAULT_SESSION_ID, auto: false, fromUrl: false };
+  }
+  if (value.toLowerCase() === "auto") {
+    return { sessionId: S3_DEFAULT_SESSION_ID, auto: true, fromUrl: true };
+  }
+  if (!S3_SESSION_PATTERN.test(value)) {
+    return { sessionId: S3_DEFAULT_SESSION_ID, auto: false, fromUrl: false };
+  }
+  return { sessionId: value, auto: false, fromUrl: true };
+}
+
+const initialSession = resolveS3Session();
+
 /**
  * S3 board state: session, request list (with S3 fields), the selected trace's
  * mixed graph, and the read-only timeline window. No HTTP calls happen here —
@@ -26,8 +77,12 @@ export const S3_DEFAULT_SESSION_ID = "s_s3demo";
  */
 export const useS3Store = defineStore("s3", {
   state: () => ({
-    sessionId: S3_DEFAULT_SESSION_ID as string,
+    sessionId: initialSession.sessionId as string,
     sessions: [] as SessionSummary[],
+    /** `?session=auto`: adopt the newest session after the first list load. */
+    sessionAuto: initialSession.auto,
+    /** The initial session came from the URL (run's session link). */
+    sessionFromUrl: initialSession.fromUrl,
     requests: [] as RequestSummary[],
     sdkActive: false,
     requestsStatus: "idle" as S3LoadStatus,
@@ -52,6 +107,7 @@ export const useS3Store = defineStore("s3", {
   actions: {
     setSession(sessionId: string) {
       this.sessionId = sessionId;
+      this.sessionAuto = false;
       this.requests = [];
       this.sdkActive = false;
       this.requestsStatus = "loading";
@@ -68,6 +124,31 @@ export const useS3Store = defineStore("s3", {
     },
     setSessions(sessions: SessionSummary[]) {
       this.sessions = sessions;
+    },
+    /**
+     * `?session=auto`: switch to the newest known session (largest lastEventAtMs,
+     * then startedAtMs). Returns the adopted id, or null when no session exists yet.
+     */
+    adoptNewestSession(): string | null {
+      let newest: SessionSummary | null = null;
+      for (const session of this.sessions) {
+        if (session.sessionId.length === 0 || !isValidS3SessionId(session.sessionId)) {
+          continue;
+        }
+        if (
+          newest === null ||
+          session.lastEventAtMs > newest.lastEventAtMs ||
+          (session.lastEventAtMs === newest.lastEventAtMs &&
+            session.startedAtMs > newest.startedAtMs)
+        ) {
+          newest = session;
+        }
+      }
+      if (newest === null) {
+        return null;
+      }
+      this.setSession(newest.sessionId);
+      return newest.sessionId;
     },
     beginRefresh() {
       this.refreshing = true;

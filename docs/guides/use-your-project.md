@@ -1,110 +1,76 @@
-# 用 TraceBoard 调试自己的项目
+# 用 TraceBoard 调试自己的 Spring Boot 项目
 
-> 适用版本：v0.1 本地演示版｜更新：2026-11-25
->
-> **重要边界**：TraceBoard 不是“任意 Java 方法自动插桩”的通用调试器。collector、workbench、前端 SDK 和采集协议可以直接复用；当前 agent 只插桩 demo 的固定 FQCN（`com.example.shop...`）。要把自己的 Controller/Service/SQL 接进来，需要修改 agent 目标类并重新构建。
+> TraceBoard 1.0.0 通用模式｜Spring Boot 2.x/3.x｜JDK 8/17/21｜Spring MVC + MyBatis｜2026-11-26
 
-## 1. 先确认你要看什么
+## 1. 一条命令
 
-| 目标 | 现在能否直接用 | 说明 |
-|---|---|---|
-| 自己前端的点击、fetch/XHR、请求体字段 | 可以 | 引入 SDK + `/ingest` 代理 |
-| 自己后端的 Controller/Service/Mapper/SQL | 需要改 agent | 修改 `TraceAgent`/`SpanContext`/Advice |
-| 自己方法的行级局部变量 | 不可以 | 当前只有 demo 的 L2 探针 |
-| 只读回放、树形链路、详情、缺口 | 可以 | 使用 workbench |
+在便携包根目录：
 
-如果只想先看懂产品，请直接按 README 的「A. 先看内置示例」运行，不要先改代码。
-
-## 2. 端口与 JVM
-
-| 进程 | 端口 | JDK | 作用 |
-|---|---|---|---|
-| collector | 8601 | 21 | 接收事件、查询与回放 |
-| 你的后端 + agent | 你的端口（demo 是 8080） | 8（当前验证） | 产生 controller/service/mapper/sql span |
-| 你的前端 + SDK | 你的端口 | — | 产生 click/fetch/XHR 事件 |
-| workbench | 5173 | 21 | 查看事实、回放、详情 |
-
-启动顺序：**collector → 应用（agent）→ 前端 → workbench**。所有进程默认只在本机回环使用。
-
-## 3. 从 Release 运行（不构建源码）
-
-1. 下载 `TraceBoard-0.1.0-win-x64-portable.zip` 并解压。
-2. 启动 collector（JDK 21）：
-   ```bash
-   java -jar app/collector.jar
-   ```
-3. 启动 workbench（JDK 21；不要用 `Run-TraceBoard.cmd`，它会同时启动 demo 后端）：
-   ```bash
-   java -jar app/launcher.jar ui \
-     --dir workbench --port 5173 \
-     --collector http://127.0.0.1:8601
-   ```
-4. 打开 `http://localhost:5173`。打包版 workbench 不含 demo，直接显示追踪台。
-5. 把你的后端按第 5 节挂上 agent，把你的前端按第 6 节接 SDK。
-
-> Release 便携包不包含前端 SDK 源码。需要 SDK 时，从 GitHub 源码包获取 `frontend/sdk` 并构建（见第 6 节）。
-
-## 4. 从源码运行
-
-```bash
-# 1) collector / agent / launcher（JDK21）
-JAVA_HOME="C:/Program Files/Java/jdk-21" mvn -B -q -DskipTests package -pl agent,server/collector,server/launcher -am
-
-# 2) workbench（Node 22）
-(cd "workbench" && npm ci && npm run dev)
-
-# 3) SDK IIFE（给前端用）
-(cd "frontend/sdk" && npm ci && npm run build)
+```bat
+TraceBoard.cmd run --jar "C:\path\to\your-app.jar" --java "C:\path\to\jdk\bin\java.exe"
 ```
 
-产物：
+从源码运行：
+
+```bash
+# 一次性构建 launcher/agent/collector（JDK21）
+JAVA_HOME="C:/Program Files/Java/jdk-21" \
+  mvn -B -q -DskipTests package -pl agent,server/collector,server/launcher -am
+
+# 构建工作台（run 默认使用 workbench/dist）
+(cd workbench && npm ci && npm run build)
+
+# 启动你的 JAR
+java -jar server/launcher/target/traceboard-launcher-1.0.0.jar \
+  run --jar "C:/path/to/your-app.jar" \
+  --java "C:/Program Files/Java/jdk-21/bin/java.exe"
+```
+
+`run` 会自动：
+
+1. 启动/复用 collector `8601`；
+2. 启动 workbench `5173`（源码路径或 `--ui-dir`）；
+3. 从 JAR 的 `Start-Class`/`Main-Class` 推导应用主包，打印 `INCLUDE=...`；
+4. 生成 `s_run_<时间>` 会话，带上 generic agent 启动应用；
+5. 打开 `http://127.0.0.1:5173/?session=<id>&app=<url>#app`：  
+   - 第一个页签是 **「我的应用」**，iframe 直接加载你的 JAR 服务；
+   - 第二个页签是 **「追踪台」**，自动选择最新会话。
+
+应用 URL 默认 `http://127.0.0.1:8080/`。自定义端口用 `--port <port>`；应用配置了非常规路径/地址时用 `--app-url <url>`。
+
+停止：复制启动时打印的 `STOP=...` 命令执行，或使用 `stop --session <id>`。
+
+## 2. 默认采集什么
+
+| 代码 | 结果 |
+|---|---|
+| `@Controller` / `@RestController` 映射方法 | `controller` 根节点 |
+| `@Service` / `@Component` / `@Repository` 方法 | `service` 子节点 |
+| 应用主包内所有 public 方法 | `service` 子节点，带 `GENERIC_AUTO` |
+| `QuoteCalculator#computeQuote` 这类普通业务类 | 自动扫包，`service` |
+| MyBatis `MapperProxy#invoke` | `mapper`，nodeKey=`接口#方法` |
+| `PreparedStatementHandler` 的 query/update/execute/batch | `sql`，语句 id 和 UPDATE 行数 |
+| 方法参数/返回值/异常 | `values` + `EXCEPTION=<SimpleName>`；Map 显示键值，应用 POJO/DTO 显示最多 12 个字段（直接读字段，不调用 getter） |
+| 行级局部变量 | **不采集** |
+| SQL 文本/响应体/Cookie | **不采集** |
+
+自动扫包会产生 getter/setter 噪声；工作台请求树里有“隐藏 generic 自动插桩叶子”过滤，也可用参数收窄：
 
 ```text
-agent/target/traceboard-agent-0.1.0-SNAPSHOT.jar
-server/collector/target/traceboard-collector-0.1.0-SNAPSHOT.jar
-server/launcher/target/traceboard-launcher-0.1.0-SNAPSHOT.jar
-frontend/sdk/dist/traceboard-sdk.iife.js
+--exclude com.myapp.model
+--include-method com.myapp.service.OrderService#submit
 ```
 
-## 5. 后端挂 agent
+`includeMethod` 在没有 Controller 父帧时可以创建 `GENERIC_ROOT`；普通自动扫包方法没有父帧时不会伪造根。
 
-当前验证环境是 **JDK 8 + Spring Boot 2.x / Tomcat 8.5**。agent 的 class major 是 52，其他 JVM 版本未验证。
+## 3. 前端关联（可选）
 
-```bash
-java -javaagent:"/absolute/path/agent.jar" \
-  -Dtraceboard.ingestUrl="http://127.0.0.1:8601/ingest/v1/events" \
-  -Dtraceboard.sessionId=s_myapp \
-  -jar "/absolute/path/your-app.jar"
-```
-
-规则：
-
-- `-javaagent` 和 `-D` 必须在 `-jar` 前；
-- `traceboard.ingestUrl` 是**完整 ingest URL**，必须以 `/ingest/v1/events` 结尾；
-- `traceboard.sessionId` 必须匹配 `s_[A-Za-z0-9_-]+`；
-- 先启动 collector，再启动应用；
-- 应用启动后可查握手：
-  ```bash
-  curl http://127.0.0.1:8601/api/v1/sessions/s_myapp/agent
-  ```
-  返回 `connected:true` 且 pid/session 匹配才算接通。
-
-如果 Tomcat 启动出现 JUL/agent 死锁，加：
-
-```bash
--Djava.util.logging.manager=java.util.logging.LogManager
-```
-
-## 6. 前端接 SDK
-
-### 6.1 纯 HTML / 任意框架
-
-把构建好的 `traceboard-sdk.iife.js` 放到前端静态目录，并在页面加载前设置配置：
+不接前端 SDK 时，后端仍有完整 controller/service/mapper/SQL 链，但标记 `LOST_BACKEND`。需要“浏览器点击 → 后端”关联时：
 
 ```html
 <script>
   window.__TRACEBOARD_CONFIG__ = {
-    sessionId: "s_myapp",
+    sessionId: "s_run_...",   // 必须与本次 run 的 session 一致
     ingestUrl: "/ingest",
     appName: "my-app",
     observeMs: 1500
@@ -113,108 +79,70 @@ java -javaagent:"/absolute/path/agent.jar" \
 <script src="/traceboard-sdk.iife.js"></script>
 ```
 
-- `ingestUrl` 是**相对基路径**，SDK 会向 `/ingest/v1/events` 发送 NDJSON；
-- `sessionId` 必须与后端 agent 完全一致；
-- `observeMs` 是纯前端点击的观察窗口，默认 1500ms。
+并把前端 dev server 的 `/ingest` 代理到 `http://127.0.0.1:8601`（`changeOrigin:false`）。SDK IIFE 在源码 `frontend/sdk/dist/traceboard-sdk.iife.js`（`npm ci && npm run build`）。
 
-### 6.2 开发服务器代理
+没有合法 `traceparent` + `X-TraceBoard-Click` 时，后端不会伪造 EXACT；只有 traceparent 时标 `LOST + TRACEPARENT_ONLY`。
 
-Collector 没有 CORS，必须由前端 dev server 同源转发，并保留 `traceparent`/`X-TraceBoard-Click` 等头：
+## 4. 手动启动（IDEA / 已有启动脚本）
 
-Vite：
-
-```ts
-server: {
-  proxy: {
-    "/ingest": {
-      target: "http://127.0.0.1:8601",
-      changeOrigin: false
-    }
-  }
-}
-```
-
-Webpack devServer：
-
-```js
-proxy: {
-  "/ingest": {
-    target: "http://127.0.0.1:8601",
-    changeOrigin: false
-  }
-}
-```
-
-不要直接在浏览器里跨域 POST 到 8601；关联头丢失后后端只能显示 `LOST` 链。
-
-### 6.3 ESM 方式
-
-```ts
-import { initTraceBoard } from "./traceboard-sdk/index.js";
-
-initTraceBoard({
-  ingestUrl: "/ingest",
-  sessionId: "s_myapp",
-  appName: "my-app"
-});
-```
-
-SDK 只采集点击、fetch/XHR、`wrapFn` 与声明的 UI 效果；不采集响应体、Cookie 或任意 JS 局部变量。
-
-## 7. 在工作台看结果
-
-1. 打开 `http://localhost:5173`；
-2. 进入「追踪台」；
-3. 在会话输入框输入 `s_myapp` 并回车/刷新；
-4. 点击你前端页面上的控件，工作台应出现点击根、fetch 和后端 span；
-5. 如果只有前端、没有后端，见第 8 节。
-
-## 8. 为什么我看不到自己的后端 Span
-
-这是当前版本的已知边界：agent 的插桩目标是 demo 固定类，而不是“任意 Controller”。
-
-需要修改这些文件（源码路径）：
-
-| 文件 | 改什么 |
-|---|---|
-| `agent/src/main/java/io/traceboard/agent/TraceAgent.java` | `CONTROLLER_TYPE`/`SERVICE_TYPE`，以及 `.type(...).transform(advice(...))` 的方法匹配 |
-| `agent/src/main/java/io/traceboard/agent/SpanContext.java` | `CONTROLLER_NODE_KEY`、`SERVICE_NODE_KEY`、Mapper/SQL 的目标类与语句后缀 |
-| `MapperAdvice.java` / `SqlAdvice.java` | 你的 mapper 方法过滤、MyBatis 语句匹配 |
-| `ControllerAdvice.java` / `ServiceAdvice.java` | 简单 entry/exit 可复用；返回类型不是 Object/boolean 时新增/调整 advice |
-
-示例：把自己的 Controller 加为 root
-
-```java
-static final String CONTROLLER_TYPE = "com.acme.order.OrderController";
-static final String CONTROLLER_NODE_KEY = CONTROLLER_TYPE + "#submit";
-```
-
-并在 `TraceAgent.install` 中把 `.type(...)` 和 `.transform(advice(...))` 指向你的类/方法。改完重新构建：
+不使用 `run` 时，可以自己启动 collector + workbench，并给应用加：
 
 ```bash
-JAVA_HOME="C:/Program Files/Java/jdk-21" \
-  mvn -B -q -DskipTests package -pl agent -am
+java -javaagent:"/abs/agent.jar" \
+  -Dtraceboard.mode=generic \
+  -Dtraceboard.ingestUrl="http://127.0.0.1:8601/ingest/v1/events" \
+  -Dtraceboard.sessionId=s_myapp \
+  -Dtraceboard.include=com.myapp \
+  -jar your-app.jar
 ```
 
-然后重启应用。不要期望仅换 sessionId 就能自动追踪任意方法。
+collector 先启动；JDK8/17/21 应用都能挂载 agent。工作台输入 `s_myapp`，或直接用 `?session=s_myapp`。
 
-## 9. 常见问题
+常用 agent 参数：
+
+```text
+-Dtraceboard.include=com.myapp
+-Dtraceboard.exclude=com.myapp.model,com.myapp.dto
+-Dtraceboard.includeMethod=com.myapp.service.OrderService#submit
+-Dtraceboard.captureArgs=true
+-Dtraceboard.captureReturn=true
+-Dtraceboard.captureMyBatis=true
+-Dtraceboard.maxSpansPerTrace=256
+-Dtraceboard.maxValues=64
+-Dtraceboard.maxString=512
+```
+
+## 5. 验证建议
+
+用任意满足条件的 Spring Boot JAR 做一次最小验证：
+
+1. 应用启动后打开 `/api/health` 或首页；
+2. 在「追踪台」确认出现 controller 节点；
+3. 调一个会访问 MyBatis 的接口，确认 service/mapper/sql 节点与 SQL 行数；
+4. 发一个带 JSON 请求体的接口，确认 DTO/Map 字段出现在参数值里；
+5. 再打开一个页面动作，确认前端 SDK 接入时是 EXACT，未接入时是 `LOST_BACKEND`。
+
+旧版开发样例已迁移到 [备份仓库](https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool_back)，正式仓库不再包含测试样例。完整字段字典见 [重要说明](../important-notes.md)。
+
+## 6. 常见问题
 
 | 现象 | 检查 |
 |---|---|
-| `localhost:5173` 拒绝连接 | workbench 未启动；打包版用 `launcher.jar ui`，源码用 `npm run dev` |
-| `GET .../agent` 404 | collector 是否先启动；应用是否带 `-javaagent`；session 是否一致；ingest URL 是否以 `/ingest/v1/events` 结尾 |
-| 工作台没有前端点击 | SDK 是否加载；`__TRACEBOARD_CONFIG__` 是否在 SDK 前设置；`/ingest` 代理是否指向 8601 |
-| 有 fetch、没有后端 span | agent 目标类不是你的类（当前版本最常见）；按第 8 节改 agent |
-| 有 controller、没有 SQL | 当前 SQL 只匹配 demo 的 MyBatis `PreparedStatementHandler#update` 和固定 mapper 语句 |
-| 关联不是 EXACT | 前端请求未经过同源代理，`traceparent` 丢失；用 `changeOrigin:false` |
-| 数据重启后消失 | collector/H2 都是内存存储，重启即清空 |
-| Tomcat 启动异常 | 加 `-Djava.util.logging.manager=java.util.logging.LogManager` |
+| `run` 启动失败/找不到 launcher | 先构建 `server/launcher`；或使用便携包内的 `TraceBoard.cmd` |
+| 应用没启动 | 检查 `--java` 是否匹配 Spring Boot 版本（Boot2/JDK8、Boot3/JDK17+）；看 `work/logs/<session>-app.log` |
+| 有 controller，没有 service/mapper | `INCLUDE=` 是否是应用主包；Mapper 是否在自动推断的业务包内；看 `generic_targets`/`generic_transformed` 日志 |
+| 自动扫包太吵 | `--exclude` 排除 DTO/model；或用 `--include-method` 精确采集 |
+| 没有 EXACT | 前端是否发 `traceparent` + `X-TraceBoard-Click`；`/ingest` 是否同源代理 |
+| 看不到局部变量 | v1 明确不支持行级局部变量/L2 |
+| 应用启动后没有新事件 | 先看 collector 8601 health；agent handshake `/api/v1/sessions/<id>/agent` 是否 connected |
+| Boot 3 启动异常 | 使用 JDK17/21；agent 仍为 release 8，但 Byte Buddy 1.14.19 支持 JDK21 |
 
-## 10. 安全与边界
+## 7. 边界与安全
 
-- 仅本机回环使用；无鉴权、无 TLS、无云端上传、无遥测。
-- SDK 会采集 query/body 字段和值，当前没有通用脱敏；**不要直接用于真实敏感数据或公网环境**。
-- 回放只隐藏未来事件，不重跑程序、不重发请求、不写数据库。
-- 没有 SSE/WebSocket；workbench 是低频轮询。
-- 没有任意方法 L2/局部变量、截图回放或云端沙箱。
+- 仅本机回环；无鉴权/TLS/云端上传/遥测。
+- 仅 load-time 插桩：应用必须通过 agent 启动；不支持动态 attach。
+- 仅可执行 Spring Boot JAR；外部 Tomcat WAR、WebFlux、JPA/Hibernate SQL 不在 v1。
+- 不采集行级局部变量、SQL 文本、响应体、Cookie；参数/返回值有长度和数量预算。
+- POJO/DTO 只做浅层字段摘要（最多 12 个字段，不调用 getter/toString）；嵌套对象、集合元素、Jackson `JsonNode`、平台对象、代理和命名模块中的类可能只显示类型或摘要。字段级采集仍受值数量、单值长度和 48 KiB 预算限制。
+- `@Async`/线程池不自动传播（只继承新建线程）；超限有 `DROP_COUNT`/`VALUES_CAPPED`，不伪造。
+- 自动扫包会采集 public 方法参数/返回值；不要在生产或真实敏感数据上直接使用。

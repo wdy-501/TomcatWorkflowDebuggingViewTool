@@ -3,55 +3,72 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
-$Version = "0.1.0"
+$Version = "1.0.0"
 $Name = "TraceBoard-$Version-win-x64-portable"
 $Out = Join-Path $Repo $OutDir
 $Stage = Join-Path $Out $Name
 $Zip = Join-Path $Out "$Name.zip"
 
-foreach ($file in @(
-  "agent\target\traceboard-agent-0.1.0-SNAPSHOT.jar",
-  "server\collector\target\traceboard-collector-0.1.0-SNAPSHOT.jar",
-  "server\launcher\target\traceboard-launcher-0.1.0-SNAPSHOT.jar",
-  "demo\buggy-shop-boot-vue\backend\target\demo-shop-backend-0.1.0-SNAPSHOT.jar",
+$artifacts = @(
+  "agent\target\traceboard-agent-$Version.jar",
+  "server\collector\target\traceboard-collector-$Version.jar",
+  "server\launcher\target\traceboard-launcher-$Version.jar",
   "workbench\dist-packaged\index.html"
-)) {
+)
+foreach ($file in $artifacts) {
   if (-not (Test-Path -LiteralPath (Join-Path $Repo $file))) { throw "Build artifact missing: $file" }
 }
 
 if (Test-Path -LiteralPath $Stage) { Remove-Item -LiteralPath $Stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $Stage "app"), (Join-Path $Stage "workbench") | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $Repo "agent\target\traceboard-agent-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\agent.jar")
-Copy-Item -LiteralPath (Join-Path $Repo "server\collector\target\traceboard-collector-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\collector.jar")
-Copy-Item -LiteralPath (Join-Path $Repo "server\launcher\target\traceboard-launcher-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\launcher.jar")
-Copy-Item -LiteralPath (Join-Path $Repo "demo\buggy-shop-boot-vue\backend\target\demo-shop-backend-0.1.0-SNAPSHOT.jar") -Destination (Join-Path $Stage "app\demo.jar")
+Copy-Item -LiteralPath (Join-Path $Repo "agent\target\traceboard-agent-$Version.jar") -Destination (Join-Path $Stage "app\agent.jar")
+Copy-Item -LiteralPath (Join-Path $Repo "server\collector\target\traceboard-collector-$Version.jar") -Destination (Join-Path $Stage "app\collector.jar")
+Copy-Item -LiteralPath (Join-Path $Repo "server\launcher\target\traceboard-launcher-$Version.jar") -Destination (Join-Path $Stage "app\launcher.jar")
 Copy-Item -Path (Join-Path $Repo "workbench\dist-packaged\*") -Destination (Join-Path $Stage "workbench") -Recurse -Force
-
-# The interactive demo is intentionally excluded from the Windows package.
 $demoDir = Join-Path $Stage "workbench\demo"
 if (Test-Path -LiteralPath $demoDir) { Remove-Item -LiteralPath $demoDir -Recurse -Force }
-if (Test-Path -LiteralPath $demoDir) {
-  throw "Packaging error: workbench demo assets must not be included ($demoDir)"
-}
-$bundledJs = Get-ChildItem -Path (Join-Path $Repo "workbench\dist-packaged\assets\*.js") -ErrorAction SilentlyContinue
-if ($bundledJs -and (Select-String -Path $bundledJs.FullName -Pattern "app-tab-demo" -Quiet)) {
-  throw "Packaging error: packaged workbench still contains the interactive demo tab"
-}
-Copy-Item -LiteralPath (Join-Path $Repo "scripts\run-traceboard.ps1") -Destination $Stage
-Copy-Item -LiteralPath (Join-Path $Repo "scripts\stop-traceboard.ps1") -Destination $Stage
-Copy-Item -LiteralPath (Join-Path $Repo "scripts\Run-TraceBoard.cmd") -Destination $Stage
-Copy-Item -LiteralPath (Join-Path $Repo "scripts\Stop-TraceBoard.cmd") -Destination $Stage
-@"
-TraceBoard $Version — Windows portable package (requires JDK 8 and JDK 21)
+$fixturesDir = Join-Path $Stage "workbench\fixtures"
+if (Test-Path -LiteralPath $fixturesDir) { Remove-Item -LiteralPath $fixturesDir -Recurse -Force }
+Copy-Item -LiteralPath (Join-Path $Repo "scripts\TraceBoard.cmd") -Destination $Stage
+Copy-Item -LiteralPath (Join-Path $Repo "LICENSE") -Destination $Stage
+Copy-Item -LiteralPath (Join-Path $Repo "docs\important-notes.md") -Destination (Join-Path $Stage "IMPORTANT-NOTES.md")
 
-1. Install Eclipse Temurin JDK 8 and JDK 21 (do not redistribute Oracle JDK).
-2. Set JAVA8 and JAVA21 to the JDK homes, or edit run-traceboard.ps1 defaults.
-3. Run Run-TraceBoard.cmd. It starts collector :8601, demo :8080, workbench :5173.
-4. Workbench session: s_demo_package.
-5. Stop-TraceBoard.cmd stops the three processes.
-6. Logs/PIDs: work\.
-7. This is a local portable package; no cloud, no upload, no Qoder Site.
+@"
+TraceBoard $Version - Windows x64 portable package
+
+REQUIREMENTS
+- JDK 21 for TraceBoard launcher/collector.
+- JDK 8, 17, or 21 for the application you debug.
+- Windows 10/11; only loopback ports are used.
+
+QUICK START
+1. Open a terminal in this folder.
+2. Run:
+   TraceBoard.cmd run --jar "C:\path\to\your-app.jar" --java "C:\path\to\jdk\bin\java.exe"
+3. TraceBoard starts the collector (:8601), the workbench (:5173), and your JAR,
+   then opens the "My App" tab. Switch to "Trace Board" for the latest session.
+
+OPTIONS
+  --port <port>            application port; also sets -Dserver.port
+  --app-url <url>          URL embedded in the My App tab (default http://127.0.0.1:8080/)
+  --include <package>      override auto-detected application package
+  --exclude <package>      exclude noisy getters/DTO packages
+  --include-method <class#method>
+  --health <url>           wait for this application health URL
+  --no-open                do not open a browser
+  --java <path>            java.exe used for the application
+
+STOP
+Copy and run the STOP command printed by TraceBoard, or use:
+  java -jar app\launcher.jar stop --session <session-id>
+
+LOGS
+  work\logs\
+
+BOUNDARIES
+Local use only. No cloud upload, no telemetry, no dynamic attach, no line-level
+locals. See README.md and docs\important-notes.md in the source repository.
 "@ | Set-Content -LiteralPath (Join-Path $Stage "README-PORTABLE.txt") -Encoding UTF8
 
 if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force }

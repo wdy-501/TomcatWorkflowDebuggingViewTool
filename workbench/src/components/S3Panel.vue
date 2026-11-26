@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   CollectorHttpError,
   CollectorUnreachableError,
@@ -18,7 +18,10 @@ import {
   compactNodeKey,
   confidenceBrief,
   controlNameFor,
+  isGenericAutoService,
+  isGenericNode,
   kindLabel,
+  nodeKindLabel,
   nodeSqlSummary,
   repoSourcePath,
 } from "../s4/labels";
@@ -39,6 +42,9 @@ const staticDemoMode = isStaticDemoMode();
 const selectedSpanId = ref<string | null>(null);
 const autoSelectedTraceId = ref<string | null>(null);
 const showBranches = ref(true);
+const treeCanvas = ref<HTMLElement | null>(null);
+/** Generic auto-scanned public methods are leaves most of the time; hide them on demand. */
+const hideGenericLeaves = ref(false);
 
 /** Low-frequency polling only while LIVE and visible — this is not realtime. */
 const POLL_INTERVAL_MS = 5000;
@@ -123,12 +129,31 @@ async function loadSessions(): Promise<void> {
   }
 }
 
+/** Keep the selected request's root as the visual anchor of the tree viewport. */
+async function centerTreeRoot(): Promise<void> {
+  await nextTick();
+  const canvas = treeCanvas.value;
+  const root = canvas?.querySelector<HTMLElement>(".s3-tree__root");
+  if (!canvas || !root) {
+    return;
+  }
+  const canvasRect = canvas.getBoundingClientRect();
+  const rootRect = root.getBoundingClientRect();
+  const delta =
+    rootRect.left + rootRect.width / 2 - (canvasRect.left + canvasRect.width / 2);
+  if (Math.abs(delta) > 1) {
+    canvas.scrollLeft += delta;
+  }
+  canvas.scrollTop = 0;
+}
+
 /** After a graph lands, pin the slider to the full window and refresh replay. */
 function onGraphChanged(): void {
   s3.setSlider(maxRel.value);
   if (s3.mode === "replay") {
     scheduleReplayLoad(true);
   }
+  void centerTreeRoot();
 }
 
 async function loadGraphFor(traceId: string): Promise<void> {
@@ -167,6 +192,15 @@ async function loadGraphFor(traceId: string): Promise<void> {
 async function refresh(silent = false): Promise<void> {
   if (s3.refreshing) {
     return;
+  }
+  // `?session=auto` may be opened before the app produced its first event: keep
+  // retrying the session list until a newest session exists, then query it.
+  if (s3.sessionAuto) {
+    await loadSessions();
+    const adopted = s3.adoptNewestSession();
+    if (adopted !== null) {
+      sessionDraft.value = adopted;
+    }
   }
   s3.beginRefresh();
   try {
@@ -416,7 +450,16 @@ function stopReplayTimer(): void {
 }
 
 onMounted(async () => {
-  void loadSessions();
+  // ?session=auto: adopt the newest session once the list is known. An explicit
+  // ?session=s_xxx is already the store's initial session, so the first refresh
+  // is guaranteed to query the session from the URL.
+  await loadSessions();
+  if (s3.sessionAuto) {
+    const adopted = s3.adoptNewestSession();
+    if (adopted !== null) {
+      sessionDraft.value = adopted;
+    }
+  }
   await refresh();
   if (!staticDemoMode && props.active) {
     startPolling();
@@ -479,7 +522,7 @@ const startTitle = computed<string>(() => {
     if (root.kind === "fetch") {
       return `网络请求 ${root.nodeKey}`;
     }
-    return `${kindLabel(root.kind)} ${compactNodeKey(root.kind, root.nodeKey)}`;
+    return `${nodeKindLabel(root)} ${compactNodeKey(root.kind, root.nodeKey)}`;
   }
   const request = selectedRequest.value;
   if (request === null) {
@@ -865,12 +908,43 @@ const timelineTicks = computed<TimelineTick[]>(() => {
   });
 });
 
-const visibleNodes = computed<GraphNode[]>(() => {
+/** Nodes inside the current live/replay window (before the optional generic-noise filter). */
+const windowNodes = computed<GraphNode[]>(() => {
   const nodes = s3.graph?.nodes ?? [];
   if (s3.mode !== "replay") {
     return nodes;
   }
   return nodes.filter((node) => node.startNs <= cutoffNs.value);
+});
+
+/** Leaf `GENERIC_AUTO` service spans: auto-scanned public methods that add little to the story. */
+const genericLeafCount = computed<number>(() => {
+  const nodes = windowNodes.value;
+  const childIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.parentSpanId !== null) {
+      childIds.add(node.parentSpanId);
+    }
+  }
+  return nodes.filter(
+    (node) => isGenericAutoService(node) && !childIds.has(node.spanId)
+  ).length;
+});
+
+const visibleNodes = computed<GraphNode[]>(() => {
+  const nodes = windowNodes.value;
+  if (!hideGenericLeaves.value) {
+    return nodes;
+  }
+  const childIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.parentSpanId !== null) {
+      childIds.add(node.parentSpanId);
+    }
+  }
+  return nodes.filter(
+    (node) => !(isGenericAutoService(node) && !childIds.has(node.spanId))
+  );
 });
 
 const hiddenNodes = computed<GraphNode[]>(() => {
@@ -935,6 +1009,11 @@ const mainSteps = computed<Map<string, number>>(
 
 const branchCount = computed<number>(() =>
   visibleNodes.value.filter((node) => !isMainNode(node.spanId)).length
+);
+
+/** Generic sessions must not show the demo-only S6 / NoDebugService capability banner. */
+const hasGenericNodes = computed<boolean>(() =>
+  (s3.graph?.nodes ?? []).some(isGenericNode)
 );
 
 function toggleBranches(): void {
@@ -1150,7 +1229,7 @@ function notCollectedReason(status: string): string {
     return "事件丢失（未到达 collector；检查 SDK/agent 与网络）";
   }
   if (status === "NOT_COLLECTED_NO_DEBUG_INFO") {
-    return "缺少调试信息（NoDebugService#compute 无 LocalVariableTable；只证明调用与返回值，不猜变量名/行号）";
+    return "缺少调试信息（该方法的 class 没有 LocalVariableTable；只证明调用与返回值，不猜变量名/行号）";
   }
   return "该事实未采集（原因未提供；检查采集开关与连接）";
 }
@@ -1251,7 +1330,7 @@ const STATUS_LEGEND = [
     status: "NOT_COLLECTED_*",
     tone: "notcollected",
     hint: "灰虚线 + reason（为什么没采到/怎么开启）",
-    reason: "如 NOT_COLLECTED_NO_DEBUG_INFO → NoDebugService#compute 无 LocalVariableTable（灰色状态 + reason，未采集不是成功）",
+    reason: "如 NOT_COLLECTED_NO_DEBUG_INFO → 该方法的 class 没有 LocalVariableTable（灰色状态 + reason，未采集不是成功）",
   },
   { status: "TRUNCATED", tone: "truncated", hint: "条纹 · 已截断/已折叠", reason: null },
   { status: "REDACTED", tone: "redacted", hint: "锁形 · 值级已脱敏", reason: null },
@@ -1380,7 +1459,8 @@ function rootLabel(request: RequestSummary): string {
         {{ s3.refreshing ? "刷新中…" : "刷新" }}
       </button>
       <span class="s3-controls__hint">
-        默认会话 s_s3demo · 输入后回车切换 ·
+        {{ s3.sessionAuto ? "自动选择最新会话" : s3.sessionFromUrl ? "会话来自启动链接 ?session=" : s3.sessionId !== "s_s3demo" ? "已自动选择最新会话" : "默认会话 s_s3demo" }}
+        · 输入后回车切换 ·
         {{ staticDemoMode ? "静态快照 · 不自动请求" : "每 5 秒刷新（非实时）" }}
       </span>
     </div>
@@ -1488,7 +1568,7 @@ function rootLabel(request: RequestSummary): string {
             :class="{ 's3-start__step--root': index === 0 }"
           >
             <span class="s3-start__step-no">{{ index + 1 }}</span>
-            <span class="s3-start__step-kind">{{ kindLabel(step.kind) }}</span>
+            <span class="s3-start__step-kind">{{ nodeKindLabel(step) }}</span>
             <code
               class="s3-start__step-key"
               :title="repoSourcePath(step) ?? undefined"
@@ -1621,19 +1701,30 @@ function rootLabel(request: RequestSummary): string {
                 树形链路 · 主链 {{ mainChain.length }} 步
                 <template v-if="branchCount > 0"> · {{ branchCount }} 个旁支/叶子节点</template>
               </span>
-              <button
-                v-if="branchCount > 0"
-                type="button"
-                class="s3-tree__branch-toggle"
-                :aria-pressed="showBranches"
-                @click="toggleBranches"
-              >
-                {{ showBranches ? "只看主链" : `显示全部旁支（${branchCount}）` }}
-              </button>
+              <span class="s3-tree__viewbar-actions">
+                <label
+                  v-if="genericLeafCount > 0"
+                  class="s3-tree__generic-filter"
+                  title="隐藏自动扫包产生的叶子业务方法（GENERIC_AUTO），保留主链与有子节点的方法"
+                >
+                  <input v-model="hideGenericLeaves" type="checkbox" />
+                  隐藏通用插桩叶子（{{ genericLeafCount }}）
+                </label>
+                <button
+                  v-if="branchCount > 0"
+                  type="button"
+                  class="s3-tree__branch-toggle"
+                  :aria-pressed="showBranches"
+                  @click="toggleBranches"
+                >
+                  {{ showBranches ? "只看主链" : `显示全部旁支（${branchCount}）` }}
+                </button>
+              </span>
             </div>
 
             <div
               v-if="treeNodes.length > 0"
+              ref="treeCanvas"
               class="s3-tree__canvas"
               aria-label="请求流程树"
             >
@@ -1838,7 +1929,11 @@ function rootLabel(request: RequestSummary): string {
         时间轴按所选链路的相对时间显示，接口参数仍是原始时间戳。
         节点详情、×N 分组和缺口清单均为已采集数据的只读派生，不推断业务对错。
       </p>
-      <p class="s3-panel__footnote">{{ S6_BANNER }}</p>
+      <p v-if="!hasGenericNodes" class="s3-panel__footnote">{{ S6_BANNER }}</p>
+      <p v-if="hasGenericNodes" class="s3-panel__footnote">
+        通用插桩模式：采集应用主包 public 方法、MyBatis Mapper 与 SQL；行级局部变量（L2）与
+        demo 专项探针不适用于用户项目。
+      </p>
     </details>
   </section>
 </template>

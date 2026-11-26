@@ -1,7 +1,7 @@
 /**
  * S6b canonical copy (single source of truth for the workbench UI).
  *
- * Every string here is the verbatim text frozen in `docs/contracts/api.v1.md`
+ * Every string here is the verbatim text documented in `docs/important-notes.md`
  * §10.11 (event-model.v1.md §4.4.8–§4.4.10). Components import these constants
  * instead of re-typing the copy, so `workbench/src` and `workbench/dist` stay
  * byte-identical in wording.

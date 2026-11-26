@@ -1,8 +1,0 @@
-# 站点方案 v2 备份 MANIFEST
-
-> 归档：2026-11-24｜算法：SHA256
-
-| SHA256 | 文件 |
-|---|---|
-| `bc118dde19527dba83d780191570defcaa9861c67840cc9f7240c54c77e229d5` | `SITE-DEPLOY.v2.md` |
-| `a9d7a3e66c7fc3b053b5bfa45348dc61174990e486233e40e2de0710334d8634` | `site-README.v2.md` |

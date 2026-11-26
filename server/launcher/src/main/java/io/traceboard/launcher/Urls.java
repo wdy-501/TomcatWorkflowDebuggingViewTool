@@ -56,7 +56,7 @@ final class Urls {
         String host = stripBrackets(uri.getHost());
         if (!isLoopback(host)) {
             throw LauncherException.usage("NON_LOOPBACK_TARGET", "--collector 只允许回环主机（127.0.0.1/localhost/::1），收到 \""
-                    + host + "\"；S4 只在本机工作，无外部网络。");
+                    + host + "\"；TraceBoard 只在本机工作，无外部网络。");
         }
         return "http://" + hostForUrl(host) + ":" + uri.getPort();
     }
@@ -79,7 +79,7 @@ final class Urls {
         String host = stripBrackets(uri.getHost());
         if (!isLoopback(host)) {
             throw LauncherException.usage("NON_LOOPBACK_TARGET", option + " 默认只允许回环主机（127.0.0.1/localhost/::1），收到 \""
-                    + host + "\"；S4 无外部网络（preview --target 是唯一有 --allow-non-loopback 的例外）。");
+                    + host + "\"；TraceBoard 无外部网络（preview --target 是唯一有 --allow-non-loopback 的例外）。");
         }
         return uri;
     }
@@ -94,7 +94,7 @@ final class Urls {
         }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
         if (scheme.equals("https")) {
-            throw LauncherException.failed("TARGET_TLS_UNSUPPORTED", "preview 只支持 http:// 目标（S4 无 TLS 反代），收到 \""
+            throw LauncherException.failed("TARGET_TLS_UNSUPPORTED", "preview 只支持 http:// 目标（无 TLS 反代），收到 \""
                     + raw + "\"；请改用 http://127.0.0.1:<port> 的静态 HTML 页。");
         }
         if (!scheme.equals("http")) {

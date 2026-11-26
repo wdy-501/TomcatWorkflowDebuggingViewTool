@@ -1,41 +1,107 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useAppStore } from "./stores/app";
-import FixturePanel from "./components/FixturePanel.vue";
-import S1Panel from "./components/S1Panel.vue";
-import S2Panel from "./components/S2Panel.vue";
+import { resolveS3Session } from "./stores/s3";
 import S3Panel from "./components/S3Panel.vue";
 import DemoPanel from "./components/DemoPanel.vue";
+import MyAppPanel from "./components/MyAppPanel.vue";
 
-type TabId = "demo" | "board";
+type TabId = "demo" | "app" | "board";
 
 const app = useAppStore();
-const showLegacyPanels =
-  new URLSearchParams(window.location.search).get("legacy") === "1";
 const staticDemo = window.__TRACEBOARD_STATIC_DEMO__ !== undefined;
 
-/** Packaged builds set VITE_ENABLE_DEMO=0 and ship without public/demo. */
-const demoEnabled = import.meta.env.VITE_ENABLE_DEMO !== "0";
+/** Only the static showcase build enables the demo; normal/package builds stay generic-only. */
+const demoEnabled = import.meta.env.VITE_ENABLE_DEMO === "1";
 
-const TAB_HASH: Record<TabId, string> = { demo: "#demo", board: "#board" };
-
-function tabFromHash(): TabId {
-  return window.location.hash === TAB_HASH.board ? "board" : "demo";
+function normalizeAppUrl(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined || raw.trim() === "") {
+    return null;
+  }
+  try {
+    const url = new URL(raw);
+    const host = url.hostname;
+    const loopback =
+      host === "127.0.0.1" ||
+      host === "localhost" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      host.startsWith("127.");
+    if ((url.protocol === "http:" || url.protocol === "https:") && loopback) {
+      return url.toString();
+    }
+  } catch {
+    // invalid app URL must not break the workbench
+  }
+  return null;
 }
 
-/** 5173 is a single entry: the interactive demo tab is the default. */
-const activeTab = ref<TabId>(demoEnabled ? tabFromHash() : "board");
-const demoActive = computed<boolean>(() => demoEnabled && activeTab.value === "demo");
-const boardVisible = computed<boolean>(() => !demoEnabled || activeTab.value === "board");
+/** `TraceBoard run --jar` passes the user's service URL as ?app=... . */
+function resolveEmbeddedAppUrl(): string | null {
+  return normalizeAppUrl(new URLSearchParams(window.location.search).get("app"));
+}
+
+/**
+ * The Java UI server used by `TraceBoard run` injects this before the app bundle.
+ * It makes a plain http://127.0.0.1:5173/#board work without an ?app= suffix.
+ */
+function resolveRuntimeAppUrl(): string | null {
+  const runtime = (window as unknown as { __TRACEBOARD_RUNTIME_APP__?: string })
+    .__TRACEBOARD_RUNTIME_APP__;
+  return normalizeAppUrl(runtime);
+}
+
+const appUrl = resolveEmbeddedAppUrl() ?? resolveRuntimeAppUrl();
+const appMode = appUrl !== null;
+const tabsEnabled = appMode || demoEnabled;
+const urlSession = resolveS3Session().fromUrl;
+
+const TAB_HASH: Record<TabId, string> = {
+  demo: "#demo",
+  app: "#app",
+  board: "#board",
+};
+
+function tabFromHash(): TabId {
+  if (window.location.hash === TAB_HASH.board) {
+    return "board";
+  }
+  return appMode ? "app" : "demo";
+}
+
+function initialTab(): TabId {
+  if (appMode) {
+    return window.location.hash === TAB_HASH.board ? "board" : "app";
+  }
+  if (!demoEnabled) {
+    return "board";
+  }
+  if (window.location.hash === TAB_HASH.demo) {
+    return "demo";
+  }
+  if (window.location.hash === TAB_HASH.board || urlSession) {
+    return "board";
+  }
+  return "demo";
+}
+
+const activeTab = ref<TabId>(initialTab());
+const demoActive = computed<boolean>(
+  () => demoEnabled && !appMode && activeTab.value === "demo"
+);
+const appActive = computed<boolean>(() => appMode && activeTab.value === "app");
+const boardVisible = computed<boolean>(() =>
+  appMode ? activeTab.value === "board" : !demoEnabled || activeTab.value === "board"
+);
 
 function writeHash(hash: string): void {
-  // Keep ?v= / ?legacy=1 and only replace the fragment.
+  // Keep ?v= / ?legacy=1 / ?session= / ?app= and only replace the fragment.
   const url = `${window.location.pathname}${window.location.search}${hash}`;
   window.history.replaceState(null, "", url);
 }
 
 function setTab(tab: TabId): void {
-  if (!demoEnabled) {
+  if (!tabsEnabled) {
     return;
   }
   activeTab.value = tab;
@@ -51,6 +117,13 @@ function showBoard(): void {
 }
 
 function onHashChange(): void {
+  if (!tabsEnabled) {
+    return;
+  }
+  if (appMode) {
+    activeTab.value = window.location.hash === TAB_HASH.board ? "board" : "app";
+    return;
+  }
   if (demoEnabled) {
     activeTab.value = tabFromHash();
   }
@@ -58,7 +131,7 @@ function onHashChange(): void {
 
 onMounted(() => {
   // Normalise the URL so a reload/bookmark keeps the selected tab.
-  if (demoEnabled && window.location.hash !== TAB_HASH[activeTab.value]) {
+  if (tabsEnabled && window.location.hash !== TAB_HASH[activeTab.value]) {
     writeHash(TAB_HASH[activeTab.value]);
   }
   window.addEventListener("hashchange", onHashChange);
@@ -80,7 +153,11 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <p class="app-header__note">
-        <template v-if="demoActive">
+        <template v-if="appActive">
+          我的应用：下方内嵌的是本次 JAR 启动的服务。应用内的请求由 agent 采集；
+          切到「追踪台」查看最新会话的请求、方法、SQL 和参数/返回值。
+        </template>
+        <template v-else-if="demoActive">
           交互示例：在示例页面点击按钮，请求发往本地后端（8080）与采集器（8601）；
           动作完成后自动定位本次链路。公网静态版使用预置响应与预置链路，不伪造采集。
         </template>
@@ -91,8 +168,21 @@ onBeforeUnmount(() => {
       </p>
     </header>
 
-    <nav v-if="demoEnabled" class="app-tabs" role="tablist" aria-label="视图切换">
+    <nav v-if="tabsEnabled" class="app-tabs" role="tablist" aria-label="视图切换">
       <button
+        v-if="appMode"
+        id="app-tab-app"
+        type="button"
+        role="tab"
+        class="app-tab"
+        :class="{ 'app-tab--active': activeTab === 'app' }"
+        :aria-selected="activeTab === 'app'"
+        @click="setTab('app')"
+      >
+        我的应用
+      </button>
+      <button
+        v-else
         id="app-tab-demo"
         type="button"
         role="tab"
@@ -114,44 +204,24 @@ onBeforeUnmount(() => {
       >
         追踪台
       </button>
+      <span v-if="appMode" class="app-tabs__hint">应用服务地址：{{ appUrl }}</span>
     </nav>
 
     <!-- Both views stay mounted (v-show) so the iframe and board state survive. -->
+    <MyAppPanel
+      v-if="appMode"
+      v-show="appActive"
+      :app-url="appUrl ?? ''"
+      @open-board="showBoard"
+    />
+
     <DemoPanel
-      v-if="demoEnabled"
+      v-if="demoEnabled && !appMode"
       v-show="demoActive"
       :static-mode="staticDemo"
       @open-board="showBoard"
     />
 
     <S3Panel v-show="boardVisible" :active="boardVisible" />
-
-    <template v-if="showLegacyPanels">
-      <details v-show="boardVisible" class="secondary-panel">
-        <summary class="secondary-panel__summary">
-          S2 · 0 行事实链（历史演示，与当前请求无关）
-        </summary>
-        <p class="secondary-panel__note">
-          读取独立会话的后端 0 行事实链，仅用于阶段回归，不属于最终产品界面。
-        </p>
-        <S2Panel />
-      </details>
-
-      <details v-show="boardVisible" class="secondary-panel">
-        <summary class="secondary-panel__summary">S1 · 采集闭环演示（历史，假数据）</summary>
-        <p class="secondary-panel__note">
-          早期用假点击验证采集闭环，数据不是真实请求，仅用于阶段回归。
-        </p>
-        <S1Panel />
-      </details>
-
-      <details v-show="boardVisible" class="secondary-panel">
-        <summary class="secondary-panel__summary">S0 · 数据契约样例（历史，静态）</summary>
-        <p class="secondary-panel__note">
-          静态 fixture 摘要，只展示数据形状，不是运行时事实。
-        </p>
-        <FixturePanel />
-      </details>
-    </template>
   </div>
 </template>

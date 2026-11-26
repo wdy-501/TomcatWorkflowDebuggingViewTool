@@ -2,6 +2,9 @@ package io.traceboard.agent;
 
 import java.lang.instrument.Instrumentation;
 
+import io.traceboard.agent.generic.GenericAgent;
+import io.traceboard.agent.generic.GenericConfig;
+
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.type.TypeDescription;
@@ -66,6 +69,12 @@ public final class TraceAgent {
      */
     public static void premain(String agentArgs, Instrumentation inst) {
         try {
+            // Generic (own-project) mode: opt-in only (traceboard.mode=generic or mode=generic in
+            // agentArgs). The demo path below is byte-for-byte the S6b installation.
+            if (GenericConfig.isGenericMode(agentArgs)) {
+                GenericAgent.install(inst, agentArgs);
+                return;
+            }
             AgentConfig config = AgentConfig.fromSystemProperties();
             if (!config.isEnabled()) {
                 log("noop premain: traceboard.ingestUrl is not set or traceboard.enabled=false (fail-open)");
