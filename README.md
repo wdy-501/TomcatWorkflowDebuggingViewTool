@@ -127,6 +127,7 @@ scripts/            启动与打包脚本
 ## 文档
 
 - [重要说明：支持范围、字段字典、采集边界](docs/important-notes.md)
+- [1.0.0 发布说明](docs/releases/v1.0.0.md)
 - [调试自己的 Spring Boot 项目](docs/guides/use-your-project.md)
 - [前端 SDK / Vite 插件](docs/guides/frontend-shallow-plugin.md)
 - [事件 schema](schema/traceboard.event.v1.json)
