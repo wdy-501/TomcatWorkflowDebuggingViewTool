@@ -107,17 +107,22 @@ function describeError(cause: unknown, scope: "requests" | "graph" | "replay"): 
 }
 
 function filterRequests(list: readonly RequestSummary[], tab: S3Tab): RequestSummary[] {
+  let filtered: readonly RequestSummary[];
   if (tab === "requests") {
-    return list.filter((item) => item.fetchCount > 0);
-  }
-  if (tab === "clicks") {
+    filtered = list.filter((item) => item.fetchCount > 0);
+  } else if (tab === "clicks") {
     // A "click" tab must be a frontend click root with zero fetch — a
     // backend-only LOST trace (fetchCount=0) is not a click.
-    return list.filter(
+    filtered = list.filter(
       (item) => item.fetchCount === 0 && item.rootKind === "ui_event"
     );
+  } else {
+    filtered = list;
   }
-  return [...list];
+  // Newest first; traceId keeps equal timestamps deterministic.
+  return [...filtered].sort(
+    (a, b) => b.startedAtNs - a.startedAtNs || a.traceId.localeCompare(b.traceId)
+  );
 }
 
 async function loadSessions(): Promise<void> {
