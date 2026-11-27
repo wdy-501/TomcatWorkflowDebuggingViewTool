@@ -104,13 +104,15 @@ public final class Launcher {
         switch (command) {
             case "run":
                 out.println("用法: run --jar <app.jar> [--java <jdk java>] [--port <appPort>] [--app-url <url>] [--health <url>]"
+                        + " [--collector-port <port>] [--ui-port <port>]"
                         + " [--session <s_xxx|auto>] [--agent <agent.jar>] [--collector <origin|collector.jar>]");
                 out.println("       [--ui-dir <workbench 静态目录>] [--jvm-arg <arg>]... [--app-arg <arg>]..."
                         + " [--include <pkg>]... [--exclude <pkg>]... [--include-method <Class#method>]...");
                 out.println("       [--no-open] [--no-ui] [--detach]");
-                out.println("一条命令启动/复用 collector(8601) 与 workbench(5173)，用 generic agent 启动应用，"
+                out.println("一条命令启动/复用 collector 与 workbench，用 generic agent 启动应用，"
                         + "推导 s_run_<yyMMddHHmmss> 与主包 INCLUDE，打开“我的应用”页签并内嵌应用。");
-                out.println("应用地址默认 http://127.0.0.1:8080/；自定义端口用 --port <port>，自定义 URL 用 --app-url <url>。");
+                out.println("默认端口: app 8080 / collector 8601 / workbench 5173；分别用 --port、"
+                        + "--collector-port、--ui-port 自定义；自定义应用 URL 用 --app-url。");
                 out.println("--detach 只是不跟随应用日志；进程仍等待应用退出。--no-ui 不启动界面，--no-open 不打开浏览器。");
                 out.println("取值本身以 -- 开头的参数请写成 --app-arg=<值> / --jvm-arg=<值>。");
                 break;
@@ -163,7 +165,8 @@ public final class Launcher {
         out.println();
         out.println("命令:");
         out.println("  idea     --jar <app.jar> --agent <agent.jar> [--collector <base>] --session <id> [--port <appPort>]");
-        out.println("  run      --jar <app.jar> [--java <jdk java>] [--port <appPort>] [--app-url <url>] [--health <url>] [--session <s_xxx|auto>]"
+        out.println("  run      --jar <app.jar> [--java <jdk java>] [--port <appPort>] [--app-url <url>] [--health <url>]"
+                + " [--collector-port <port>] [--ui-port <port>] [--session <s_xxx|auto>]"
                 + " [--agent <agent.jar>] [--collector <origin|collector.jar>] [--ui-dir <dir>]");
         out.println("           [--jvm-arg <arg>]... [--app-arg <arg>]... [--include <pkg>]... [--exclude <pkg>]..."
                 + " [--include-method <Class#method>]... [--no-open] [--no-ui] [--detach]");
@@ -177,7 +180,7 @@ public final class Launcher {
         out.println("约定:");
         out.println("  --collector 只收 http://<loopback-host>:<port>（默认 http://127.0.0.1:8601），末尾 / 归一化；旧的 --ingest/--ingest-url 已移除。");
         out.println("  --session 必须匹配 ^s_[A-Za-z0-9_-]+$（如 s_myapp）；run 可省略或用 --session auto 生成 s_run_<yyMMddHHmmss>；stop 用 --session 或 --pid-file。");
-        out.println("  固定端口: collector 8601 / workbench 5173 / preview 8602；应用端口由 --port 或 --app-url 指定。");
+        out.println("  端口: 应用默认 8080（--port）、collector 默认 8601（--collector-port）、workbench 默认 5173（--ui-port）；preview 默认 8602。");
         out.println("  只在本机回环工作；无 secret、无外部网络、无 CDN；日志/ PID 仅写 work/**。");
         out.println("退出码: 0 成功/无 FAIL；1 launcher 未预期错误（LAUNCHER_ERROR）；2 用法/参数非法；3 预期失败。");
     }

@@ -28,15 +28,15 @@ java -jar server/launcher/target/traceboard-launcher-1.0.0.jar \
 
 `run` 会自动：
 
-1. 启动/复用 collector `8601`；
-2. 启动 workbench `5173`（源码路径或 `--ui-dir`）；
+1. 启动/复用 collector（默认 `8601`，可 `--collector-port`）；
+2. 启动 workbench（默认 `5173`，可 `--ui-port`；源码路径或 `--ui-dir`）；
 3. 从 JAR 的 `Start-Class`/`Main-Class` 推导应用主包，打印 `INCLUDE=...`；
-4. 生成 `s_run_<时间>` 会话，带上 generic agent 启动应用；
-5. 打开 `http://127.0.0.1:5173/?session=<id>&app=<url>#app`：  
+4. 生成 `s_run_<时间>` 会话，带上 generic agent 启动应用（默认 `8080`，可 `--port`）；
+5. 打开 `http://127.0.0.1:<ui-port>/?session=<id>&app=<url>#app`：  
    - 第一个页签是 **「我的应用」**，iframe 直接加载你的 JAR 服务；
    - 第二个页签是 **「追踪台」**，自动选择最新会话。
 
-应用 URL 默认 `http://127.0.0.1:8080/`。自定义端口用 `--port <port>`；应用配置了非常规路径/地址时用 `--app-url <url>`。
+三个端口都可独立设置：应用 `--port`、collector `--collector-port`、workbench `--ui-port`。应用 URL 默认 `http://127.0.0.1:8080/`；应用配置了非常规路径/地址时用 `--app-url <url>`。
 
 停止：复制启动时打印的 `STOP=...` 命令执行，或使用 `stop --session <id>`。
 

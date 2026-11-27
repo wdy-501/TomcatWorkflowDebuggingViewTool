@@ -46,11 +46,13 @@ QUICK START
 1. Open a terminal in this folder.
 2. Run:
    TraceBoard.cmd run --jar "C:\path\to\your-app.jar" --java "C:\path\to\jdk\bin\java.exe"
-3. TraceBoard starts the collector (:8601), the workbench (:5173), and your JAR,
-   then opens the "My App" tab. Switch to "Trace Board" for the latest session.
+3. TraceBoard starts the collector (default :8601), the workbench (default :5173),
+   and your JAR (default :8080), then opens the "My App" tab.
 
 OPTIONS
-  --port <port>            application port; also sets -Dserver.port
+  --port <port>            application port (default 8080); also sets -Dserver.port
+  --collector-port <port>  collector port (default 8601)
+  --ui-port <port>         workbench port (default 5173)
   --app-url <url>          URL embedded in the My App tab (default http://127.0.0.1:8080/)
   --include <package>      override auto-detected application package
   --exclude <package>      exclude noisy getters/DTO packages

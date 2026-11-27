@@ -100,6 +100,8 @@ final class Args {
             case "--session":
             case "--java":
             case "--port":
+            case "--collector-port":
+            case "--ui-port":
             case "--health":
             case "--pid-file":
             case "--log-dir":

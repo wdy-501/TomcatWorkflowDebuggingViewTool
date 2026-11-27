@@ -75,13 +75,15 @@ java -jar server/launcher/target/traceboard-launcher-1.0.0.jar \
 
 启动后打开：
 
-- 我的应用：`http://127.0.0.1:5173/#app`（内嵌你的服务）
-- 追踪台：`http://127.0.0.1:5173/#board`（自动选择最新会话）
+- 我的应用：`http://127.0.0.1:5173/#app`（默认 UI 端口；内嵌你的服务）
+- 追踪台：`http://127.0.0.1:5173/#board`（默认 UI 端口；自动选择最新会话）
 
 常用参数：
 
 ```text
---port <port>            应用端口（同时设置 -Dserver.port）
+--port <port>            应用端口（默认 8080；同时设置 -Dserver.port）
+--collector-port <port>  collector 端口（默认 8601；自动启动内置 collector）
+--ui-port <port>         workbench 端口（默认 5173）
 --app-url <url>          内嵌到“我的应用”的地址（默认 http://127.0.0.1:8080/）
 --include com.myapp      覆盖自动推断的业务包
 --exclude com.myapp.dto  排除噪声包
@@ -89,6 +91,13 @@ java -jar server/launcher/target/traceboard-launcher-1.0.0.jar \
 --health <url>           等待应用健康检查
 --no-open                不自动打开浏览器
 --java <path>            应用使用的 java.exe
+```
+
+三个端口可同时自定义，例如：
+
+```bat
+TraceBoard.cmd run --jar "C:\path\to\your-app.jar" --java "C:/Program Files/Java/jdk-21/bin/java.exe" ^
+  --port 18084 --collector-port 8602 --ui-port 5174
 ```
 
 停止：复制启动日志里的 `STOP=...` 命令执行，或：

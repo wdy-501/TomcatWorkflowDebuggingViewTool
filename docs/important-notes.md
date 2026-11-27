@@ -61,7 +61,7 @@ TraceBoard 在本机回环地址上运行，用 Java agent 观察一个可执行
 | workbench | `http://127.0.0.1:5173` | 我的应用 / 追踪台界面 |
 | 目标应用 | 默认 `http://127.0.0.1:8080` | 被调试的 Spring Boot JAR |
 
-全部服务只绑定回环地址。collector 无 CORS、无鉴权、无 TLS。
+以上三个端口都可以在 `run` 时独立自定义：`--port`（应用）、`--collector-port`、`--ui-port`。三者必须互不相同。全部服务只绑定回环地址，collector 无 CORS、无鉴权、无 TLS。
 
 ## 4. 安装
 
@@ -149,10 +149,10 @@ java -jar server/launcher/target/traceboard-launcher-1.0.0.jar \
 
 启动器会自动：
 
-1. 启动/复用 collector `8601`；
-2. 启动 workbench `5173`；
+1. 启动/复用 collector（默认 `8601`，可用 `--collector-port`）；
+2. 启动 workbench（默认 `5173`，可用 `--ui-port`）；
 3. 从 JAR 的 `Start-Class` / `Main-Class` 推断应用主包，打印 `INCLUDE=...`；
-4. 用 generic agent 启动应用；
+4. 用 generic agent 启动应用（默认端口 `8080`，可用 `--port`）；
 5. 生成 `s_run_<时间>` 会话，并打开“我的应用”页签。
 
 ### 5.2 常用参数
@@ -161,7 +161,9 @@ java -jar server/launcher/target/traceboard-launcher-1.0.0.jar \
 |---|---|
 | `--jar <path>` | 目标 Spring Boot 可执行 JAR |
 | `--java <path>` | 目标应用使用的 `java.exe` |
-| `--port <port>` | 目标应用端口，同时设置 `-Dserver.port` |
+| `--port <port>` | 目标应用端口（默认 8080），同时设置 `-Dserver.port` |
+| `--collector-port <port>` | collector 端口（默认 8601）；内置 collector 会用该端口启动 |
+| `--ui-port <port>` | workbench 端口（默认 5173） |
 | `--app-url <url>` | 嵌入“我的应用”的 URL；默认 `http://127.0.0.1:8080/` |
 | `--include <pkg>` | 覆盖自动推断的业务包 |
 | `--exclude <pkg>` | 排除噪声包（DTO、getter、第三方库等） |
@@ -169,6 +171,13 @@ java -jar server/launcher/target/traceboard-launcher-1.0.0.jar \
 | `--health <url>` | 等待应用健康检查 URL |
 | `--no-open` | 不自动打开浏览器 |
 | `--detach` | 启动后返回，服务继续运行 |
+
+三个端口同时自定义示例：
+
+```bat
+TraceBoard.cmd run --jar "C:\path\to\your-app.jar" --java "C:/Program Files/Java/jdk-21/bin/java.exe" ^
+  --port 18084 --collector-port 8602 --ui-port 5174
+```
 
 工作台会带入 `?session=<会话>&app=<应用地址>`。不带 `?session=` 时，本地工作台会自动选择最新会话；静态演示站点保留自己的预置会话。
 
@@ -452,7 +461,7 @@ java \
 | 看不到局部变量 | generic v1 不支持行级局部变量 |
 | 看不到 SQL 文本 | 设计边界：只采集语句 id 和行数 |
 | 应用返回 404 | 确认访问的是应用真实路径；内嵌 iframe 需要页面可嵌入 |
-| 端口被占用 | 停旧进程；或使用 `--port` 换端口 |
+| 端口被占用 | 应用用 `--port`，collector 用 `--collector-port`，界面用 `--ui-port`；三个端口不能相同 |
 | 页面仍是旧缓存 | `Ctrl+F5` 强刷 |
 
 ## 11. 安全与隐私

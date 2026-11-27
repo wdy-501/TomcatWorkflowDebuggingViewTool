@@ -22,10 +22,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 /**
- * {@code run --jar app.jar}: one command that starts/reuses the collector (8601), starts the
- * workbench UI (5173, in-process), derives a session + include package, spawns the user JAR with
- * the generic agent and opens {@code http://127.0.0.1:5173/?session=<id>&app=<appUrl>#app}.
- * The workbench embeds the user's app as “我的应用”; the board is one tab away.
+ * {@code run --jar app.jar}: one command that starts/reuses the collector (default 8601), starts
+ * the workbench UI (default 5173, in-process), derives a session + include package, spawns the
+ * user JAR with the generic agent and opens
+ * {@code http://127.0.0.1:<ui-port>/?session=<id>&app=<appUrl>#app}. The three ports are
+ * independently configurable: {@code --port} (application), {@code --collector-port}, and
+ * {@code --ui-port}. The workbench embeds the user's app as “我的应用”; the board is one tab away.
  *
  * <p>Only processes started by this run are stopped on exit (shutdown hook / app exit). Reused
  * collector or UI instances are recorded but never killed. {@code --detach} means "do not follow
@@ -38,7 +40,9 @@ final class RunCommand {
     private static final Duration APP_HEALTH_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration UI_READY_TIMEOUT = Duration.ofSeconds(20);
     private static final Duration POLL = Duration.ofMillis(300);
-    private static final int UI_PORT = 5173;
+    private static final int DEFAULT_APP_PORT = 8080;
+    private static final int DEFAULT_COLLECTOR_PORT = 8601;
+    private static final int DEFAULT_UI_PORT = 5173;
 
     int run(String[] argv) throws LauncherException {
         Args args = Args.parse(argv);
@@ -47,14 +51,22 @@ final class RunCommand {
         boolean noOpen = args.flag("--no-open");
         boolean noUi = args.flag("--no-ui");
         boolean portExplicit = args.has("--port");
-        int port = args.port("--port", 8080);
+        int port = args.port("--port", DEFAULT_APP_PORT);
+        int collectorPort = args.port("--collector-port", DEFAULT_COLLECTOR_PORT);
+        boolean collectorPortExplicit = args.has("--collector-port");
+        int uiPort = args.port("--ui-port", DEFAULT_UI_PORT);
+        if (port == collectorPort || port == uiPort || collectorPort == uiPort) {
+            throw LauncherException.usage("--port、--collector-port、--ui-port 必须互不相同："
+                    + "app=" + port + " collector=" + collectorPort + " ui=" + uiPort + "。");
+        }
 
         Path jar = requireFile(args.require("--jar"), "JAR_NOT_FOUND",
                 "应用 JAR 不存在；确认 --jar 指向可执行的 Spring Boot / Java JAR。");
         String healthRaw = args.get("--health");
         String healthUrl = healthRaw == null ? null : Urls.loopbackHttpUrl(healthRaw, "--health").toString();
 
-        CollectorTarget collectorTarget = collectorTarget(args.get("--collector"));
+        CollectorTarget collectorTarget = collectorTarget(args.get("--collector"), collectorPort,
+                collectorPortExplicit);
         String collectorOrigin = collectorTarget.origin();
 
         Path agent = args.has("--agent")
@@ -112,7 +124,7 @@ final class RunCommand {
         } else if (portExplicit) {
             appUrl = "http://127.0.0.1:" + port + "/";
         } else {
-            appUrl = "http://127.0.0.1:8080/";
+            appUrl = "http://127.0.0.1:" + DEFAULT_APP_PORT + "/";
         }
 
         AtomicBoolean cleaned = new AtomicBoolean(false);
@@ -124,7 +136,7 @@ final class RunCommand {
             CollectorState collectorState = ensureCollector(collectorTarget, serviceJava, session, logDir);
             collector = collectorState.child();
 
-            ui = noUi ? UiState.none() : ensureUi(uiDir, collectorOrigin, appUrl);
+            ui = noUi ? UiState.none() : ensureUi(uiDir, collectorOrigin, appUrl, uiPort);
 
             List<String> appCommand = buildAppCommand(appJava, agent, collectorOrigin, session, include,
                     excludes, includeMethods, portExplicit, port, jar, args);
@@ -139,7 +151,7 @@ final class RunCommand {
                 throw LauncherException.failed("WORK_DIR", "无法写 PID 文件 \"" + Util.fwd(pidFile) + "\"（"
                         + e.getClass().getSimpleName() + "）；检查 work/ 目录权限。");
             }
-            writeServices(servicesFile, session, app, collector, ui, pidFile);
+            writeServices(servicesFile, session, app, collector, ui, pidFile, uiPort);
 
             final Child appChild = app;
             final Child collectorChild = collector;
@@ -180,7 +192,7 @@ final class RunCommand {
                 throw LauncherException.failed("APP_EXITED", "应用启动后立即退出（pid=" + app.pid() + "）。");
             }
 
-            String openUrl = "http://127.0.0.1:" + UI_PORT + "/?session="
+            String openUrl = "http://127.0.0.1:" + uiPort + "/?session="
                     + URLEncoder.encode(session, StandardCharsets.UTF_8)
                     + "&app=" + URLEncoder.encode(appUrl, StandardCharsets.UTF_8)
                     + "#app";
@@ -239,7 +251,7 @@ final class RunCommand {
     // collector (reuse or spawn)
     // -------------------------------------------------------------------------
 
-    private record CollectorTarget(String origin, Path jarFlag) {
+    private record CollectorTarget(String origin, Path jarFlag, boolean spawnable) {
     }
 
     private record CollectorState(Child child, boolean reused) {
@@ -248,19 +260,39 @@ final class RunCommand {
     /**
      * {@code --collector} keeps its original meaning (collector origin) but also accepts a
      * collector JAR path for {@code run}: a value ending in {@code .jar} is treated as the
-     * artifact, everything else as an origin.
+     * artifact, everything else as an origin. Without {@code --collector}, the bundled collector
+     * is started on {@code --collector-port} (default 8601).
      */
-    private static CollectorTarget collectorTarget(String raw) throws LauncherException {
+    private static CollectorTarget collectorTarget(String raw, int collectorPort,
+                                                   boolean collectorPortExplicit) throws LauncherException {
+        String defaultOrigin = "http://127.0.0.1:" + collectorPort;
         if (raw == null || raw.isBlank()) {
-            return new CollectorTarget(Urls.DEFAULT_COLLECTOR, null);
+            return new CollectorTarget(defaultOrigin, null, true);
         }
         String value = raw.trim();
         if (value.toLowerCase(Locale.ROOT).endsWith(".jar")) {
             Path jar = requireFile(value, "COLLECTOR_NOT_FOUND",
                     "collector jar 不存在；先构建: JAVA_HOME=\"$JAVA21\" mvn -B -q -DskipTests package -pl \"server/collector\" -am。");
-            return new CollectorTarget(Urls.DEFAULT_COLLECTOR, jar);
+            return new CollectorTarget(defaultOrigin, jar, true);
         }
-        return new CollectorTarget(Urls.collectorOrigin(value), null);
+        String origin = Urls.collectorOrigin(value);
+        if (collectorPortExplicit && originPort(origin) != collectorPort) {
+            throw LauncherException.usage("--collector 与 --collector-port 冲突："
+                    + origin + " 的端口不是 " + collectorPort + "；只保留其中一个参数。");
+        }
+        return new CollectorTarget(origin, null, false);
+    }
+
+    private static int originPort(String origin) throws LauncherException {
+        try {
+            int port = URI.create(origin).getPort();
+            if (port > 0) {
+                return port;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // fall through
+        }
+        throw LauncherException.usage("collector origin 缺少端口: \"" + origin + "\"。");
     }
 
     private static CollectorState ensureCollector(CollectorTarget target, Path java, String session,
@@ -269,16 +301,23 @@ final class RunCommand {
         if (isHealthy(healthUrl)) {
             return new CollectorState(null, true);
         }
-        if (!spawnableCollector(target.origin())) {
+        if (!target.spawnable()) {
             throw LauncherException.failed("COLLECTOR_UNREACHABLE", "collector 不可达: " + target.origin()
-                    + "/actuator/health；非 8601 的 --collector 不会被自动启动，请先手工启动该 collector。");
+                    + "/actuator/health；使用 --collector <origin> 时不会自动启动该实例。"
+                    + "请先手工启动它，或改用 --collector-port <port> 让 TraceBoard 启动内置 collector。");
+        }
+        int collectorPort = originPort(target.origin());
+        if (!portFree(collectorPort)) {
+            throw LauncherException.failed("PORT_IN_USE", "collector 端口 " + collectorPort + " 已被占用；"
+                    + "先停止占用进程或用 --collector-port 换端口（不静默改端口）。");
         }
         Path collectorJar = target.jarFlag() != null ? target.jarFlag() : autoResolveCollectorJar();
         Path collectorLog = logDir.resolve(session + "-collector.log");
-        System.out.println("COLLECTOR_CMD=\"" + Util.fwd(java) + "\" -jar \"" + Util.fwd(collectorJar) + "\"");
+        List<String> collectorCommand = List.of(java.toString(), "-jar", collectorJar.toString(),
+                "--server.port=" + collectorPort);
+        System.out.println("COLLECTOR_CMD=" + display(collectorCommand));
         System.out.println("COLLECTOR_LOG=\"" + Util.fwd(collectorLog) + "\"");
-        Child child = ChildProcesses.start("collector",
-                List.of(java.toString(), "-jar", collectorJar.toString()), java, collectorJar, collectorLog);
+        Child child = ChildProcesses.start("collector", collectorCommand, java, collectorJar, collectorLog);
         long deadline = System.nanoTime() + COLLECTOR_HEALTH_TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
             if (!child.alive()) {
@@ -296,16 +335,6 @@ final class RunCommand {
         throw LauncherException.failed("COLLECTOR_HEALTH_TIMEOUT", "collector 在 "
                 + COLLECTOR_HEALTH_TIMEOUT.toSeconds() + "s 内未通过健康检查: " + healthUrl
                 + "；查看上面的日志尾。");
-    }
-
-    /** The bundled collector always binds 8601; only that port can be auto-started. */
-    private static boolean spawnableCollector(String origin) {
-        try {
-            URI uri = URI.create(origin);
-            return uri.getPort() == 8601;
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
     }
 
     private static boolean isHealthy(String healthUrl) {
@@ -328,8 +357,9 @@ final class RunCommand {
         }
     }
 
-    private static UiState ensureUi(Path uiDir, String collectorOrigin, String appUrl) throws LauncherException {
-        String url = "http://127.0.0.1:" + UI_PORT;
+    private static UiState ensureUi(Path uiDir, String collectorOrigin, String appUrl, int uiPort)
+            throws LauncherException {
+        String url = "http://127.0.0.1:" + uiPort;
         if (isTraceBoardUi(url + "/")) {
             return UiState.reused(url);
         }
@@ -340,7 +370,7 @@ final class RunCommand {
                 uiArgs.add("--dir");
                 uiArgs.add(Util.fwd(uiDir));
                 uiArgs.add("--port");
-                uiArgs.add(String.valueOf(UI_PORT));
+                uiArgs.add(String.valueOf(uiPort));
                 uiArgs.add("--collector");
                 uiArgs.add(collectorOrigin);
                 if (appUrl != null) {
@@ -381,7 +411,7 @@ final class RunCommand {
             throw error;
         }
         throw LauncherException.failed("UI_HEALTH_TIMEOUT", "workbench 在 " + UI_READY_TIMEOUT.toSeconds()
-                + "s 内未就绪: " + url + "；检查 5173 是否被其他程序占用。");
+                + "s 内未就绪: " + url + "；检查端口 " + uiPort + " 是否被其他程序占用。");
     }
 
     private static boolean isTraceBoardUi(String url) {
@@ -457,7 +487,7 @@ final class RunCommand {
         if (repo != null) {
             return repo;
         }
-        throw LauncherException.failed("AGENT_NOT_FOUND", "找不到 agent jar（已查 app/*.jar 与 agent/target/*-SNAPSHOT.jar）；"
+        throw LauncherException.failed("AGENT_NOT_FOUND", "找不到 agent jar（已查 app/*.jar 与 agent/target/traceboard-agent-1.0.0.jar）；"
                 + "构建: JAVA_HOME=\"$JAVA21\" mvn -B -q -DskipTests package -pl \"agent\" -am；或用 --agent 指定。");
     }
 
@@ -473,7 +503,7 @@ final class RunCommand {
             return repo;
         }
         throw LauncherException.failed("COLLECTOR_NOT_FOUND",
-                "找不到 collector jar（已查 app/*.jar 与 server/collector/target/*-SNAPSHOT.jar）；"
+                "找不到 collector jar（已查 app/*.jar 与 server/collector/target/traceboard-collector-1.0.0.jar）；"
                         + "构建: JAVA_HOME=\"$JAVA21\" mvn -B -q -DskipTests package -pl \"server/collector\" -am；"
                         + "或用 --collector 指定 collector.jar（也可以指向一个已启动的 collector origin）。");
     }
@@ -599,7 +629,7 @@ final class RunCommand {
     // -------------------------------------------------------------------------
 
     private static void writeServices(Path file, String session, Child app, Child collector, UiState ui,
-                                      Path pidFile) throws LauncherException {
+                                      Path pidFile, int uiPort) throws LauncherException {
         StringBuilder json = new StringBuilder(512);
         json.append("{\"session\":").append(quote(session))
                 .append(",\"createdAtMs\":").append(System.currentTimeMillis())
@@ -619,11 +649,11 @@ final class RunCommand {
                         .append(",\"java\":").append(quote(ui.java()))
                         .append(",\"jar\":").append(quote(ui.jar()))
                         .append(",\"commandLineHint\":").append(quote(ui.commandLineHint()))
-                        .append(",\"port\":").append(UI_PORT)
+                        .append(",\"port\":").append(uiPort)
                         .append(",\"url\":").append(quote(ui.url())).append('}');
                 break;
             case "reused":
-                json.append("{\"kind\":\"reused\",\"port\":").append(UI_PORT)
+                json.append("{\"kind\":\"reused\",\"port\":").append(uiPort)
                         .append(",\"url\":").append(quote(ui.url())).append('}');
                 break;
             default:
