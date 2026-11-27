@@ -27,7 +27,7 @@ import {
   repoSourcePath,
 } from "../s4/labels";
 import { S6_BANNER } from "../s6/canonical";
-import { isStaticDemoMode, staticDemoCaseTraceId } from "../demo/static-demo";
+import { appendStaticDemoAction, isStaticDemoMode } from "../demo/static-demo";
 import {
   beginDemoCase,
   demoBridge,
@@ -276,10 +276,13 @@ function selectRequest(traceId: string): void {
 }
 
 async function clearCurrentSession(): Promise<void> {
-  if (staticDemoMode || clearing.value || s3.requests.length === 0) {
+  if (clearing.value || s3.requests.length === 0) {
     return;
   }
-  if (!window.confirm(`清空会话 ${s3.sessionId} 的本机记录？只删除 TraceBoard collector 内存，不影响业务数据库。`)) {
+  const message = staticDemoMode
+    ? "清空静态演示的本地模拟记录？刷新页面会恢复预置快照。"
+    : `清空会话 ${s3.sessionId} 的本机记录？只删除 TraceBoard collector 内存，不影响业务数据库。`;
+  if (!window.confirm(message)) {
     return;
   }
   clearing.value = true;
@@ -374,7 +377,7 @@ async function selectDemoCase(caseKey: string, atMs?: number): Promise<void> {
   beginDemoCase(caseKey);
 
   if (staticDemoMode) {
-    const traceId = staticDemoCaseTraceId(caseKey);
+    const traceId = appendStaticDemoAction(caseKey, atMs);
     if (traceId === null) {
       setDemoResult({
         caseKey,
@@ -382,6 +385,10 @@ async function selectDemoCase(caseKey: string, atMs?: number): Promise<void> {
         static: true,
         message: "预置数据中没有该案例的链路（demo-data 的 cases 缺少该按钮）",
       });
+      return;
+    }
+    await refresh(true);
+    if (seq !== demoCaseSeq) {
       return;
     }
     showDemoTrace(traceId);
@@ -1510,8 +1517,8 @@ function rootLabel(request: RequestSummary): string {
         id="s3-clear"
         type="button"
         class="s3-controls__button s3-controls__button--danger"
-        :disabled="staticDemoMode || clearing || s3.requests.length === 0"
-        :title="staticDemoMode ? '静态快照为预置数据，刷新页面恢复' : '只删除本机 collector 内存记录，不影响业务数据库'"
+        :disabled="clearing || s3.requests.length === 0"
+        :title="staticDemoMode ? '清空本地模拟记录；刷新页面恢复预置快照' : '只删除本机 collector 内存记录，不影响业务数据库'"
         @click="clearCurrentSession"
       >
         {{ clearing ? "清空中…" : "清空记录" }}
