@@ -1704,7 +1704,7 @@ function rootLabel(request: RequestSummary): string {
           class="s3-state"
         >
           空态：会话 <code>{{ s3.sessionId }}</code> 暂无 click/请求事实。空态不是“确认没发”；
-          发起一次真实点击后刷新（collector 重启会清空内存）。
+          {{ staticDemoMode ? "点击示例按钮会在浏览器内追加一条模拟记录。" : "发起一次真实点击后刷新（collector 重启会清空内存）。" }}
         </p>
         <p
           v-else-if="visibleRequests.length === 0 && s3.requests.length > 0"
