@@ -10,7 +10,7 @@
 
 ## 发布
 
-`site/traceboard/dist/` 已按正式 1.0.0 工作台重建并提交。Pages 工作流为手动触发（`workflow_dispatch`），只上传该目录，不会在普通代码提交时自动发布。
+`site/traceboard/dist/` 已按正式 1.0.0 工作台重建并提交。Pages 工作流在 `site/traceboard/dist/` 或本工作流文件更新时自动部署，同时保留手动 `workflow_dispatch`；部署前会检查工作台入口 `<script type="module">` 和 `demo-data.js` 都存在。
 
 ## 重新构建
 

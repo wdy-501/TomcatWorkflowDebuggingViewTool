@@ -1,6 +1,10 @@
 name: Deploy static showcase to GitHub Pages
 
 on:
+  push:
+    paths:
+      - "site/traceboard/dist/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -22,6 +26,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate static site
+        run: |
+          test -f site/traceboard/dist/index.html
+          test -f site/traceboard/dist/app/index.html
+          grep -q 'type="module"' site/traceboard/dist/app/index.html
+          grep -q 'demo-data.js' site/traceboard/dist/app/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
