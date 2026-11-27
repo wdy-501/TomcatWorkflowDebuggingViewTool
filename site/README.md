@@ -10,7 +10,7 @@
 
 ## 发布
 
-1.0.0 源码清理阶段不提交旧 `dist/`；最终发布前重新构建并提交。Pages 工作流为手动触发（`workflow_dispatch`），只上传 `site/traceboard/dist/`，不会在普通代码提交时自动发布。
+`site/traceboard/dist/` 已按正式 1.0.0 工作台重建并提交。Pages 工作流为手动触发（`workflow_dispatch`），只上传该目录，不会在普通代码提交时自动发布。
 
 ## 重新构建
 

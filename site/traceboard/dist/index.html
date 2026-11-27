@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="TraceBoard 1.0.0：本地只读 Java 全链路调试。浏览器点击、请求、Spring 控制器、Service、MyBatis、SQL 行数、参数/请求体和未采集缺口在同一条时间线。">
+  <title>TraceBoard · 本地 Java 全链路调试</title>
+  <link rel="stylesheet" href="./assets/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">跳到工作台</a>
+  <header class="topbar">
+    <a class="brand" href="#main" aria-label="TraceBoard 首页">
+      <span class="brand-mark" aria-hidden="true">TB</span>
+      <span class="brand-text"><strong>TraceBoard</strong><span>本地 Java 全链路调试</span></span>
+    </a>
+    <div class="topbar-meta">
+      <span class="pill pill-live"><span class="dot" aria-hidden="true"></span>静态演示快照</span>
+      <span class="topbar-note">本地运行 · 无上传</span>
+    </div>
+    <nav class="topnav" aria-label="页面导航">
+      <a href="#demo">工作台演示</a>
+      <a href="#matrix">支持范围</a>
+      <a href="#boundaries">采集边界</a>
+      <a href="https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/blob/master/docs/important-notes.md" target="_blank" rel="noopener">使用文档</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="intro" aria-labelledby="intro-title">
+      <div>
+        <p class="eyebrow">SPRING BOOT 2/3 · JDK 8/17/21 · MYBATIS · 只读回放</p>
+        <h1 id="intro-title">把一次请求拆成一条可核对的 Java 全链路。</h1>
+        <div class="intro-links">
+          <a class="cta cta-primary" href="#demo">体验工作台 ↓</a>
+          <a class="cta" href="https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool" target="_blank" rel="noopener">GitHub 源码 ↗</a>
+          <a class="cta" href="https://github.com/wdy-501/TomcatWorkflowDebuggingViewTool/blob/master/docs/important-notes.md" target="_blank" rel="noopener">安装与使用文档 ↗</a>
+          <span class="cta-note">MIT · 本地回环 · 不重发请求 · 不写数据库</span>
+        </div>
+      </div>
+      <p class="intro-copy">用一条命令带着 agent 启动可执行 Spring Boot JAR，TraceBoard 会采集浏览器请求、Controller、Service、MyBatis Mapper、SQL 行数、参数/返回值、Map 与 DTO 请求体字段和异常类型，并在工作台里按树形链路回放。没有采集到的内容会明确标出原因，不用假数据补齐。</p>
+      <div class="intro-metrics" aria-label="支持的运行范围">
+        <div><strong>2</strong><span>Spring Boot 主版本</span></div>
+        <div><strong>3</strong><span>JDK 版本</span></div>
+        <div><strong>1</strong><span>条命令启动</span></div>
+        <div><strong>0</strong><span>云端上传</span></div>
+      </div>
+    </section>
+
+    <section class="interactive" id="demo" aria-labelledby="demo-title">
+      <div class="section-head">
+        <div><p class="eyebrow">INTERACTIVE WORKBENCH</p><h2 id="demo-title">直接体验工作台。</h2></div>
+        <p>下面内嵌的是 TraceBoard 工作台的静态版，默认进入“交互示例”页签，内置 10 个可点击动作。公网版按钮返回浏览器内预置响应，追踪台展示对应快照；真实采集需要在本地启动目标 JAR、collector 和 workbench。</p>
+      </div>
+      <div class="interactive-shell">
+        <div class="interactive-bar">
+          <span>静态快照 · 10 个动作 · 预置响应 · 无 Java / 无上传</span>
+          <a href="./app/?v=1.0.0" target="_blank" rel="noopener">全屏打开工作台 ↗</a>
+        </div>
+        <iframe
+          src="./app/?v=1.0.0"
+          title="TraceBoard 工作台交互示例"
+          loading="eager"
+        ></iframe>
+      </div>
+      <p class="interactive-note">公网版用于展示交互和数据形状，不是实时 collector；真实请求需要按使用文档在本地启动。</p>
+    </section>
+
+    <section class="matrix" id="matrix" aria-labelledby="matrix-title">
+      <div class="section-head">
+        <div><p class="eyebrow">SUPPORTED</p><h2 id="matrix-title">正式支持的 Java 路径。</h2></div>
+        <p>v1.0.0 聚焦 Spring MVC + MyBatis 的可执行 JAR；其他框架和运行方式明确列为不支持，不伪装成功。</p>
+      </div>
+      <div class="matrix-grid">
+        <article class="matrix-card">
+          <div class="matrix-top"><span class="stack-index">01</span><span class="status status-ok">支持</span></div>
+          <h3>Spring Boot 2.x / 3.x</h3>
+          <p>Spring MVC Controller、Service、MyBatis Mapper/SQL；javax 与 jakarta 请求头。</p>
+          <div class="matrix-meta"><span>JDK 8 / 17 / 21</span><span>可执行 JAR</span></div>
+        </article>
+        <article class="matrix-card">
+          <div class="matrix-top"><span class="stack-index">02</span><span class="status status-ok">支持</span></div>
+          <h3>MyBatis + 关系型数据库</h3>
+          <p>Mapper 接口、语句 id、SELECT/INSERT/UPDATE/DELETE 类型与影响行数；不采集 SQL 文本。</p>
+          <div class="matrix-meta"><span>MapperProxy</span><span>PreparedStatement</span></div>
+        </article>
+        <article class="matrix-card">
+          <div class="matrix-top"><span class="stack-index">03</span><span class="status status-basic">可选</span></div>
+          <h3>浏览器 SDK 关联</h3>
+          <p>接入前端 SDK 可把点击与后端请求标为 EXACT；不接 SDK 时后端链路仍完整，但标 LOST。</p>
+          <div class="matrix-meta"><span>fetch / XHR</span><span>可选</span></div>
+        </article>
+        <article class="matrix-card matrix-card-muted">
+          <div class="matrix-top"><span class="stack-index">04</span><span class="status status-no">不支持</span></div>
+          <h3>WebFlux / JPA / WAR</h3>
+          <p>WebFlux、JPA/Hibernate SQL、外部 Tomcat WAR、动态 attach 不在 v1.0.0。</p>
+          <div class="matrix-meta"><span>明确边界</span><span>不承诺</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="boundaries" id="boundaries" aria-labelledby="boundaries-title">
+      <div class="section-head">
+        <div><p class="eyebrow">COLLECTION SCOPE</p><h2 id="boundaries-title">只展示能被核对的采集事实。</h2></div>
+        <p>TraceBoard 是本地只读观察工具：不重发请求、不写业务库、不上传数据。采集不到的内容会保留为缺口。</p>
+      </div>
+      <div class="boundary-grid">
+        <div><h3>能采集</h3><p>Controller/Service/Mapper/SQL 链、任意 public 方法、参数与返回值、Map 和 DTO 请求体字段、异常类型、SQL 影响行数、耗时、线程与关联状态。</p></div>
+        <div><h3>采不到</h3><p>行级局部变量、SQL 文本、原始响应体、Cookie、任意框架内部调用、线程池自动传播和动态 attach。</p></div>
+        <div><h3>运行方式</h3><p>Windows 便携包或源码构建；TraceBoard 自身用 JDK21，被调试应用用 JDK8/17/21；只监听 127.0.0.1。</p></div>
+      </div>
+      <p class="closing">TraceBoard · 事件流是唯一事实源 · 回放 0 写 · 未采集有原因。</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>TraceBoard v1.0.0 · 本地 Java 全链路调试 · 静态演示快照</span>
+    <span>无 Cookie · 无上传 · 无外部资源</span>
+  </footer>
+  <div class="sr-only" id="announcer" aria-live="polite"></div>
+</body>
+</html>
