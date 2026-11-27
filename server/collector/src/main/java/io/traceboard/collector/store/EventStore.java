@@ -8,9 +8,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
 /**
- * In-memory, append-only event store: {@code sessionId -> SessionLog}.
+ * In-memory session store: {@code sessionId -> SessionLog}.
  *
- * <p>S1 has no persistence, no eviction, no sampling. Restart clears everything.</p>
+ * <p>Events append by default; the workbench may explicitly clear one session's in-memory
+ * events. There is no persistence, eviction or sampling. Restart clears everything.</p>
  */
 @Component
 public class EventStore {
@@ -29,6 +30,20 @@ public class EventStore {
      */
     public SessionLog find(String sessionId) {
         return sessions.get(sessionId);
+    }
+
+    /**
+     * Clears one session's in-memory events while keeping the session id reserved.
+     *
+     * @return true when the session existed and was cleared
+     */
+    public boolean clear(String sessionId) {
+        SessionLog log = sessions.get(sessionId);
+        if (log == null) {
+            return false;
+        }
+        log.clear();
+        return true;
     }
 
     /**

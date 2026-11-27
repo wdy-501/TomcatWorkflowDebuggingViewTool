@@ -281,6 +281,13 @@ export async function fetchSessions(): Promise<SessionSummary[]> {
   }));
 }
 
+/** DELETE /api/v1/sessions/{sessionId} — clears only the local collector memory. */
+export async function clearSession(sessionId: string): Promise<boolean> {
+  const path = `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}`;
+  const payload = await requestJson(path, { method: "DELETE" });
+  return isRecord(payload) && payload.cleared === true;
+}
+
 /**
  * GET /api/v1/sessions/{sessionId}/events?afterSeq=&limit=
  * This is a read-only page query (api.v1.md §7.2) — not replay, not a stream.

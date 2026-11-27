@@ -1006,6 +1006,16 @@ code {
   filter: brightness(1.1);
 }
 
+.s3-controls__button--danger {
+  background: #b42318;
+  border-color: #b42318;
+  color: #fff;
+}
+
+.s3-controls__button--danger:hover:not(:disabled) {
+  background: #912018;
+}
+
 .s3-controls__button:disabled {
   cursor: not-allowed;
   opacity: 0.45;

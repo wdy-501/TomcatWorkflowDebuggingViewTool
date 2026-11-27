@@ -5,6 +5,7 @@ import java.util.List;
 
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -42,6 +43,11 @@ public class SessionsController {
                     snapshot.startedAtMs(), snapshot.lastEventAtMs()));
         }
         return new SessionsResponse(sessions);
+    }
+
+    @DeleteMapping(path = "/api/v1/sessions/{sessionId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ClearResponse clear(@PathVariable("sessionId") String sessionId) {
+        return new ClearResponse(sessionId, store.clear(sessionId));
     }
 
     @GetMapping(path = "/api/v1/sessions/{sessionId}/events", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -129,5 +135,8 @@ public class SessionsController {
     }
 
     public record SessionsResponse(List<SessionSummary> sessions) {
+    }
+
+    public record ClearResponse(String sessionId, boolean cleared) {
     }
 }

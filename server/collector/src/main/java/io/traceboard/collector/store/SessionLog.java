@@ -47,6 +47,13 @@ public final class SessionLog {
         return seq;
     }
 
+    public synchronized void clear() {
+        events.clear();
+        idempotencyKeys.clear();
+        startedAtMs = 0L;
+        lastEventAtMs = 0L;
+    }
+
     public synchronized SessionSnapshot snapshot() {
         return new SessionSnapshot(sessionId, events.size(), startedAtMs, lastEventAtMs,
                 new ArrayList<>(events));

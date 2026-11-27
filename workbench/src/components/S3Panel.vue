@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import {
   CollectorHttpError,
   CollectorUnreachableError,
+  clearSession,
   fetchGraph,
   fetchReplay,
   fetchRequests,
@@ -43,6 +44,9 @@ const selectedSpanId = ref<string | null>(null);
 const autoSelectedTraceId = ref<string | null>(null);
 const showBranches = ref(true);
 const treeCanvas = ref<HTMLElement | null>(null);
+const requestList = ref<HTMLElement | null>(null);
+const clearing = ref(false);
+const clearError = ref<string | null>(null);
 /** Generic auto-scanned public methods are leaves most of the time; hide them on demand. */
 const hideGenericLeaves = ref(false);
 
@@ -132,6 +136,17 @@ async function loadSessions(): Promise<void> {
   } catch {
     s3.setSessions([]);
   }
+}
+
+/** Keep the selected request visible when it is older than the newest rows. */
+async function revealSelectedRequest(): Promise<void> {
+  await nextTick();
+  const list = requestList.value;
+  if (list === null) {
+    return;
+  }
+  const selected = list.querySelector<HTMLElement>(".s3-req--active");
+  selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 /** Keep the selected request's root as the visual anchor of the tree viewport. */
@@ -257,6 +272,31 @@ function selectRequest(traceId: string): void {
   selectedSpanId.value = null;
   showBranches.value = true;
   void loadGraphFor(traceId);
+  void revealSelectedRequest();
+}
+
+async function clearCurrentSession(): Promise<void> {
+  if (staticDemoMode || clearing.value || s3.requests.length === 0) {
+    return;
+  }
+  if (!window.confirm(`清空会话 ${s3.sessionId} 的本机记录？只删除 TraceBoard collector 内存，不影响业务数据库。`)) {
+    return;
+  }
+  clearing.value = true;
+  clearError.value = null;
+  try {
+    await clearSession(s3.sessionId);
+    s3.setRequests(s3.sessionId, s3.sdkActive, []);
+    s3.selectTrace(null);
+    s3.clearGraph();
+    selectedSpanId.value = null;
+    await loadSessions();
+  } catch (cause) {
+    const error = describeError(cause, "requests");
+    clearError.value = [error.message, error.hint].filter(Boolean).join(" — ");
+  } finally {
+    clearing.value = false;
+  }
 }
 
 function selectTab(tab: S3Tab): void {
@@ -399,6 +439,9 @@ const stopDemoWatch = watch(
 const stopActiveWatch = watch(
   () => props.active,
   (active) => {
+    if (active) {
+      void revealSelectedRequest();
+    }
     if (staticDemoMode) {
       return;
     }
@@ -1463,6 +1506,16 @@ function rootLabel(request: RequestSummary): string {
       >
         {{ s3.refreshing ? "刷新中…" : "刷新" }}
       </button>
+      <button
+        id="s3-clear"
+        type="button"
+        class="s3-controls__button s3-controls__button--danger"
+        :disabled="staticDemoMode || clearing || s3.requests.length === 0"
+        :title="staticDemoMode ? '静态快照为预置数据，刷新页面恢复' : '只删除本机 collector 内存记录，不影响业务数据库'"
+        @click="clearCurrentSession"
+      >
+        {{ clearing ? "清空中…" : "清空记录" }}
+      </button>
       <span class="s3-controls__hint">
         {{ s3.sessionAuto ? "自动选择最新会话" : s3.sessionFromUrl ? "会话来自启动链接 ?session=" : s3.sessionId !== "s_s3demo" ? "已自动选择最新会话" : "默认会话 s_s3demo" }}
         · 输入后回车切换 ·
@@ -1476,6 +1529,9 @@ function rootLabel(request: RequestSummary): string {
       </span>
       <span v-if="s3.lastRefreshedAt"> · 最近刷新 {{ s3.lastRefreshedAt }}</span>
       <span v-else> · 尚未刷新</span>
+    </p>
+    <p v-if="clearError" class="s3-banner s3-banner--error" role="alert">
+      清空失败：{{ clearError }}
     </p>
 
     <p v-if="s3.requestsError" class="s3-banner s3-banner--error" role="alert">
@@ -1593,7 +1649,7 @@ function rootLabel(request: RequestSummary): string {
     <div class="s3-body">
       <section class="s3-ops-wrap" aria-labelledby="s3-ops-title">
         <h3 id="s3-ops-title" class="s3-subtitle">最近请求</h3>
-        <div id="s3-ops" class="s3-ops" role="tablist" aria-label="请求切换">
+        <div id="s3-ops" ref="requestList" class="s3-ops" role="tablist" aria-label="请求切换">
           <button
             v-for="request in visibleRequests"
             :key="request.traceId"
@@ -1830,7 +1886,7 @@ function rootLabel(request: RequestSummary): string {
             回放
           </button>
         </div>
-        <span id="s3-readonly" class="s3-readonly">只读：不会重发请求/不写数据库</span>
+        <span id="s3-readonly" class="s3-readonly">只读追踪；清空仅删本机 collector 内存记录</span>
       </div>
 
       <template v-if="s3.graph !== null">
@@ -1930,7 +1986,8 @@ function rootLabel(request: RequestSummary): string {
     <details class="s3-help">
       <summary class="s3-help__summary">说明与边界</summary>
       <p class="s3-panel__footnote">
-        本板只读：GET requests / graph / replay。回放不会重发请求、不写数据库、不调用 demo、不执行程序；
+        本板不会重发请求、不写业务数据库、不调用 demo、不执行程序；回放只读。
+        “清空记录”只删除本机 collector 内存中的当前会话事件，不影响业务数据库，也不能撤销。
         时间轴按所选链路的相对时间显示，接口参数仍是原始时间戳。
         节点详情、×N 分组和缺口清单均为已采集数据的只读派生，不推断业务对错。
       </p>
