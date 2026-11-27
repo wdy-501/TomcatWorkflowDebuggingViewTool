@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   bindDemoFrame,
   demoBridge,
@@ -98,6 +98,15 @@ const statusText = computed<string>(() => {
 function bindFrameWindow(): void {
   bindDemoFrame(frame.value?.contentWindow ?? null);
 }
+
+watch(
+  () => demoBridge.lastResult,
+  (result) => {
+    if (result !== null && result.status === "resolved") {
+      emit("open-board");
+    }
+  }
+);
 
 onMounted(bindFrameWindow);
 onBeforeUnmount(unbindDemoFrame);
